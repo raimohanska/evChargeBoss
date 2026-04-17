@@ -11,7 +11,6 @@ export const CONFIG = {
     azimuth: 0,           // 0=south, -90=east, 90=west
     kwp: 7.5,             // installed kWp
     efficiencyFactor: 0.85,
-    freeThresholdW: 400,  // slots above this W forecast are "free"
   },
   electricity: {
     transportCostEurKwh: 0.045, // sähkön siirto + verot, €/kWh
@@ -21,9 +20,9 @@ export const CONFIG = {
 export interface Slot {
   start: Date;
   end: Date;
-  spotPriceEur: number;       // raw spot €/kWh
-  transportCostEur: number;
-  solarForecastW: number;
-  effectivePriceEur: number;  // 0 if solar above threshold, else spot+transport
+  spotPriceEurPerKwh: number;       // raw spot price €/kWh
+  transportCostEurPerKwh: number;   // transfer tariff + taxes €/kWh
+  solarForecastW: number;           // forecasted solar output during slot
+  effectiveCostEur: number;         // total cost for this slot (grid fraction * rate * 0.25h)
   charge: boolean;
 }

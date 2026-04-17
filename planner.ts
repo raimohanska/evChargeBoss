@@ -51,18 +51,20 @@ export async function plan(): Promise<Slot[]> {
     const end = new Date(start.getTime() + 15 * 60 * 1000);
     const epoch = start.getTime();
 
-    const spotPriceEur = assertNotNull(spotMap.get(epoch), `spot price @ ${start.toISOString()}`);
+    const spotPriceEurPerKwh = assertNotNull(spotMap.get(epoch), `spot price @ ${start.toISOString()}`);
     const solarForecastW = solarMap.get(epoch) ?? 0;
-    const isFree = solarForecastW >= CONFIG.solar.freeThresholdW;
-    const transportCostEur = CONFIG.electricity.transportCostEurKwh;
+    const transportCostEurPerKwh = CONFIG.electricity.transportCostEurKwh;
+
+    // Fraction of charger power not covered by solar (clamped to [0, 1])
+    const gridFraction = Math.max(0, CONFIG.charging.powerKw - solarForecastW / 1000) / CONFIG.charging.powerKw;
 
     return {
       start,
       end,
-      spotPriceEur,
-      transportCostEur,
+      spotPriceEurPerKwh,
+      transportCostEurPerKwh,
       solarForecastW,
-      effectivePriceEur: isFree ? 0 : spotPriceEur + transportCostEur,
+      effectiveCostEur: gridFraction * (spotPriceEurPerKwh + transportCostEurPerKwh) * CONFIG.charging.powerKw * 0.25,
       charge: false,
     };
   });
@@ -72,7 +74,7 @@ export async function plan(): Promise<Slot[]> {
   const slotsNeeded = Math.ceil(targetKwh / (powerKw * 0.25)); // 0.25h per slot
   log(`Need ${slotsNeeded} slots to deliver ${targetKwh} kWh at ${powerKw} kW`);
 
-  const sorted = [...slots].sort((a, b) => a.effectivePriceEur - b.effectivePriceEur);
+  const sorted = [...slots].sort((a, b) => a.effectiveCostEur - b.effectiveCostEur);
   const selected = new Set(sorted.slice(0, slotsNeeded).map((s) => s.start.getTime()));
   slots.forEach((s) => (s.charge = selected.has(s.start.getTime())));
 
@@ -82,21 +84,18 @@ export async function plan(): Promise<Slot[]> {
 
 function printPlan(slots: Slot[]) {
   const chargeSlots = slots.filter((s) => s.charge);
-  const totalCost = chargeSlots.reduce(
-    (sum, s) => sum + s.effectivePriceEur * CONFIG.charging.powerKw * 0.25,
-    0
-  );
-  const freeSlots = chargeSlots.filter((s) => s.effectivePriceEur === 0).length;
+  const totalCost = chargeSlots.reduce((sum, s) => sum + s.effectiveCostEur, 0);
+  const freeSlots = chargeSlots.filter((s) => s.effectiveCostEur === 0).length;
 
-  log("─── Charging Plan ──────────────────────────────────────");
+  log(`  ${"TIME".padEnd(5)}  ${"SPOT".padEnd(11)}  ${"SOLAR".padEnd(6)}  ${"COST".padStart(7)}`);
+  log(`  ${"─".repeat(5)}  ${"─".repeat(11)}  ${"─".repeat(6)}  ${"─".repeat(7)}`);
   for (const s of slots) {
     const time = s.start.toLocaleTimeString("fi-FI", { hour: "2-digit", minute: "2-digit" });
-    const price = s.effectivePriceEur === 0
-      ? "  FREE☀️ "
-      : `${(s.effectivePriceEur * 100).toFixed(2).padStart(5)} c/kWh`;
-    const solar = s.solarForecastW > 0 ? `☀${s.solarForecastW.toFixed(0).padStart(4)}W` : "   0W  ";
+    const spot = `${(s.spotPriceEurPerKwh * 100).toFixed(2).padStart(5)} c/kWh`;
+    const sun = s.solarForecastW > 0 ? `\x1b[33m☀\x1b[0m${s.solarForecastW.toFixed(0).padStart(4)}W` : `${"0".padStart(5)}W`;
+    const cost = s.effectiveCostEur === 0 ? `\x1b[92m   FREE\x1b[0m` : `${s.effectiveCostEur.toFixed(3)} €`;
     const marker = s.charge ? "⚡CHARGE" : "       ";
-    log(`  ${time}  ${price}  ${solar}  ${marker}`);
+    log(`  ${time}  ${spot}  ${sun}  ${cost}  ${marker}`);
   }
   log(`─── Total: ${chargeSlots.length} slots, ~${(totalCost).toFixed(3)} € charging cost, ${freeSlots} solar-free slots`);
 }

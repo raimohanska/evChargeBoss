@@ -15,9 +15,9 @@ export async function runCharging(slots: Slot[]) {
     const action = slot.charge ? "ON " : "OFF";
     log(`[CHARGER ${action}] slot ${slot.start.toLocaleTimeString()}–${slot.end.toLocaleTimeString()} | ${
       slot.charge
-        ? slot.effectivePriceEur === 0
+        ? slot.effectiveCostEur === 0
           ? "solar-free"
-          : `${(slot.effectivePriceEur * 100).toFixed(2)} c/kWh`
+          : `${slot.effectiveCostEur.toFixed(3)} €`
         : "too expensive"
     }`);
 
