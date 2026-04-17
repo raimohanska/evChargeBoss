@@ -74,7 +74,9 @@ export async function plan(): Promise<Slot[]> {
   const slotsNeeded = Math.ceil(targetKwh / (powerKw * 0.25)); // 0.25h per slot
   log(`Need ${slotsNeeded} slots to deliver ${targetKwh} kWh at ${powerKw} kW`);
 
-  const sorted = [...slots].sort((a, b) => a.effectiveCostEur - b.effectiveCostEur);
+  const sorted = [...slots].sort((a, b) =>
+    a.effectiveCostEur - b.effectiveCostEur || a.start.getTime() - b.start.getTime()
+  );
   const selected = new Set(sorted.slice(0, slotsNeeded).map((s) => s.start.getTime()));
   slots.forEach((s) => (s.charge = selected.has(s.start.getTime())));
 
