@@ -68,6 +68,7 @@
 // which can be used to verify actual vs. planned charging and tune the plan.
 
 import { CONFIG } from "./config.ts";
+import { IncompleteDataError } from "./errors.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { runCharging, simulateSession } from "./charger.ts";
@@ -76,6 +77,20 @@ import { StatusPublisher } from "./mqtt-status.ts";
 import { log, sleep } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
 
+
+function errorStatus(err: unknown): string {
+  if (err instanceof IncompleteDataError) {
+    const m = err.message;
+    if (m.includes("spot price")) return "Waiting for spot prices";
+    if (m.includes("solar"))      return "Waiting for solar forecast";
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("spot-hinta"))            return "Waiting for spot prices";
+  if (msg.includes("solar") || msg.includes("open-meteo") || msg.includes("forecast.solar"))
+                                             return "Waiting for solar forecast";
+  if (msg.toLowerCase().includes("mqtt"))    return "MQTT connection error";
+  return msg;
+}
 
 async function main() {
   const { mode, from: initialFrom } = parseArgs();
@@ -113,8 +128,9 @@ async function main() {
       await runCharging(slots, session.driver, publisher);
       publisher?.setStatus("idle");
     } catch (err) {
-      log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
-      publisher?.setStatus("error");
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`ERROR: ${msg}`);
+      publisher?.setError(errorStatus(err));
       log("Retrying in 60s...");
       await sleep(60_000);
     }

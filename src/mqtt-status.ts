@@ -2,7 +2,7 @@ import type { MqttClient } from "./mqtt-client.ts";
 import type { Slot } from "./types.ts";
 import { log } from "./utils.ts";
 
-export type AppStatus = "waiting_for_car" | "planning" | "charging" | "idle" | "error";
+export type AppStatus = "waiting_for_car" | "planning" | "charging" | "idle";
 
 const DEVICE_ID = "evchargeboss";
 const BASE = "evchargeboss";
@@ -62,6 +62,10 @@ export class StatusPublisher {
       this.pub(stateTopic(s.id), this.state[s.id]);
     }
     log("MQTT discovery and initial state published.");
+  }
+
+  setError(message: string): void {
+    this.setState("status", message);
   }
 
   setStatus(status: AppStatus): void {
