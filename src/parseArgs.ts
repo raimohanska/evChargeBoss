@@ -1,4 +1,4 @@
-import { CONFIG, Mode } from "./config";
+import { CONFIG, type Mode } from "./config.ts";
 
 // Flags:
 //   --config <path>   config file (default: config.json)  — consumed by config.ts at import time
