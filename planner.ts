@@ -2,7 +2,7 @@ import { CONFIG } from "./config.ts";
 import type { Slot } from "./config.ts";
 import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
 import { fetchSolarForecast, persistSolarCache } from "./solar.ts";
-import { log, assertNotNull } from "./utils.ts";
+import { log, assertNotNull, localDateString } from "./utils.ts";
 import { IncompleteDataError } from "./errors.ts";
 
 function datesInRange(from: Date, to: Date): string[] {
@@ -12,7 +12,7 @@ function datesInRange(from: Date, to: Date): string[] {
   const end = new Date(to);
   end.setHours(0, 0, 0, 0);
   while (d <= end) {
-    dates.push(d.toLocaleDateString("sv-SE"));
+    dates.push(localDateString(d));
     d.setDate(d.getDate() + 1);
   }
   return dates;

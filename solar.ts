@@ -1,6 +1,6 @@
 import { CONFIG } from "./config.ts";
 import { readCache, writeCache } from "./cache.ts";
-import { log } from "./utils.ts";
+import { log, localDateString, localDateTimeString } from "./utils.ts";
 import { fetchSolarForecastOpenMeteo } from "./solar-openmeteo.ts";
 
 const CACHE_DIR = process.env.CACHE_DIR ?? ".";
@@ -46,9 +46,9 @@ export async function fetchSolarForecast(dates: string[]): Promise<Map<number, n
 export function persistSolarCache(map: Map<number, number>): void {
   const byDate = new Map<string, Record<string, number>>();
   for (const [epoch, watts] of map) {
-    const date = new Date(epoch).toLocaleDateString("sv-SE");
+    const date = localDateString(new Date(epoch));
     if (!byDate.has(date)) byDate.set(date, {});
-    byDate.get(date)![new Date(epoch).toLocaleString("sv-SE").replace(" ", "T")] = watts;
+    byDate.get(date)![localDateTimeString(new Date(epoch))] = watts;
   }
   for (const [date, data] of byDate) {
     writeCache(`${CACHE_DIR}/.solar-cache-${date}.json`, data);

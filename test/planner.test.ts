@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { plan } from "../planner.ts";
+import { localDateTimeString } from "../utils.ts";
 
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
@@ -35,19 +36,19 @@ test("selected charge slots are the cheapest 10 on 2026-04-19 morning", async ()
   const slots = await plan(FROM);
   const chargeTimes = slots
     .filter((s) => s.charge)
-    .map((s) => s.start.toLocaleString("sv-SE"));
+    .map((s) => localDateTimeString(s.start));
 
   assert.deepEqual(chargeTimes, [
-    "2026-04-19 09:30:00",
-    "2026-04-19 09:45:00",
-    "2026-04-19 10:00:00",
-    "2026-04-19 10:15:00",
-    "2026-04-19 10:30:00",
-    "2026-04-19 10:45:00",
-    "2026-04-19 11:00:00",
-    "2026-04-19 11:15:00",
-    "2026-04-19 11:30:00",
-    "2026-04-19 11:45:00",
+    "2026-04-19T09:30:00",
+    "2026-04-19T09:45:00",
+    "2026-04-19T10:00:00",
+    "2026-04-19T10:15:00",
+    "2026-04-19T10:30:00",
+    "2026-04-19T10:45:00",
+    "2026-04-19T11:00:00",
+    "2026-04-19T11:15:00",
+    "2026-04-19T11:30:00",
+    "2026-04-19T11:45:00",
   ]);
 });
 

@@ -1,5 +1,5 @@
 import { readCache, writeCache } from "./cache.ts";
-import { log } from "./utils.ts";
+import { log, localDateString, localDateTimeString } from "./utils.ts";
 
 const CACHE_DIR = process.env.CACHE_DIR ?? ".";
 
@@ -40,9 +40,9 @@ export async function fetchSpotPrices(dates: string[]): Promise<Map<number, numb
 export function persistSpotCache(map: Map<number, number>): void {
   const byDate = new Map<string, Record<string, number>>();
   for (const [epoch, price] of map) {
-    const date = new Date(epoch).toLocaleDateString("sv-SE");
+    const date = localDateString(new Date(epoch));
     if (!byDate.has(date)) byDate.set(date, {});
-    byDate.get(date)![new Date(epoch).toLocaleString("sv-SE").replace(" ", "T")] = price;
+    byDate.get(date)![localDateTimeString(new Date(epoch))] = price;
   }
   for (const [date, data] of byDate) {
     writeCache(`${CACHE_DIR}/.spot-cache-${date}.json`, data);
