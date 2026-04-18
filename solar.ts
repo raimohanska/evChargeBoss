@@ -15,7 +15,7 @@ export async function fetchSolarForecast(dates: string[]): Promise<Map<number, n
     log(`Fetching solar forecast... (missing: ${missingDates.join(", ")})`);
     const { lat, lon, declination, azimuth, kwp } = CONFIG.solar;
     const url = `https://api.forecast.solar/estimate/${lat}/${lon}/${declination}/${azimuth}/${kwp}`;
-    log("Fetching solar forecast from forecast.solar...");
+    log("Fetching solar forecast from " + url);
     const res = await fetch(url);
     if (!res.ok) {
       log(`  forecast.solar HTTP ${res.status} — falling back to Open-Meteo`);

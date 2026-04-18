@@ -15,7 +15,7 @@ interface OpenMeteoResponse {
 export async function fetchSolarForecastOpenMeteo(): Promise<Map<number, number>> {
   const { lat, lon, kwp, efficiencyFactor } = CONFIG.solar;
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&forecast_days=2&timezone=auto`;
-  log("Fetching solar forecast from Open-Meteo (backup)...");
+  log("Fetching solar forecast from " + url);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`open-meteo HTTP ${res.status}`);
   const json = (await res.json()) as OpenMeteoResponse;
