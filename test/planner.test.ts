@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { plan } from "../planner.ts";
-import { localDateTimeString } from "../utils.ts";
+import { plan } from "../src/planner.ts";
+import { localDateTimeString } from "../src/utils.ts";
 
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));

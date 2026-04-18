@@ -1,7 +1,7 @@
 {
   "type": "module",
   "scripts": {
-    "build": "esbuild index.ts --bundle --platform=node --target=node12 --outfile=dist/bundle.cjs --inject:polyfill.ts",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node12 --outfile=dist/bundle.cjs --inject:src/polyfill.ts",
     "test": "TZ=Europe/Helsinki CONFIG_FILE=test/fixtures/config.json node --experimental-strip-types --test test/planner.test.ts"
   },
   "dependencies": {
