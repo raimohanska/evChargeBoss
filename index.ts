@@ -113,24 +113,21 @@ async function main() {
   while (true) {
     if (from) log(`Planning from ${from.toISOString()}`);
 
-    let slots;
     try {
-      slots = await plan(from);
+      const slots = await plan(from);
+      from = undefined; // subsequent iterations always use current time
+      printPlan(slots);
+      await runCharging(slots, driver);
     } catch (err) {
       if (err instanceof IncompleteDataError) {
         log(`ERROR: ${err.message}`);
         log(err.missingSlots.map((s) => `  ✗ spot@${s.toISOString()}`).join("\n"));
-        log("Retrying in 60s...");
-        await sleep(60_000);
-        continue;
+      } else {
+        log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
       }
-      throw err;
+      log("Retrying in 60s...");
+      await sleep(60_000);
     }
-
-    from = undefined; // subsequent iterations always use current time
-
-    printPlan(slots);
-    await runCharging(slots, driver);
   }
 }
 
