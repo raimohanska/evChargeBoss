@@ -8,8 +8,8 @@ interface ForecastSolarResult {
   watt_hours_period: Record<string, number>;
 }
 
-export async function fetchSolarForecast(): Promise<Map<number, number>> {
-  const cached = readCache<Record<string, number>>(".solar-cache.json");
+export async function fetchSolarForecast(date: string): Promise<Map<number, number>> {
+  const cached = readCache<Record<string, number>>(`.solar-cache-${date}.json`);
   if (cached) {
     const map = new Map(Object.entries(cached).map(([k, v]) => [new Date(k).getTime(), v]));
     log(`  Solar forecast loaded from cache (${map.size} slots)`);
@@ -35,8 +35,8 @@ export async function fetchSolarForecast(): Promise<Map<number, number>> {
   return map;
 }
 
-export function persistSolarCache(map: Map<number, number>): void {
-  writeCache(".solar-cache.json", Object.fromEntries(
+export function persistSolarCache(map: Map<number, number>, date: string): void {
+  writeCache(`.solar-cache-${date}.json`, Object.fromEntries(
     [...map.entries()].map(([k, v]) => [new Date(k).toISOString(), v])
   ));
   log("  Solar forecast cached.");

@@ -52,9 +52,10 @@ export async function plan(from?: Date): Promise<Slot[]> {
 
   log(`Planning ${slotStarts.length} slots from ${now.toLocaleTimeString()} to ${target.toLocaleString()}`);
 
+  const date = now.toISOString().slice(0, 10);
   const [spotMap, solarMap] = await Promise.all([
-    fetchSpotPrices(),
-    fetchSolarForecast(),
+    fetchSpotPrices(date),
+    fetchSolarForecast(date),
   ]);
 
   const missingSpot = slotStarts.filter((s) => !spotMap.has(s.getTime()));
@@ -64,14 +65,14 @@ export async function plan(from?: Date): Promise<Slot[]> {
       missingSpot.map((s) => `  ✗ spot@${s.toISOString()}`).join("\n")
     );
   }
-  persistSpotCache(spotMap);
+  persistSpotCache(spotMap, date);
 
   // Build a sorted list of solar epochs for nearest-preceding lookup
   const solarEpochs = [...solarMap.keys()].sort((a, b) => a - b);
 
   const missingSolar = slotStarts.filter((s) => !solarMap.has(s.getTime())).length;
   if (missingSolar > 0) log(`  ${missingSolar} solar slots without exact match — using nearest preceding value`);
-  persistSolarCache(solarMap);
+  persistSolarCache(solarMap, date);
 
   const slots: Slot[] = slotStarts.map((start) => {
     const end = new Date(start.getTime() + 15 * 60 * 1000);

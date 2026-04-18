@@ -8,8 +8,8 @@ interface SpotHintaEntry {
   PriceWithTax: number; // €/kWh incl. VAT
 }
 
-export async function fetchSpotPrices(): Promise<Map<number, number>> {
-  const cached = readCache<Record<string, number>>(".spot-cache.json");
+export async function fetchSpotPrices(date: string): Promise<Map<number, number>> {
+  const cached = readCache<Record<string, number>>(`.spot-cache-${date}.json`);
   if (cached) {
     const map = new Map(Object.entries(cached).map(([k, v]) => [new Date(k).getTime(), v]));
     log(`  Spot prices loaded from cache (${map.size} slots)`);
@@ -29,8 +29,8 @@ export async function fetchSpotPrices(): Promise<Map<number, number>> {
   return map;
 }
 
-export function persistSpotCache(map: Map<number, number>): void {
-  writeCache(".spot-cache.json", Object.fromEntries(
+export function persistSpotCache(map: Map<number, number>, date: string): void {
+  writeCache(`.spot-cache-${date}.json`, Object.fromEntries(
     [...map.entries()].map(([k, v]) => [new Date(k).toISOString(), v])
   ));
   log("  Spot prices cached.");
