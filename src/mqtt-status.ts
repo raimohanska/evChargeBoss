@@ -48,9 +48,9 @@ export class StatusPublisher {
 
   private state: Record<string, string> = {
     status:     STATUS.starting,
-    plan_cost:  "",
-    next_charge:"",
-    solar_pct:  "",
+    plan_cost:  "-",
+    next_charge:"-",
+    solar_pct:  "-",
   };
 
   setClient(client: MqttClient): void {
@@ -76,9 +76,9 @@ export class StatusPublisher {
   setStatus(status: string): void {
     this.setState("status", status);
     if (status === STATUS.waitingForCar) {
-      this.setState("plan_cost",  "");
-      this.setState("next_charge","");
-      this.setState("solar_pct",  "");
+      this.setState("plan_cost",  "-");
+      this.setState("next_charge","-");
+      this.setState("solar_pct",  "-");
     }
   }
 
