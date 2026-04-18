@@ -99,7 +99,6 @@ export class StatusPublisher {
     });
     // Remove any previously-retained `time` discovery (old entity type, now replaced by `text`)
     this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time/config`, "", true);
-    log(`[MQTT] Publishing text entity discovery to ${timeDiscoveryTopic}: ${timeDiscoveryPayload}`);
     this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
     this.pub(timeStateTopic, getTargetTime());
 
