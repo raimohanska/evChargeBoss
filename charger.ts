@@ -22,12 +22,23 @@ export async function runCharging(slots: Slot[], driver: ChargerDriver): Promise
   const now = new Date();
   const upcoming = slots.filter((s) => s.end > now);
 
-  for (const slot of upcoming) {
+  const firstCharge = upcoming.find((s) => s.charge);
+  if (!firstCharge) {
+    log("No charge slots remaining in window.");
+    return;
+  }
+
+  // Sleep directly to the first charge slot, skipping all the preceding OFF slots
+  const msUntilFirst = firstCharge.start.getTime() - Date.now();
+  if (msUntilFirst > 0) {
+    log(`Charging starts at ${firstCharge.start.toLocaleTimeString()} (in ${Math.round(msUntilFirst / 1000)}s)`);
+    await sleep(msUntilFirst);
+  }
+
+  // Execute from the first charge slot onward (handles any OFF slots between charge slots)
+  for (const slot of upcoming.filter((s) => s.start >= firstCharge.start)) {
     const msUntilStart = slot.start.getTime() - Date.now();
-    if (msUntilStart > 0) {
-      log(`Waiting ${Math.round(msUntilStart / 1000)}s until slot ${slot.start.toLocaleTimeString()}`);
-      await sleep(msUntilStart);
-    }
+    if (msUntilStart > 0) await sleep(msUntilStart);
 
     const label = slot.charge
       ? slot.effectiveCostEur === 0 ? "solar-free" : `${slot.effectiveCostEur.toFixed(3)} €`
