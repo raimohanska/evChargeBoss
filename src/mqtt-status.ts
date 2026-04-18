@@ -34,10 +34,10 @@ interface SensorDef {
 }
 
 const SENSORS: SensorDef[] = [
-  { id: "status",     name: "Status",                icon: "mdi:ev-station" },
-  { id: "plan_cost",  name: "Estimated Charge Cost", icon: "mdi:currency-eur", unit: "€",  state_class: "measurement" },
-  { id: "next_charge",name: "Next Charge Start",     icon: "mdi:clock-start" },
-  { id: "solar_pct",  name: "Solar Power Share",     icon: "mdi:solar-power", unit: "%",  state_class: "measurement" },
+  { id: "status",     name: "Status",                  icon: "mdi:ev-station" },
+  { id: "plan_cost",  name: "Estimated Charge Cost (€)",icon: "mdi:currency-eur" },
+  { id: "next_charge",name: "Next Charge Start",        icon: "mdi:clock-start" },
+  { id: "solar_pct",  name: "Solar Power Share (%)",    icon: "mdi:solar-power" },
 ];
 
 function stateTopic(id: string) { return `${BASE}/${id}`; }
