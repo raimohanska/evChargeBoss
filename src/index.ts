@@ -74,7 +74,7 @@ import { printPlan } from "./printer.ts";
 import { runCharging, simulateSession } from "./charger.ts";
 import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
 import { STATUS, StatusPublisher, getTargetTime } from "./mqtt-status.ts";
-import { localTimeShort, log, sleep } from "./utils.ts";
+import { Canceller, localTimeShort, log, sleep } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
 
 
@@ -113,7 +113,7 @@ async function main() {
   }
 
   // replanController is replaced each inner-loop iteration; the callback always aborts the current one.
-  let replanController = new AbortController();
+  let replanController = new Canceller();
   publisher?.setReplanCallback(() => replanController.abort());
 
   let from = initialFrom;
@@ -133,7 +133,7 @@ async function main() {
         if (remainingKwh === 0) { log("Target kWh already reached."); break; }
 
         publisher?.setStatus(STATUS.fetchingData);
-        replanController = new AbortController();
+        replanController = new Canceller();
         const slots = await plan(planFrom, {
           targetTime: publisher ? getTargetTime() : undefined,
           targetKwh: remainingKwh,

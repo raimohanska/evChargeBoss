@@ -2,6 +2,7 @@ import type { Slot } from "./types.ts";
 import { STATUS } from "./mqtt-status.ts";
 import type { StatusPublisher } from "./mqtt-status.ts";
 import { CONFIG } from "./config.ts";
+import type { CancelSignal } from "./utils.ts";
 import { log, localTimeShort, sleepAbortable } from "./utils.ts";
 
 export interface ChargerDriver {
@@ -33,7 +34,7 @@ export async function runCharging(
   slots: Slot[],
   driver: ChargerDriver,
   publisher?: StatusPublisher,
-  signal?: AbortSignal,
+  signal?: CancelSignal,
 ): Promise<number> {
   const now = new Date();
   const upcoming = slots.filter((s) => s.end > now);

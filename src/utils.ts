@@ -32,11 +32,35 @@ export function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-/** Like sleep(), but resolves early (without throwing) if the AbortSignal fires. */
-export function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+export interface CancelSignal {
+  aborted: boolean;
+  addEventListener(ev: string, cb: () => void): void;
+}
+
+/** Minimal AbortController-like that works on Node 12. */
+export class Canceller {
+  private _listeners: Array<() => void> = [];
+  readonly signal: CancelSignal = {
+    aborted: false,
+    addEventListener: (_ev: string, cb: () => void) => {
+      if (this.signal.aborted) { cb(); return; }
+      this._listeners.push(cb);
+    },
+  };
+
+  abort(): void {
+    if (this.signal.aborted) return;
+    this.signal.aborted = true;
+    const ls = this._listeners.splice(0);
+    for (const cb of ls) cb();
+  }
+}
+
+/** Like sleep(), but resolves early (without throwing) if the CancelSignal fires. */
+export function sleepAbortable(ms: number, signal?: CancelSignal): Promise<void> {
   if (ms <= 0 || signal?.aborted) return Promise.resolve();
   return new Promise<void>((resolve) => {
     const t = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+    signal?.addEventListener("abort", () => { clearTimeout(t); resolve(); });
   });
 }
