@@ -94,7 +94,7 @@ export class StatusPublisher {
       icon:          "mdi:clock-end",
       state_topic:   timeStateTopic,
       command_topic: timeCmdTopic,
-      pattern:       "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+      pattern:       "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
       device:        DEVICE,
     });
     // Remove any previously-retained `time` discovery (old entity type, now replaced by `text`)
