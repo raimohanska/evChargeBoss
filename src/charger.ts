@@ -1,7 +1,8 @@
 import type { Slot } from "./types.ts";
 import { STATUS } from "./mqtt-status.ts";
 import type { StatusPublisher } from "./mqtt-status.ts";
-import { log, localTimeShort, sleep } from "./utils.ts";
+import { CONFIG } from "./config.ts";
+import { log, localTimeShort, sleepAbortable } from "./utils.ts";
 
 export interface ChargerDriver {
   send(on: boolean): Promise<void>;
@@ -24,14 +25,23 @@ export const simulateSession: ChargingSession = {
 };
 
 
-export async function runCharging(slots: Slot[], driver: ChargerDriver, publisher?: StatusPublisher): Promise<void> {
+/**
+ * Runs the charging schedule. Returns kWh delivered in fully-completed charge slots.
+ * If signal is aborted mid-session the charger is turned off and the function returns early.
+ */
+export async function runCharging(
+  slots: Slot[],
+  driver: ChargerDriver,
+  publisher?: StatusPublisher,
+  signal?: AbortSignal,
+): Promise<number> {
   const now = new Date();
   const upcoming = slots.filter((s) => s.end > now);
 
   const firstCharge = upcoming.find((s) => s.charge);
   if (!firstCharge) {
     log("No charge slots remaining in window.");
-    return;
+    return 0;
   }
 
   const chargeSlots = upcoming.filter(s => s.charge);
@@ -42,14 +52,18 @@ export async function runCharging(slots: Slot[], driver: ChargerDriver, publishe
   if (msUntilFirst > 0) {
     driver.send(false);
     log(`Charging starts at ${localTimeShort(firstCharge.start)} (in ${Math.round(msUntilFirst / 1000)}s)`);
-    await sleep(msUntilFirst);
+    await sleepAbortable(msUntilFirst, signal);
   }
+  if (signal?.aborted) return 0;
   publisher?.setStatus(STATUS.charging(localTimeShort(lastCharge.end)));
+
+  let completedChargeSlots = 0;
 
   // Execute from the first charge slot onward (handles any OFF slots between charge slots)
   for (const slot of upcoming.filter((s) => s.start >= firstCharge.start)) {
     const msUntilStart = slot.start.getTime() - Date.now();
-    if (msUntilStart > 0) await sleep(msUntilStart);
+    if (msUntilStart > 0) await sleepAbortable(msUntilStart, signal);
+    if (signal?.aborted) break;
 
     const label = slot.charge
       ? slot.effectiveCostEur === 0 ? "solar-free" : `${slot.effectiveCostEur.toFixed(3)} €`
@@ -58,8 +72,16 @@ export async function runCharging(slots: Slot[], driver: ChargerDriver, publishe
     await driver.send(slot.charge);
 
     const msUntilEnd = slot.end.getTime() - Date.now();
-    if (msUntilEnd > 0) await sleep(msUntilEnd);
+    if (msUntilEnd > 0) await sleepAbortable(msUntilEnd, signal);
+
+    if (signal?.aborted) {
+      if (slot.charge) await driver.send(false);
+      break;
+    }
+
+    if (slot.charge) completedChargeSlots++;
   }
 
-  log("Charging session complete.");
+  if (!signal?.aborted) log("Charging session complete.");
+  return completedChargeSlots * CONFIG.charging.powerKw * 0.25;
 }

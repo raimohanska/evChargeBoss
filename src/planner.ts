@@ -62,9 +62,12 @@ function nextTargetTime(timeStr: string, from: Date): Date {
   return tomorrow;
 }
 
-export async function plan(from?: Date): Promise<Slot[]> {
+export async function plan(
+  from?: Date,
+  overrides?: { targetTime?: string; targetKwh?: number },
+): Promise<Slot[]> {
   const now = from ?? new Date();
-  const target = nextTargetTime(CONFIG.charging.targetTime, now);
+  const target = nextTargetTime(overrides?.targetTime ?? CONFIG.charging.targetTime, now);
   const slotStarts = slotsBetween(now, target);
 
   log(`Planning ${slotStarts.length} slots from ${now.toLocaleTimeString()} to ${target.toLocaleString()}`);
@@ -117,7 +120,8 @@ export async function plan(from?: Date): Promise<Slot[]> {
   });
 
   // Select cheapest N slots
-  const { targetKwh, powerKw } = CONFIG.charging;
+  const targetKwh = overrides?.targetKwh ?? CONFIG.charging.targetKwh;
+  const { powerKw } = CONFIG.charging;
   const slotsNeeded = Math.ceil(targetKwh / (powerKw * 0.25)); // 0.25h per slot
   log(`Need ${slotsNeeded} slots to deliver ${targetKwh} kWh at ${powerKw} kW`);
 

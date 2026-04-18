@@ -3,6 +3,13 @@ import { CONFIG } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { localTimeShort, log } from "./utils.ts";
 
+let targetTimeOverride: string | null = null;
+
+/** Returns the active target charge time (HA override if set, otherwise config). */
+export function getTargetTime(): string {
+  return targetTimeOverride ?? CONFIG.charging.targetTime;
+}
+
 // All possible status values. Static states are plain strings; dynamic ones are functions.
 export const STATUS = {
   starting:           "Starting...",
@@ -43,9 +50,16 @@ const SENSORS: SensorDef[] = [
 
 function stateTopic(id: string) { return `${BASE}/${id}`; }
 function discoveryTopic(id: string) { return `${DISCOVERY}/sensor/${DEVICE_ID}_${id}/config`; }
+/** Convert HH:MM config string to HH:MM:SS format required by HA time entity. */
+function toHaTime(hhmm: string): string { return `${hhmm}:00`; }
 
 export class StatusPublisher {
   private client: MqttClient | null = null;
+  private replanCallback: (() => void) | null = null;
+
+  setReplanCallback(cb: () => void): void {
+    this.replanCallback = cb;
+  }
 
   private state: Record<string, string> = {
     status:     STATUS.starting,
@@ -71,6 +85,34 @@ export class StatusPublisher {
     for (const s of SENSORS) {
       this.pub(stateTopic(s.id), this.state[s.id]);
     }
+
+    // HA time entity for target charge time (renders a native time-picker in the UI)
+    const timeCmdTopic   = `${BASE}/target_time/set`;
+    const timeStateTopic = `${BASE}/target_time/state`;
+    this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time/config`, JSON.stringify({
+      unique_id:     `${DEVICE_ID}_target_time`,
+      name:          "Charge Target Time",
+      icon:          "mdi:clock-end",
+      state_topic:   timeStateTopic,
+      command_topic: timeCmdTopic,
+      device:        DEVICE,
+    }), true);
+    this.pub(timeStateTopic, toHaTime(getTargetTime()));
+
+    client.subscribe(timeCmdTopic, (err) => {
+      if (err) log(`[MQTT status] subscribe error: ${err.message}`);
+    });
+    client.on("message", (topic: string, payload: Buffer) => {
+      if (topic !== timeCmdTopic) return;
+      const parts = payload.toString().trim().split(":");
+      if (parts.length < 2) return;
+      const newTime = `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
+      targetTimeOverride = newTime;
+      log(`[MQTT] Target time updated to ${newTime}`);
+      this.pub(timeStateTopic, toHaTime(newTime));
+      this.replanCallback?.();
+    });
+
     log("MQTT discovery and initial state published.");
   }
 

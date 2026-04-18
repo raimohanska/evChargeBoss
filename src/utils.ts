@@ -31,3 +31,12 @@ export function assertNotNull<T>(value: T | undefined, label: string): T {
 export function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
+
+/** Like sleep(), but resolves early (without throwing) if the AbortSignal fires. */
+export function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+  });
+}
