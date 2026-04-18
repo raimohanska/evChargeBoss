@@ -1,7 +1,7 @@
 import type { MqttClient } from "./mqtt-client.ts";
 import { CONFIG } from "./config.ts";
 import type { Slot } from "./types.ts";
-import { localTimeShort, log } from "./utils.ts";
+import { log } from "./utils.ts";
 
 let targetTimeOverride: string | null = null;
 
@@ -45,7 +45,6 @@ interface SensorDef {
 const SENSORS: SensorDef[] = [
   { id: "status",     name: "Status",                  icon: "mdi:ev-station" },
   { id: "plan_cost",  name: "Estimated Charge Cost (€)",icon: "mdi:currency-eur" },
-  { id: "next_charge",name: "Next Charge Start",        icon: "mdi:clock-start" },
   { id: "solar_pct",  name: "Solar Power Share (%)",    icon: "mdi:solar-power" },
 ];
 
@@ -61,10 +60,9 @@ export class StatusPublisher {
   }
 
   private state: Record<string, string> = {
-    status:     STATUS.starting,
-    plan_cost:  "-",
-    next_charge:"-",
-    solar_pct:  "-",
+    status:    STATUS.starting,
+    plan_cost: "-",
+    solar_pct: "-",
   };
 
   setClient(client: MqttClient): void {
@@ -98,6 +96,9 @@ export class StatusPublisher {
       pattern:       "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
       device:        DEVICE,
     });
+    // Clear stale retained messages from removed/renamed entities
+    this.pub(`${DISCOVERY}/sensor/${DEVICE_ID}_next_charge/config`, "", true);
+    this.pub(stateTopic("next_charge"), "", true);
     // Remove any previously-retained `time` discovery (old entity type, now replaced by `text`)
     this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time/config`, "", true);
     this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
@@ -123,9 +124,8 @@ export class StatusPublisher {
   setStatus(status: string): void {
     this.setState("status", status);
     if (status === STATUS.waitingForCar) {
-      this.setState("plan_cost",  "-");
-      this.setState("next_charge","-");
-      this.setState("solar_pct",  "-");
+      this.setState("plan_cost", "-");
+      this.setState("solar_pct", "-");
     }
   }
 
@@ -136,13 +136,11 @@ export class StatusPublisher {
   setPlan(slots: Slot[]): void {
     const charge = slots.filter(s => s.charge);
     const cost   = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
-    const next   = charge[0];
     const totalSolarFraction = charge.reduce(
       (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / CONFIG.charging.powerKw), 0);
     const pct = charge.length > 0 ? Math.round(totalSolarFraction / charge.length * 100) : 0;
-    this.setState("plan_cost",  cost.toFixed(3));
-    this.setState("next_charge",next ? localTimeShort(next.start) : "-");
-    this.setState("solar_pct",  String(pct));
+    this.setState("plan_cost", cost.toFixed(3));
+    this.setState("solar_pct", String(pct));
   }
 
   private setState(id: string, value: string): void {
