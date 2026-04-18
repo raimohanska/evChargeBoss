@@ -71,7 +71,7 @@ import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { runCharging, simulateDriver, mqttDriver } from "./charger.ts";
 import { IncompleteDataError } from "./errors.ts";
-import { log } from "./utils.ts";
+import { log, sleep } from "./utils.ts";
 
 type Mode = "charge" | "plan" | "simulate";
 
@@ -95,38 +95,43 @@ function parseArgs(): { mode: Mode; from?: Date } {
 }
 
 async function main() {
-  const { mode, from } = parseArgs();
+  const { mode, from: initialFrom } = parseArgs();
 
   const modeLabel = mode === "charge" ? "charging" : mode;
-  if (from) log(`=== EV Charger Planner [${modeLabel}] (historical from ${from.toISOString()}) ===`);
-  else log(`=== EV Charger Planner [${modeLabel}] ===`);
+  log(`=== EV Charger Planner [${modeLabel}] ===`);
 
-  let slots;
-  try {
-    slots = await plan(from);
-  } catch (err) {
-    if (err instanceof IncompleteDataError) {
-      log(`ERROR: ${err.message}`);
-      log(err.missingSlots.map((s) => `  ✗ spot@${s.toISOString()}`).join("\n"));
-      process.exit(1);
-    }
-    throw err;
-  }
-
-  printPlan(slots);
-
-  if (mode === "plan") return;
-
-  if (mode === "simulate") {
-    log("--- Simulating charge loop (no sleeps, no MQTT) ---");
-    await runCharging(slots, simulateDriver, { skipSleeps: true });
+  if (mode === "plan") {
+    const slots = await plan(initialFrom);
+    printPlan(slots);
     return;
   }
 
-  // charge mode: real MQTT
-  // TODO: connect MQTT broker before starting loop
-  // TODO: subscribe to trigger topic, replan on plug-in event
-  await runCharging(slots, mqttDriver);
+  const driver = mode === "simulate" ? simulateDriver : mqttDriver;
+  // TODO (charge mode): connect MQTT broker, subscribe to trigger topic
+
+  let from = initialFrom;
+  while (true) {
+    if (from) log(`Planning from ${from.toISOString()}`);
+
+    let slots;
+    try {
+      slots = await plan(from);
+    } catch (err) {
+      if (err instanceof IncompleteDataError) {
+        log(`ERROR: ${err.message}`);
+        log(err.missingSlots.map((s) => `  ✗ spot@${s.toISOString()}`).join("\n"));
+        log("Retrying in 60s...");
+        await sleep(60_000);
+        continue;
+      }
+      throw err;
+    }
+
+    from = undefined; // subsequent iterations always use current time
+
+    printPlan(slots);
+    await runCharging(slots, driver);
+  }
 }
 
 main();

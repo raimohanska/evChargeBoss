@@ -18,21 +18,15 @@ export const mqttDriver: ChargerDriver = {
   },
 };
 
-export async function runCharging(
-  slots: Slot[],
-  driver: ChargerDriver,
-  opts: { skipSleeps?: boolean } = {},
-): Promise<void> {
+export async function runCharging(slots: Slot[], driver: ChargerDriver): Promise<void> {
   const now = new Date();
   const upcoming = slots.filter((s) => s.end > now);
 
   for (const slot of upcoming) {
-    if (!opts.skipSleeps) {
-      const msUntilStart = slot.start.getTime() - Date.now();
-      if (msUntilStart > 0) {
-        log(`Waiting ${Math.round(msUntilStart / 1000)}s until slot ${slot.start.toLocaleTimeString()}`);
-        await sleep(msUntilStart);
-      }
+    const msUntilStart = slot.start.getTime() - Date.now();
+    if (msUntilStart > 0) {
+      log(`Waiting ${Math.round(msUntilStart / 1000)}s until slot ${slot.start.toLocaleTimeString()}`);
+      await sleep(msUntilStart);
     }
 
     const label = slot.charge
@@ -41,10 +35,8 @@ export async function runCharging(
     log(`[${slot.charge ? "ON " : "OFF"}] ${slot.start.toLocaleTimeString()}–${slot.end.toLocaleTimeString()} | ${label}`);
     await driver.send(slot.charge);
 
-    if (!opts.skipSleeps) {
-      const msUntilEnd = slot.end.getTime() - Date.now();
-      if (msUntilEnd > 0) await sleep(msUntilEnd);
-    }
+    const msUntilEnd = slot.end.getTime() - Date.now();
+    if (msUntilEnd > 0) await sleep(msUntilEnd);
   }
 
   log("Charging session complete.");
