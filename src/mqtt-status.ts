@@ -59,6 +59,11 @@ export class StatusPublisher {
     this.replanCallback = cb;
   }
 
+  resetTargetTime(): void {
+    targetTimeOverride = null;
+    this.pub(`${BASE}/target_time/state`, getTargetTime());
+  }
+
   private state: Record<string, string> = {
     status:    STATUS.starting,
     plan_cost: "-",

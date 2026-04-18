@@ -155,7 +155,10 @@ async function main() {
         const newlyCharged = await runCharging(slots, session.driver, publisher, replanController.signal);
         chargedKwh += newlyCharged;
 
-        if (!replanController.signal.aborted) break; // session complete
+        if (!replanController.signal.aborted) {
+          publisher?.resetTargetTime();
+          break; // session complete
+        }
         log(`Target time changed — re-planning with ${(CONFIG.charging.targetKwh - chargedKwh).toFixed(2)} kWh remaining.`);
       }
 
