@@ -26,7 +26,7 @@ export async function connectMqtt(): Promise<MqttClient> {
   });
 }
 
-export async function waitForPlugIn(client: MqttClient): Promise<void> {
+async function waitForPlugIn(client: MqttClient): Promise<void> {
   const { powerTopic, powerField, powerThresholdW } = CONFIG.mqtt;
   log(`Waiting for car plug-in (${powerTopic}.${powerField} > ${powerThresholdW} W)...`);
 
@@ -84,6 +84,7 @@ export function makeMqttSession(): ChargingSession {
     async waitForStart() {
       if (!client) client = await connectMqtt();
       try {
+        await driver.send(true)
         await waitForPlugIn(client);
       } catch (err) {
         client.end();
