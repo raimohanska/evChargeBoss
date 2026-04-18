@@ -3,7 +3,6 @@ import type { Slot } from "./config.ts";
 import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
 import { fetchSolarForecast, persistSolarCache } from "./solar.ts";
 import { log, assertNotNull } from "./utils.ts";
-import { printPlan } from "./printer.ts";
 
 function datesInRange(from: Date, to: Date): string[] {
   const dates: string[] = [];
@@ -124,6 +123,5 @@ export async function plan(from?: Date): Promise<Slot[]> {
   const selected = new Set(sorted.slice(0, slotsNeeded).map((s) => s.start.getTime()));
   slots.forEach((s) => (s.charge = selected.has(s.start.getTime())));
 
-  printPlan(slots);
   return slots;
 }

@@ -68,6 +68,7 @@
 // which can be used to verify actual vs. planned charging and tune the plan.
 
 import { plan } from "./planner.ts";
+import { printPlan } from "./printer.ts";
 import { log } from "./utils.ts";
 
 function parseArgs(): { from?: Date } {
@@ -86,7 +87,8 @@ async function main() {
   else log("=== EV Charger Planner starting ===");
   // TODO step 1: connect MQTT, publish initial ON state
   // TODO step 2: subscribe to trigger topic, replan on plug-in event
-  await plan(from);
+  const slots = await plan(from);
+  printPlan(slots);
 }
 
 main();
