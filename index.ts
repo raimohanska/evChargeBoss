@@ -69,26 +69,64 @@
 
 import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
+import { runCharging, simulateDriver, mqttDriver } from "./charger.ts";
+import { IncompleteDataError } from "./errors.ts";
 import { log } from "./utils.ts";
 
-function parseArgs(): { from?: Date } {
-  const fromIdx = process.argv.indexOf("--from");
-  if (fromIdx === -1) return {};
-  const raw = process.argv[fromIdx + 1];
-  if (!raw) throw new Error("--from requires a value, e.g. --from 2026-04-18T08:00");
-  const from = new Date(raw);
-  if (isNaN(from.getTime())) throw new Error(`--from: invalid date "${raw}"`);
-  return { from };
+type Mode = "charge" | "plan" | "simulate";
+
+function parseArgs(): { mode: Mode; from?: Date } {
+  const argv = process.argv.slice(2);
+
+  const fromIdx = argv.indexOf("--from");
+  let from: Date | undefined;
+  if (fromIdx !== -1) {
+    const raw = argv[fromIdx + 1];
+    if (!raw) throw new Error("--from requires a value, e.g. --from 2026-04-18T08:00");
+    from = new Date(raw);
+    if (isNaN(from.getTime())) throw new Error(`--from: invalid date "${raw}"`);
+  }
+
+  let mode: Mode = "charge";
+  if (argv.includes("--plan")) mode = "plan";
+  else if (argv.includes("--simulate")) mode = "simulate";
+
+  return { mode, from };
 }
 
 async function main() {
-  const { from } = parseArgs();
-  if (from) log(`=== EV Charger Planner (historical from ${from.toISOString()}) ===`);
-  else log("=== EV Charger Planner starting ===");
-  // TODO step 1: connect MQTT, publish initial ON state
-  // TODO step 2: subscribe to trigger topic, replan on plug-in event
-  const slots = await plan(from);
+  const { mode, from } = parseArgs();
+
+  const modeLabel = mode === "charge" ? "charging" : mode;
+  if (from) log(`=== EV Charger Planner [${modeLabel}] (historical from ${from.toISOString()}) ===`);
+  else log(`=== EV Charger Planner [${modeLabel}] ===`);
+
+  let slots;
+  try {
+    slots = await plan(from);
+  } catch (err) {
+    if (err instanceof IncompleteDataError) {
+      log(`ERROR: ${err.message}`);
+      log(err.missingSlots.map((s) => `  ✗ spot@${s.toISOString()}`).join("\n"));
+      process.exit(1);
+    }
+    throw err;
+  }
+
   printPlan(slots);
+
+  if (mode === "plan") return;
+
+  if (mode === "simulate") {
+    log("--- Simulating charge loop (no sleeps, no MQTT) ---");
+    await runCharging(slots, simulateDriver, { skipSleeps: true });
+    return;
+  }
+
+  // charge mode: real MQTT
+  // TODO: connect MQTT broker before starting loop
+  // TODO: subscribe to trigger topic, replan on plug-in event
+  await runCharging(slots, mqttDriver);
 }
 
 main();

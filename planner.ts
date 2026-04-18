@@ -3,6 +3,7 @@ import type { Slot } from "./config.ts";
 import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
 import { fetchSolarForecast, persistSolarCache } from "./solar.ts";
 import { log, assertNotNull } from "./utils.ts";
+import { IncompleteDataError } from "./errors.ts";
 
 function datesInRange(from: Date, to: Date): string[] {
   const dates: string[] = [];
@@ -73,9 +74,9 @@ export async function plan(from?: Date): Promise<Slot[]> {
 
   const missingSpot = slotStarts.filter((s) => !spotMap.has(s.getTime()));
   if (missingSpot.length > 0) {
-    throw new Error(
-      `INCOMPLETE DATA — cannot plan safely. Missing ${missingSpot.length} spot price slot(s):\n` +
-      missingSpot.map((s) => `  ✗ spot@${s.toISOString()}`).join("\n")
+    throw new IncompleteDataError(
+      `Cannot plan safely — missing ${missingSpot.length} spot price slot(s)`,
+      missingSpot,
     );
   }
   persistSpotCache(spotMap);
