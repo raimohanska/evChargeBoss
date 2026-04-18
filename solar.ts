@@ -3,13 +3,15 @@ import { readCache, writeCache } from "./cache.ts";
 import { log } from "./utils.ts";
 import { fetchSolarForecastOpenMeteo } from "./solar-openmeteo.ts";
 
+const CACHE_DIR = process.env.CACHE_DIR ?? ".";
+
 interface ForecastSolarResult {
   watts: Record<string, number>;
   watt_hours_period: Record<string, number>;
 }
 
 export async function fetchSolarForecast(dates: string[]): Promise<Map<number, number>> {
-  const missingDates = dates.filter((d) => readCache(`.solar-cache-${d}.json`) === null);
+  const missingDates = dates.filter((d) => readCache(`${CACHE_DIR}/.solar-cache-${d}.json`) === null);
 
   if (missingDates.length > 0) {
     log(`Fetching solar forecast... (missing: ${missingDates.join(", ")})`);
@@ -32,7 +34,7 @@ export async function fetchSolarForecast(dates: string[]): Promise<Map<number, n
 
   const map = new Map<number, number>();
   for (const date of dates) {
-    const cached = readCache<Record<string, number>>(`.solar-cache-${date}.json`)!;
+    const cached = readCache<Record<string, number>>(`${CACHE_DIR}/.solar-cache-${date}.json`)!;
     for (const [k, v] of Object.entries(cached)) {
       map.set(new Date(k).getTime(), v);
     }
@@ -49,7 +51,7 @@ export function persistSolarCache(map: Map<number, number>): void {
     byDate.get(date)![new Date(epoch).toLocaleString("sv-SE").replace(" ", "T")] = watts;
   }
   for (const [date, data] of byDate) {
-    writeCache(`.solar-cache-${date}.json`, data);
+    writeCache(`${CACHE_DIR}/.solar-cache-${date}.json`, data);
   }
   log(`  Solar forecast cached (${byDate.size} day file(s)).`);
 }

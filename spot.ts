@@ -1,6 +1,8 @@
 import { readCache, writeCache } from "./cache.ts";
 import { log } from "./utils.ts";
 
+const CACHE_DIR = process.env.CACHE_DIR ?? ".";
+
 interface SpotHintaEntry {
   Rank: number;
   DateTime: string;
@@ -9,7 +11,7 @@ interface SpotHintaEntry {
 }
 
 export async function fetchSpotPrices(dates: string[]): Promise<Map<number, number>> {
-  const missingDates = dates.filter((d) => readCache(`.spot-cache-${d}.json`) === null);
+  const missingDates = dates.filter((d) => readCache(`${CACHE_DIR}/.spot-cache-${d}.json`) === null);
 
   if (missingDates.length > 0) {
     log(`Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(", ")})`);
@@ -26,7 +28,7 @@ export async function fetchSpotPrices(dates: string[]): Promise<Map<number, numb
 
   const map = new Map<number, number>();
   for (const date of dates) {
-    const cached = readCache<Record<string, number>>(`.spot-cache-${date}.json`)!;
+    const cached = readCache<Record<string, number>>(`${CACHE_DIR}/.spot-cache-${date}.json`)!;
     for (const [k, v] of Object.entries(cached)) {
       map.set(new Date(k).getTime(), v);
     }
@@ -43,7 +45,7 @@ export function persistSpotCache(map: Map<number, number>): void {
     byDate.get(date)![new Date(epoch).toLocaleString("sv-SE").replace(" ", "T")] = price;
   }
   for (const [date, data] of byDate) {
-    writeCache(`.spot-cache-${date}.json`, data);
+    writeCache(`${CACHE_DIR}/.spot-cache-${date}.json`, data);
   }
   log(`  Spot prices cached (${byDate.size} day file(s)).`);
 }
