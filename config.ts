@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 
 export interface Config {
   mqtt: {
@@ -35,7 +35,13 @@ function getConfigPath(): string {
   if (process.env.CONFIG_FILE) return process.env.CONFIG_FILE;
   const idx = process.argv.indexOf("--config");
   if (idx !== -1 && process.argv[idx + 1]) return process.argv[idx + 1];
-  return "config.json";
+  if (existsSync("config.json")) return "config.json";
+  console.warn(
+    "\n⚠️  WARNING: config.json not found — falling back to config-example.json." +
+    "\n   This uses placeholder values. Copy config-example.json to config.json" +
+    "\n   and edit it to configure your system before running for real.\n"
+  );
+  return "config-example.json";
 }
 
 export const CONFIG: Config = JSON.parse(readFileSync(getConfigPath(), "utf8")) as Config;

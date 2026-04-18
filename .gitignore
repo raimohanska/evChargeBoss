@@ -2,3 +2,4 @@
 .solar-cache-*.json
 dist/
 node_modules/
+config.json
