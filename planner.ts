@@ -37,17 +37,17 @@ function treeShadingFactor(date: Date): number {
   return 1.0;
 }
 
-function nextDayAt(timeStr: string): Date {
+function nextDayAt(timeStr: string, from: Date): Date {
   const [h, m] = timeStr.split(":").map(Number);
-  const d = new Date();
+  const d = new Date(from);
   d.setDate(d.getDate() + 1);
   d.setHours(h, m, 0, 0);
   return d;
 }
 
-export async function plan(): Promise<Slot[]> {
-  const now = new Date();
-  const target = nextDayAt(CONFIG.charging.targetTime);
+export async function plan(from?: Date): Promise<Slot[]> {
+  const now = from ?? new Date();
+  const target = nextDayAt(CONFIG.charging.targetTime, now);
   const slotStarts = slotsBetween(now, target);
 
   log(`Planning ${slotStarts.length} slots from ${now.toLocaleTimeString()} to ${target.toLocaleString()}`);

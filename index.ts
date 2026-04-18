@@ -70,11 +70,23 @@
 import { plan } from "./planner.ts";
 import { log } from "./utils.ts";
 
+function parseArgs(): { from?: Date } {
+  const fromIdx = process.argv.indexOf("--from");
+  if (fromIdx === -1) return {};
+  const raw = process.argv[fromIdx + 1];
+  if (!raw) throw new Error("--from requires a value, e.g. --from 2026-04-18T08:00");
+  const from = new Date(raw);
+  if (isNaN(from.getTime())) throw new Error(`--from: invalid date "${raw}"`);
+  return { from };
+}
+
 async function main() {
-  log("=== EV Charger Planner starting ===");
+  const { from } = parseArgs();
+  if (from) log(`=== EV Charger Planner (historical from ${from.toISOString()}) ===`);
+  else log("=== EV Charger Planner starting ===");
   // TODO step 1: connect MQTT, publish initial ON state
   // TODO step 2: subscribe to trigger topic, replan on plug-in event
-  await plan();
+  await plan(from);
 }
 
 main();
