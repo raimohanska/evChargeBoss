@@ -22,7 +22,6 @@
     "declination": 35,
     "azimuth": 0,
     "kwp": 7.5,
-    "efficiencyFactor": 0.85,
     "treeShadingSchedule": [
       { "time": "13:00", "outputFraction": 1.0 },
       { "time": "14:30", "outputFraction": 0.5 },

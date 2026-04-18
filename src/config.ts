@@ -3,9 +3,9 @@ import { z } from "zod";
 
 const ModeSchema = z.enum(["charge", "plan", "simulate"]);
 
-const ConfigSchema = z.object({
+const ConfigSchema = z.strictObject({
   mode: ModeSchema,
-  mqtt: z.object({
+  mqtt: z.strictObject({
     brokerUrl: z.string(),
     username: z.string(),
     password: z.string(),
@@ -16,23 +16,23 @@ const ConfigSchema = z.object({
     onPayload: z.string(),
     offPayload: z.string(),
   }),
-  charging: z.object({
+  charging: z.strictObject({
     targetKwh: z.number().positive(),
     powerKw: z.number().positive(),
     targetTime: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
   }),
-  solar: z.object({
+  solar: z.strictObject({
     lat: z.number().min(-90).max(90),
     lon: z.number().min(-180).max(180),
     declination: z.number(),
     azimuth: z.number(),
     kwp: z.number().positive(),
-    treeShadingSchedule: z.array(z.object({
+    treeShadingSchedule: z.array(z.strictObject({
       time: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
       outputFraction: z.number().min(0).max(1),
     })),
   }),
-  electricity: z.object({
+  electricity: z.strictObject({
     transportCostEurKwh: z.number().nonnegative(),
   }),
 });
