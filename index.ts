@@ -69,8 +69,8 @@
 
 import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
-import { runCharging, simulateDriver } from "./charger.ts";
-import { connectMqtt, waitForPlugIn, createMqttChargerDriver } from "./mqtt-client.ts";
+import { runCharging, simulateSession } from "./charger.ts";
+import { makeMqttSession } from "./mqtt-client.ts";
 import { log, sleep } from "./utils.ts";
 
 type Mode = "charge" | "plan" | "simulate";
@@ -106,39 +106,20 @@ async function main() {
     return;
   }
 
-  if (mode === "simulate") {
-    let from = initialFrom;
-    while (true) {
-      if (from) log(`Planning from ${from.toISOString()}`);
-      try {
-        const slots = await plan(from);
-        from = undefined;
-        printPlan(slots);
-        await runCharging(slots, simulateDriver);
-      } catch (err) {
-        log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
-        log("Retrying in 60s...");
-        await sleep(60_000);
-      }
-    }
-  }
+  const session = mode === "simulate" ? simulateSession : makeMqttSession();
 
-  // charge mode: connect to MQTT, wait for car plug-in, then plan and charge
-  let mqttClient;
+  let from = initialFrom;
   while (true) {
+    if (from) log(`Planning from ${from.toISOString()}`);
     try {
-      if (!mqttClient) mqttClient = await connectMqtt();
-      const driver = createMqttChargerDriver(mqttClient);
-
-      await waitForPlugIn(mqttClient);
-
-      const slots = await plan();
+      await session.waitForStart();
+      const slots = await plan(from);
+      from = undefined;
       printPlan(slots);
-      await runCharging(slots, driver);
+      await runCharging(slots, session.driver);
     } catch (err) {
       log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
       log("Retrying in 60s...");
-      mqttClient = undefined; // reconnect on next iteration
       await sleep(60_000);
     }
   }

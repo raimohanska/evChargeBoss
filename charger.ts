@@ -5,9 +5,19 @@ export interface ChargerDriver {
   send(on: boolean): Promise<void>;
 }
 
-export const simulateDriver: ChargerDriver = {
-  async send(on: boolean) {
-    log(`[SIMULATE] → ${on ? "ON " : "OFF"}`);
+// A session encapsulates how to wait for "ready to charge" and which driver to use.
+// waitForStart() resolves when it is time to plan and begin charging.
+export interface ChargingSession {
+  waitForStart(): Promise<void>;
+  driver: ChargerDriver;
+}
+
+export const simulateSession: ChargingSession = {
+  waitForStart: async () => {},
+  driver: {
+    async send(on: boolean) {
+      log(`[SIMULATE] → ${on ? "ON " : "OFF"}`);
+    },
   },
 };
 
