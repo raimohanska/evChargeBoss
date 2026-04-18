@@ -1,5 +1,5 @@
 import { CONFIG } from "./config.ts";
-import type { Slot } from "./config.ts";
+import type { Slot } from "./types.ts";
 import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
 import { fetchSolarForecast, persistSolarCache } from "./solar.ts";
 import { log, assertNotNull, localDateString } from "./utils.ts";

@@ -1,4 +1,4 @@
-import type { Slot } from "./config.ts";
+import type { Slot } from "./types.ts";
 import { log } from "./utils.ts";
 
 export function printPlan(slots: Slot[]): void {

@@ -1,4 +1,4 @@
-import type { Slot } from "./config.ts";
+import type { Slot } from "./types.ts";
 import { log, sleep } from "./utils.ts";
 
 export interface ChargerDriver {
