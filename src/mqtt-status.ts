@@ -21,6 +21,7 @@ export const STATUS = {
   idle:               "Idle",
   plannedChargeStart: (time: string) => `Planned charge start at ${time}`,
   charging:           (until: string) => `Charging until ${until}`,
+  chargePaused:       (next: string)  => `Charge paused, next slot at ${next}`,
   error:              (msg: string) => msg,
 } as const;
 

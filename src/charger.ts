@@ -45,9 +45,6 @@ export async function runCharging(
     return 0;
   }
 
-  const chargeSlots = upcoming.filter(s => s.charge);
-  const lastCharge = chargeSlots[chargeSlots.length - 1];
-
   // Sleep directly to the first charge slot, skipping all the preceding OFF slots
   const msUntilFirst = firstCharge.start.getTime() - Date.now();
   if (msUntilFirst > 0) {
@@ -56,15 +53,28 @@ export async function runCharging(
     await sleepAbortable(msUntilFirst, signal);
   }
   if (signal?.aborted) return 0;
-  publisher?.setStatus(STATUS.charging(localTimeShort(lastCharge.end)));
 
   let completedChargeSlots = 0;
+  const slotsToExecute = upcoming.filter((s) => s.start >= firstCharge.start);
 
   // Execute from the first charge slot onward (handles any OFF slots between charge slots)
-  for (const slot of upcoming.filter((s) => s.start >= firstCharge.start)) {
+  for (let i = 0; i < slotsToExecute.length; i++) {
+    const slot = slotsToExecute[i];
     const msUntilStart = slot.start.getTime() - Date.now();
     if (msUntilStart > 0) await sleepAbortable(msUntilStart, signal);
     if (signal?.aborted) break;
+
+    // Update status: for charge slots show end of this consecutive run; for gaps show next charge start
+    if (slot.charge) {
+      let runEnd = slot.end;
+      for (let j = i + 1; j < slotsToExecute.length && slotsToExecute[j].charge; j++) {
+        runEnd = slotsToExecute[j].end;
+      }
+      publisher?.setStatus(STATUS.charging(localTimeShort(runEnd)));
+    } else {
+      const nextCharge = slotsToExecute.slice(i + 1).find(s => s.charge);
+      if (nextCharge) publisher?.setStatus(STATUS.chargePaused(localTimeShort(nextCharge.start)));
+    }
 
     const label = slot.charge
       ? slot.effectiveCostEur === 0 ? "solar-free" : `${slot.effectiveCostEur.toFixed(3)} €`
