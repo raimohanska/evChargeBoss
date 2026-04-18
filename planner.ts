@@ -45,8 +45,11 @@ export async function plan(): Promise<Slot[]> {
   }
   persistSpotCache(spotMap);
 
+  // Build a sorted list of solar epochs for nearest-preceding lookup
+  const solarEpochs = [...solarMap.keys()].sort((a, b) => a - b);
+
   const missingSolar = slotStarts.filter((s) => !solarMap.has(s.getTime())).length;
-  if (missingSolar > 0) log(`  ${missingSolar} solar slots missing (assumed 0 W — no sun)`);
+  if (missingSolar > 0) log(`  ${missingSolar} solar slots without exact match — using nearest preceding value`);
   persistSolarCache(solarMap);
 
   const slots: Slot[] = slotStarts.map((start) => {
@@ -54,7 +57,9 @@ export async function plan(): Promise<Slot[]> {
     const epoch = start.getTime();
 
     const spotPriceEurPerKwh = assertNotNull(spotMap.get(epoch), `spot price @ ${start.toISOString()}`);
-    const solarForecastW = solarMap.get(epoch) ?? 0;
+    const solarForecastW = solarMap.get(epoch)
+      ?? solarMap.get(solarEpochs.findLast((k) => k <= epoch) ?? -1)
+      ?? 0;
     const transportCostEurPerKwh = CONFIG.electricity.transportCostEurKwh;
 
     // Fraction of charger power not covered by solar (clamped to [0, 1])
