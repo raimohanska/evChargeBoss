@@ -35,6 +35,15 @@ function discoveryTopic(id: string) { return `${DISCOVERY}/sensor/${DEVICE_ID}_$
 export class StatusPublisher {
   private client: MqttClient | null = null;
 
+  // Tracks current values so they can be replayed on connect and kept consistent.
+  private state: Record<string, string> = {
+    status:            "starting",
+    charger_state:     "OFF",
+    plan_charge_slots: "0",
+    plan_cost:         "0.000",
+    next_charge:       "none",
+  };
+
   setClient(client: MqttClient): void {
     this.client = client;
     for (const s of SENSORS) {
@@ -49,24 +58,39 @@ export class StatusPublisher {
       };
       this.pub(discoveryTopic(s.id), JSON.stringify(config), true);
     }
-    log("MQTT discovery published for all sensors.");
+    for (const s of SENSORS) {
+      this.pub(stateTopic(s.id), this.state[s.id]);
+    }
+    log("MQTT discovery and initial state published.");
   }
 
   setStatus(status: AppStatus): void {
-    this.pub(stateTopic("status"), status);
+    this.setState("status", status);
+    if (status === "waiting_for_car") {
+      // Clear stale plan data from the previous session.
+      this.setState("plan_charge_slots", "0");
+      this.setState("plan_cost", "0.000");
+      this.setState("next_charge", "none");
+      this.setState("charger_state", "OFF");
+    }
   }
 
   setChargerState(on: boolean): void {
-    this.pub(stateTopic("charger_state"), on ? "ON" : "OFF");
+    this.setState("charger_state", on ? "ON" : "OFF");
   }
 
   setPlan(slots: Slot[]): void {
     const charge = slots.filter(s => s.charge);
     const cost = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
     const next = charge[0];
-    this.pub(stateTopic("plan_charge_slots"), String(charge.length));
-    this.pub(stateTopic("plan_cost"), cost.toFixed(3));
-    this.pub(stateTopic("next_charge"), next ? next.start.toISOString() : "none");
+    this.setState("plan_charge_slots", String(charge.length));
+    this.setState("plan_cost", cost.toFixed(3));
+    this.setState("next_charge", next ? next.start.toISOString() : "none");
+  }
+
+  private setState(id: string, value: string): void {
+    this.state[id] = value;
+    this.pub(stateTopic(id), value);
   }
 
   private pub(topic: string, payload: string, retain = true): void {
