@@ -1,12 +1,9 @@
 import { CONFIG } from "./config.ts";
-import { readCache, writeCache } from "./cache.ts";
 import { log } from "./utils.ts";
 
 // Uses Open-Meteo shortwave radiation (horizontal plane) as a PV proxy.
 // Less accurate than forecast.solar (no tilt/azimuth correction) but
 // free with no rate limits and no API key required.
-
-const CACHE_FILE = ".solar-openmeteo-cache.json";
 
 interface OpenMeteoResponse {
   hourly: {
@@ -16,13 +13,6 @@ interface OpenMeteoResponse {
 }
 
 export async function fetchSolarForecastOpenMeteo(): Promise<Map<number, number>> {
-  const cached = readCache<Record<string, number>>(CACHE_FILE);
-  if (cached) {
-    const map = new Map(Object.entries(cached).map(([k, v]) => [Number(k), v]));
-    log(`  Solar forecast (Open-Meteo) loaded from cache (${map.size} slots)`);
-    return map;
-  }
-
   const { lat, lon, kwp, efficiencyFactor } = CONFIG.solar;
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&forecast_days=2&timezone=auto`;
   log("Fetching solar forecast from Open-Meteo (backup)...");
@@ -40,7 +30,6 @@ export async function fetchSolarForecastOpenMeteo(): Promise<Map<number, number>
     }
   }
 
-  writeCache(CACHE_FILE, Object.fromEntries(map));
-  log(`  Got ${map.size} solar forecast slots from Open-Meteo (cached)`);
+  log(`  Got ${map.size} solar forecast slots from Open-Meteo`);
   return map;
 }

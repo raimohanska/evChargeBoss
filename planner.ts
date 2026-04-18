@@ -1,7 +1,7 @@
 import { CONFIG } from "./config.ts";
 import type { Slot } from "./config.ts";
-import { fetchSpotPrices } from "./spot.ts";
-import { fetchSolarForecast } from "./solar.ts";
+import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
+import { fetchSolarForecast, persistSolarCache } from "./solar.ts";
 import { log, assertNotNull } from "./utils.ts";
 
 function slotsBetween(from: Date, to: Date): Date[] {
@@ -43,9 +43,11 @@ export async function plan(): Promise<Slot[]> {
       missingSpot.map((s) => `  ✗ spot@${s.toISOString()}`).join("\n")
     );
   }
+  persistSpotCache(spotMap);
 
   const missingSolar = slotStarts.filter((s) => !solarMap.has(s.getTime())).length;
   if (missingSolar > 0) log(`  ${missingSolar} solar slots missing (assumed 0 W — no sun)`);
+  persistSolarCache(solarMap);
 
   const slots: Slot[] = slotStarts.map((start) => {
     const end = new Date(start.getTime() + 15 * 60 * 1000);

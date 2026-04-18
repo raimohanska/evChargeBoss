@@ -25,7 +25,11 @@ export async function fetchSpotPrices(): Promise<Map<number, number>> {
   for (const entry of data) {
     map.set(new Date(entry.DateTime).getTime(), entry.PriceWithTax);
   }
-  writeCache(".spot-cache.json", Object.fromEntries(map));
-  log(`  Got ${map.size} quarter-hour price slots (cached)`);
+  log(`  Got ${map.size} quarter-hour price slots`);
   return map;
+}
+
+export function persistSpotCache(map: Map<number, number>): void {
+  writeCache(".spot-cache.json", Object.fromEntries(map));
+  log("  Spot prices cached.");
 }

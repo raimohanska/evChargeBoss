@@ -31,9 +31,11 @@ export async function fetchSolarForecast(): Promise<Map<number, number>> {
   for (const [tsStr, w] of Object.entries(watts)) {
     map.set(new Date(tsStr.replace(" ", "T")).getTime(), w * CONFIG.solar.efficiencyFactor);
   }
-  writeCache(".solar-cache.json", Object.fromEntries(
-    Object.entries(watts).map(([k, v]) => [new Date(k.replace(" ", "T")).getTime(), v])
-  ));
-  log(`  Got ${map.size} solar forecast slots (cached)`);
+  log(`  Got ${map.size} solar forecast slots`);
   return map;
+}
+
+export function persistSolarCache(map: Map<number, number>): void {
+  writeCache(".solar-cache.json", Object.fromEntries(map));
+  log("  Solar forecast cached.");
 }
