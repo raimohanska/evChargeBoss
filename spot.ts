@@ -11,7 +11,7 @@ interface SpotHintaEntry {
 export async function fetchSpotPrices(): Promise<Map<number, number>> {
   const cached = readCache<Record<string, number>>(".spot-cache.json");
   if (cached) {
-    const map = new Map(Object.entries(cached).map(([k, v]) => [Number(k), v]));
+    const map = new Map(Object.entries(cached).map(([k, v]) => [new Date(k).getTime(), v]));
     log(`  Spot prices loaded from cache (${map.size} slots)`);
     return map;
   }
@@ -30,6 +30,8 @@ export async function fetchSpotPrices(): Promise<Map<number, number>> {
 }
 
 export function persistSpotCache(map: Map<number, number>): void {
-  writeCache(".spot-cache.json", Object.fromEntries(map));
+  writeCache(".spot-cache.json", Object.fromEntries(
+    [...map.entries()].map(([k, v]) => [new Date(k).toISOString(), v])
+  ));
   log("  Spot prices cached.");
 }
