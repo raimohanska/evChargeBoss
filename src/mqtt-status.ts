@@ -89,14 +89,18 @@ export class StatusPublisher {
     // HA time entity for target charge time (renders a native time-picker in the UI)
     const timeCmdTopic   = `${BASE}/target_time/set`;
     const timeStateTopic = `${BASE}/target_time/state`;
-    this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time/config`, JSON.stringify({
+    const timeDiscoveryTopic = `${DISCOVERY}/time/${DEVICE_ID}_target_time/config`;
+    const timeDiscoveryPayload = JSON.stringify({
       unique_id:     `${DEVICE_ID}_target_time`,
       name:          "Charge Target Time",
       icon:          "mdi:clock-end",
       state_topic:   timeStateTopic,
       command_topic: timeCmdTopic,
       device:        DEVICE,
-    }), true);
+    });
+    log(`[MQTT] Publishing time entity discovery to ${timeDiscoveryTopic}: ${timeDiscoveryPayload}`);
+    this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
+    log(`[MQTT] Publishing time entity state to ${timeStateTopic}: ${toHaTime(getTargetTime())}`);
     this.pub(timeStateTopic, toHaTime(getTargetTime()));
 
     client.subscribe(timeCmdTopic, (err) => {
