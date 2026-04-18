@@ -1,4 +1,5 @@
 import type { Slot } from "./types.ts";
+import type { StatusPublisher } from "./mqtt-status.ts";
 import { log, sleep } from "./utils.ts";
 
 export interface ChargerDriver {
@@ -22,7 +23,7 @@ export const simulateSession: ChargingSession = {
 };
 
 
-export async function runCharging(slots: Slot[], driver: ChargerDriver): Promise<void> {
+export async function runCharging(slots: Slot[], driver: ChargerDriver, publisher?: StatusPublisher): Promise<void> {
   const now = new Date();
   const upcoming = slots.filter((s) => s.end > now);
 
@@ -50,10 +51,12 @@ export async function runCharging(slots: Slot[], driver: ChargerDriver): Promise
       : "too expensive";
     log(`[${slot.charge ? "ON " : "OFF"}] ${slot.start.toLocaleTimeString()}–${slot.end.toLocaleTimeString()} | ${label}`);
     await driver.send(slot.charge);
+    publisher?.setChargerState(slot.charge);
 
     const msUntilEnd = slot.end.getTime() - Date.now();
     if (msUntilEnd > 0) await sleep(msUntilEnd);
   }
 
   log("Charging session complete.");
+  publisher?.setChargerState(false);
 }

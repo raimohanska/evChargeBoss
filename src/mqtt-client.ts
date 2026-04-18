@@ -1,6 +1,7 @@
 import mqtt from "mqtt";
 import { CONFIG } from "./config.ts";
 import type { ChargingSession } from "./charger.ts";
+import type { StatusPublisher } from "./mqtt-status.ts";
 import { log } from "./utils.ts";
 
 export type MqttClient = mqtt.MqttClient;
@@ -63,7 +64,7 @@ async function waitForPlugIn(client: MqttClient): Promise<void> {
 // Returns a ChargingSession that connects to the broker once, then for each
 // session waits until the power topic reports watts above the threshold
 // (car plugged in), reconnecting automatically after any error.
-export function makeMqttSession(): ChargingSession {
+export function makeMqttSession(publisher?: StatusPublisher): ChargingSession {
   let client: MqttClient | undefined;
   const { chargerTopic, onPayload, offPayload } = CONFIG.mqtt;
 
@@ -82,7 +83,10 @@ export function makeMqttSession(): ChargingSession {
 
   return {
     async waitForStart() {
-      if (!client) client = await connectMqtt();
+      if (!client) {
+        client = await connectMqtt();
+        publisher?.setClient(client);
+      }
       try {
         await driver.send(true)
         await waitForPlugIn(client);

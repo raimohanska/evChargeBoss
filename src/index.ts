@@ -71,6 +71,7 @@ import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { runCharging, simulateSession } from "./charger.ts";
 import { makeMqttSession } from "./mqtt-client.ts";
+import { StatusPublisher } from "./mqtt-status.ts";
 import { log, sleep } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
 
@@ -87,19 +88,26 @@ async function main() {
     return;
   }
 
-  const session = mode === "simulate" ? simulateSession : makeMqttSession();
+  const publisher = mode === "charge" ? new StatusPublisher() : undefined;
+  const session = mode === "simulate" ? simulateSession : makeMqttSession(publisher);
 
   let from = initialFrom;
   while (true) {
     if (from) log(`Planning from ${from.toISOString()}`);
     try {
+      publisher?.setStatus("waiting_for_car");
       await session.waitForStart();
+      publisher?.setStatus("planning");
       const slots = await plan(from);
       from = undefined;
+      publisher?.setPlan(slots);
       printPlan(slots);
-      await runCharging(slots, session.driver);
+      publisher?.setStatus("charging");
+      await runCharging(slots, session.driver, publisher);
+      publisher?.setStatus("idle");
     } catch (err) {
       log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
+      publisher?.setStatus("error");
       log("Retrying in 60s...");
       await sleep(60_000);
     }
