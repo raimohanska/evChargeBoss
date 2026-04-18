@@ -35,6 +35,7 @@ export async function runCharging(slots: Slot[], driver: ChargerDriver): Promise
   // Sleep directly to the first charge slot, skipping all the preceding OFF slots
   const msUntilFirst = firstCharge.start.getTime() - Date.now();
   if (msUntilFirst > 0) {
+    driver.send(false)
     log(`Charging starts at ${firstCharge.start.toLocaleTimeString()} (in ${Math.round(msUntilFirst / 1000)}s)`);
     await sleep(msUntilFirst);
   }
