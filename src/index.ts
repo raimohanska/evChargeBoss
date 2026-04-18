@@ -67,10 +67,11 @@
 // hardware target for the charger topic. It also provides energy monitoring,
 // which can be used to verify actual vs. planned charging and tune the plan.
 
+import { CONFIG } from "./config.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { runCharging, simulateSession } from "./charger.ts";
-import { makeMqttSession } from "./mqtt-client.ts";
+import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
 import { StatusPublisher } from "./mqtt-status.ts";
 import { log, sleep } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
@@ -88,8 +89,14 @@ async function main() {
     return;
   }
 
-  const publisher = mode === "charge" ? new StatusPublisher() : undefined;
+  const publisher = CONFIG.mqtt ? new StatusPublisher() : undefined;
   const session = mode === "simulate" ? simulateSession : makeMqttSession(publisher);
+
+  if (mode === "simulate" && publisher) {
+    connectMqtt()
+      .then(client => publisher.setClient(client))
+      .catch(err => log(`MQTT unavailable, status publishing disabled: ${err.message}`));
+  }
 
   let from = initialFrom;
   while (true) {

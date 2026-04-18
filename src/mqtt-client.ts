@@ -7,7 +7,7 @@ import { log } from "./utils.ts";
 export type MqttClient = mqtt.MqttClient;
 
 export async function connectMqtt(): Promise<MqttClient> {
-  const { brokerUrl, username, password } = CONFIG.mqtt;
+  const { brokerUrl, username, password } = CONFIG.mqtt!;
   return new Promise((resolve, reject) => {
     const opts: mqtt.IClientOptions = {};
     if (username) opts.username = username;
@@ -28,7 +28,7 @@ export async function connectMqtt(): Promise<MqttClient> {
 }
 
 async function waitForPlugIn(client: MqttClient): Promise<void> {
-  const { powerTopic, powerField, powerThresholdW } = CONFIG.mqtt;
+  const { powerTopic, powerField, powerThresholdW } = CONFIG.mqtt!;
   log(`Waiting for car plug-in (${powerTopic}.${powerField} > ${powerThresholdW} W)...`);
 
   return new Promise((resolve, reject) => {
@@ -65,6 +65,7 @@ async function waitForPlugIn(client: MqttClient): Promise<void> {
 // session waits until the power topic reports watts above the threshold
 // (car plugged in), reconnecting automatically after any error.
 export function makeMqttSession(publisher?: StatusPublisher): ChargingSession {
+  if (!CONFIG.mqtt) throw new Error("mqtt config is required for charge mode");
   let client: MqttClient | undefined;
   const { chargerTopic, onPayload, offPayload } = CONFIG.mqtt;
 

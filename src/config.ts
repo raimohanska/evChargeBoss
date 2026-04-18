@@ -15,7 +15,7 @@ const ConfigSchema = z.strictObject({
     chargerTopic: z.string(),
     onPayload: z.string(),
     offPayload: z.string(),
-  }),
+  }).optional(),
   charging: z.strictObject({
     targetKwh: z.number().positive(),
     powerKw: z.number().positive(),
