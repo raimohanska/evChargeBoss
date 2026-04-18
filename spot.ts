@@ -40,7 +40,7 @@ export function persistSpotCache(map: Map<number, number>): void {
   for (const [epoch, price] of map) {
     const date = new Date(epoch).toLocaleDateString("sv-SE");
     if (!byDate.has(date)) byDate.set(date, {});
-    byDate.get(date)![new Date(epoch).toISOString()] = price;
+    byDate.get(date)![new Date(epoch).toLocaleString("sv-SE").replace(" ", "T")] = price;
   }
   for (const [date, data] of byDate) {
     writeCache(`.spot-cache-${date}.json`, data);

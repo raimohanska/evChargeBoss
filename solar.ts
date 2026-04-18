@@ -46,7 +46,7 @@ export function persistSolarCache(map: Map<number, number>): void {
   for (const [epoch, watts] of map) {
     const date = new Date(epoch).toLocaleDateString("sv-SE");
     if (!byDate.has(date)) byDate.set(date, {});
-    byDate.get(date)![new Date(epoch).toISOString()] = watts;
+    byDate.get(date)![new Date(epoch).toLocaleString("sv-SE").replace(" ", "T")] = watts;
   }
   for (const [date, data] of byDate) {
     writeCache(`.solar-cache-${date}.json`, data);
