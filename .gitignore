@@ -1,2 +1,4 @@
 .spot-cache-*.json
 .solar-cache-*.json
+dist/
+node_modules/

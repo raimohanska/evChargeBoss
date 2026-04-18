@@ -94,7 +94,7 @@ export async function plan(from?: Date): Promise<Slot[]> {
 
     const spotPriceEurPerKwh = assertNotNull(spotMap.get(epoch), `spot price @ ${start.toISOString()}`);
     const rawSolarW = solarMap.get(epoch)
-      ?? solarMap.get(solarEpochs.findLast((k) => k <= epoch) ?? -1)
+      ?? solarMap.get([...solarEpochs].reverse().find((k) => k <= epoch) ?? -1)
       ?? 0;
     const solarForecastW = rawSolarW * treeShadingFactor(start);
     const transportCostEurPerKwh = CONFIG.electricity.transportCostEurKwh;
