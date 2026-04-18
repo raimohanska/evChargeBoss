@@ -1,4 +1,5 @@
 {
+  "mode": "simulate",
   "mqtt": {
     "brokerUrl": "mqtt://homeassistant.local:1883",
     "username": "",

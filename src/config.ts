@@ -1,38 +1,45 @@
 import { readFileSync, existsSync } from "fs";
+import { z } from "zod";
 
-export type Mode = "charge" | "plan" | "simulate";
+const ModeSchema = z.enum(["charge", "plan", "simulate"]);
 
-export interface Config {
-  mode: Mode,
-  mqtt: {
-    brokerUrl: string;
-    username: string;
-    password: string;
-    powerTopic: string;       // subscribe for power readings
-    powerField: string;       // JSON key containing watts, e.g. {"power": 150}
-    powerThresholdW: number;  // watts above which we consider a car plugged in
-    chargerTopic: string;     // publish ON/OFF commands here
-    onPayload: string;        // MQTT payload for ON  (e.g. '{"state":"ON"}')
-    offPayload: string;       // MQTT payload for OFF (e.g. '{"state":"OFF"}')
-  };
-  charging: {
-    targetKwh: number;   // energy needed per session
-    powerKw: number;     // charger power
-    targetTime: string;  // next-day deadline (local time, "HH:MM")
-  };
-  solar: {
-    lat: number;
-    lon: number;
-    declination: number;  // roof pitch in degrees
-    azimuth: number;      // 0=south, -90=east, 90=west
-    kwp: number;          // installed kWp
-    efficiencyFactor: number;
-    treeShadingSchedule: Array<{ time: string; outputFraction: number }>;
-  };
-  electricity: {
-    transportCostEurKwh: number;  // transfer tariff + taxes, €/kWh
-  };
-}
+const ConfigSchema = z.object({
+  mode: ModeSchema,
+  mqtt: z.object({
+    brokerUrl: z.string(),
+    username: z.string(),
+    password: z.string(),
+    powerTopic: z.string(),
+    powerField: z.string(),
+    powerThresholdW: z.number(),
+    chargerTopic: z.string(),
+    onPayload: z.string(),
+    offPayload: z.string(),
+  }),
+  charging: z.object({
+    targetKwh: z.number().positive(),
+    powerKw: z.number().positive(),
+    targetTime: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
+  }),
+  solar: z.object({
+    lat: z.number().min(-90).max(90),
+    lon: z.number().min(-180).max(180),
+    declination: z.number(),
+    azimuth: z.number(),
+    kwp: z.number().positive(),
+    efficiencyFactor: z.number().gt(0).lte(1),
+    treeShadingSchedule: z.array(z.object({
+      time: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
+      outputFraction: z.number().min(0).max(1),
+    })),
+  }),
+  electricity: z.object({
+    transportCostEurKwh: z.number().nonnegative(),
+  }),
+});
+
+export type Mode = z.infer<typeof ModeSchema>;
+export type Config = z.infer<typeof ConfigSchema>;
 
 function getConfigPath(): string {
   if (process.env.CONFIG_FILE) return process.env.CONFIG_FILE;
@@ -49,4 +56,27 @@ function getConfigPath(): string {
   return "config-example.json";
 }
 
-export const CONFIG: Config = JSON.parse(readFileSync(getConfigPath(), "utf8")) as Config;
+function loadConfig(): Config {
+  const path = getConfigPath();
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`ERROR: Failed to read config file "${path}": ${msg}`);
+    process.exit(1);
+  }
+
+  const result = ConfigSchema.safeParse(raw);
+  if (result.success) return result.data;
+
+  console.error(`ERROR: Invalid config file "${path}":\n`);
+  for (const issue of result.error.issues) {
+    const field = issue.path.join(".");
+    console.error(`  ${field ? field + ": " : ""}${issue.message}`);
+  }
+  console.error();
+  process.exit(1);
+}
+
+export const CONFIG: Config = loadConfig();
