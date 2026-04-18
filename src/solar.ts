@@ -26,7 +26,7 @@ export async function fetchSolarForecast(dates: string[]): Promise<Map<number, n
     const json = (await res.json()) as { result: ForecastSolarResult };
     const map = new Map<number, number>();
     for (const [tsStr, w] of Object.entries(json.result.watts)) {
-      map.set(new Date(tsStr.replace(" ", "T")).getTime(), w * CONFIG.solar.efficiencyFactor);
+      map.set(new Date(tsStr.replace(" ", "T")).getTime(), w);
     }
     log(`  Got ${map.size} solar forecast slots`);
     return map;

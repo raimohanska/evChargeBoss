@@ -81,7 +81,6 @@ The intended hardware target is a **NOUS D3Z** DIN-rail relay (25 A, Zigbee) via
   "declination": 35,      // roof pitch in degrees (0 = flat, 90 = vertical)
   "azimuth": 0,           // 0 = south, -90 = east, 90 = west
   "kwp": 7.5,             // installed DC peak power
-  "efficiencyFactor": 0.85,
   "treeShadingSchedule": [   // optional: waypoints for local shading
     { "time": "13:00", "outputFraction": 1.0 },
     { "time": "14:30", "outputFraction": 0.5 },

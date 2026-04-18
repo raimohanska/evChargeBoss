@@ -65,8 +65,8 @@ Spot price and solar data are cached per-day to `.spot-cache-YYYY-MM-DD.json` / 
 
 ## Solar forecast sources
 
-1. **forecast.solar** — primary; tilt/azimuth-aware; already returns system AC output (kW), so do not apply `efficiencyFactor` on top of it again.
-2. **Open-Meteo** — automatic fallback on non-2xx from forecast.solar; uses global horizontal irradiance (GHI), which underestimates output for tilted south-facing panels at high latitudes. The formula: `(GHI_W_m2 / 1000) * kwp * 1000 * efficiencyFactor`.
+1. **forecast.solar** — primary; tilt/azimuth-aware; already returns system AC output (kW).
+2. **Open-Meteo** — automatic fallback on non-2xx from forecast.solar; uses global horizontal irradiance (GHI), which underestimates output for tilted south-facing panels at high latitudes. The formula: `(GHI_W_m2 / 1000) * kwp * 1000`.
 
 ## Error handling
 

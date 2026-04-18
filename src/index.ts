@@ -28,7 +28,7 @@
 //    - Fetch solar production forecast for all slots (api.forecast.solar)
 //      - Free public API, no key needed for single-plane estimate
 //      - Params: lat, lon, roof declination, azimuth, installed kWp
-//      - Returns watts per 15-min slot; multiply by efficiencyFactor (~0.85)
+//      - Returns watts per 15-min slot
 //    - Compute effective price per slot:
 //      - If solarForecastW >= freeThresholdW → effectivePrice = 0  (charging is "free")
 //      - Otherwise → effectivePrice = spotPrice + transportCost

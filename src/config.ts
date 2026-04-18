@@ -27,7 +27,6 @@ const ConfigSchema = z.object({
     declination: z.number(),
     azimuth: z.number(),
     kwp: z.number().positive(),
-    efficiencyFactor: z.number().gt(0).lte(1),
     treeShadingSchedule: z.array(z.object({
       time: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
       outputFraction: z.number().min(0).max(1),
