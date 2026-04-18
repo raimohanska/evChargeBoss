@@ -73,23 +73,22 @@ import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { runCharging, simulateSession } from "./charger.ts";
 import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
-import { StatusPublisher } from "./mqtt-status.ts";
-import { log, sleep } from "./utils.ts";
+import { STATUS, StatusPublisher } from "./mqtt-status.ts";
+import { localTimeShort, log, sleep } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
 
 
 function errorStatus(err: unknown): string {
   if (err instanceof IncompleteDataError) {
     const m = err.message;
-    if (m.includes("spot price")) return "Waiting for spot prices";
-    if (m.includes("solar"))      return "Waiting for solar forecast";
+    if (m.includes("spot price")) return STATUS.waitingForSpot;
+    if (m.includes("solar"))      return STATUS.waitingForSolar;
   }
   const msg = err instanceof Error ? err.message : String(err);
-  if (msg.includes("spot-hinta"))            return "Waiting for spot prices";
-  if (msg.includes("solar") || msg.includes("open-meteo") || msg.includes("forecast.solar"))
-                                             return "Waiting for solar forecast";
-  if (msg.toLowerCase().includes("mqtt"))    return "MQTT connection error";
-  return msg;
+  if (msg.includes("spot-hinta"))                                                    return STATUS.waitingForSpot;
+  if (msg.includes("solar") || msg.includes("open-meteo") || msg.includes("forecast.solar")) return STATUS.waitingForSolar;
+  if (msg.toLowerCase().includes("mqtt"))                                            return STATUS.mqttError;
+  return STATUS.error(msg);
 }
 
 async function main() {
@@ -117,16 +116,19 @@ async function main() {
   while (true) {
     if (from) log(`Planning from ${from.toISOString()}`);
     try {
-      publisher?.setStatus("waiting_for_car");
+      publisher?.setStatus(STATUS.waitingForCar);
       await session.waitForStart();
-      publisher?.setStatus("planning");
+      publisher?.setStatus(STATUS.fetchingData);
       const slots = await plan(from);
       from = undefined;
       publisher?.setPlan(slots);
       printPlan(slots);
-      publisher?.setStatus("charging");
+      const firstCharge = slots.find(s => s.charge);
+      publisher?.setStatus(firstCharge
+        ? STATUS.plannedChargeStart(localTimeShort(firstCharge.start))
+        : STATUS.idle);
       await runCharging(slots, session.driver, publisher);
-      publisher?.setStatus("idle");
+      publisher?.setStatus(STATUS.idle);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log(`ERROR: ${msg}`);

@@ -1,6 +1,7 @@
 import type { Slot } from "./types.ts";
+import { STATUS } from "./mqtt-status.ts";
 import type { StatusPublisher } from "./mqtt-status.ts";
-import { log, sleep } from "./utils.ts";
+import { log, localTimeShort, sleep } from "./utils.ts";
 
 export interface ChargerDriver {
   send(on: boolean): Promise<void>;
@@ -33,13 +34,17 @@ export async function runCharging(slots: Slot[], driver: ChargerDriver, publishe
     return;
   }
 
+  const chargeSlots = upcoming.filter(s => s.charge);
+  const lastCharge = chargeSlots[chargeSlots.length - 1];
+
   // Sleep directly to the first charge slot, skipping all the preceding OFF slots
   const msUntilFirst = firstCharge.start.getTime() - Date.now();
   if (msUntilFirst > 0) {
-    driver.send(false)
-    log(`Charging starts at ${firstCharge.start.toLocaleTimeString()} (in ${Math.round(msUntilFirst / 1000)}s)`);
+    driver.send(false);
+    log(`Charging starts at ${localTimeShort(firstCharge.start)} (in ${Math.round(msUntilFirst / 1000)}s)`);
     await sleep(msUntilFirst);
   }
+  publisher?.setStatus(STATUS.charging(localTimeShort(lastCharge.end)));
 
   // Execute from the first charge slot onward (handles any OFF slots between charge slots)
   for (const slot of upcoming.filter((s) => s.start >= firstCharge.start)) {
@@ -49,14 +54,12 @@ export async function runCharging(slots: Slot[], driver: ChargerDriver, publishe
     const label = slot.charge
       ? slot.effectiveCostEur === 0 ? "solar-free" : `${slot.effectiveCostEur.toFixed(3)} €`
       : "too expensive";
-    log(`[${slot.charge ? "ON " : "OFF"}] ${slot.start.toLocaleTimeString()}–${slot.end.toLocaleTimeString()} | ${label}`);
+    log(`[${slot.charge ? "ON " : "OFF"}] ${localTimeShort(slot.start)}–${localTimeShort(slot.end)} | ${label}`);
     await driver.send(slot.charge);
-    publisher?.setChargerState(slot.charge);
 
     const msUntilEnd = slot.end.getTime() - Date.now();
     if (msUntilEnd > 0) await sleep(msUntilEnd);
   }
 
   log("Charging session complete.");
-  publisher?.setChargerState(false);
 }

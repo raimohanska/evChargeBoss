@@ -18,6 +18,11 @@ export function localDateTimeString(d: Date): string {
   return `${localDateString(d)}T${h}:${min}:${sec}`;
 }
 
+/** Format a Date as H:MM in local time (no leading zero on hour). */
+export function localTimeShort(d: Date): string {
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 export function assertNotNull<T>(value: T | undefined, label: string): T {
   if (value === undefined) throw new Error(`Missing value: ${label}`);
   return value;

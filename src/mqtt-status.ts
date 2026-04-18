@@ -2,7 +2,19 @@ import type { MqttClient } from "./mqtt-client.ts";
 import type { Slot } from "./types.ts";
 import { log } from "./utils.ts";
 
-export type AppStatus = "waiting_for_car" | "planning" | "charging" | "idle";
+// All possible status values. Static states are plain strings; dynamic ones are functions.
+export const STATUS = {
+  starting:           "Starting...",
+  waitingForCar:      "Waiting for car to be plugged in",
+  fetchingData:       "Fetching data...",
+  waitingForSpot:     "Waiting for spot prices",
+  waitingForSolar:    "Waiting for solar forecast",
+  mqttError:          "MQTT connection error",
+  idle:               "Idle",
+  plannedChargeStart: (time: string) => `Planned charge start at ${time}`,
+  charging:           (until: string) => `Charging until ${until}`,
+  error:              (msg: string) => msg,
+} as const;
 
 const DEVICE_ID = "evchargeboss";
 const BASE = "evchargeboss";
@@ -22,11 +34,10 @@ interface SensorDef {
 }
 
 const SENSORS: SensorDef[] = [
-  { id: "status",            name: "Status",                icon: "mdi:ev-station" },
-  { id: "charger_state",     name: "Charger State",         icon: "mdi:power-plug" },
-  { id: "plan_charge_slots", name: "Charge Slots",          icon: "mdi:clock-outline", unit: "slots", state_class: "measurement" },
-  { id: "plan_cost",         name: "Estimated Charge Cost", icon: "mdi:currency-eur",  unit: "€",     state_class: "measurement" },
-  { id: "next_charge",       name: "Next Charge Start",     icon: "mdi:clock-start" },
+  { id: "status",     name: "Status",                icon: "mdi:ev-station" },
+  { id: "plan_cost",  name: "Estimated Charge Cost", icon: "mdi:currency-eur", unit: "€",  state_class: "measurement" },
+  { id: "next_charge",name: "Next Charge Start",     icon: "mdi:clock-start" },
+  { id: "solar_pct",  name: "Solar Power Share",     icon: "mdi:solar-power", unit: "%",  state_class: "measurement" },
 ];
 
 function stateTopic(id: string) { return `${BASE}/${id}`; }
@@ -35,13 +46,11 @@ function discoveryTopic(id: string) { return `${DISCOVERY}/sensor/${DEVICE_ID}_$
 export class StatusPublisher {
   private client: MqttClient | null = null;
 
-  // Tracks current values so they can be replayed on connect and kept consistent.
   private state: Record<string, string> = {
-    status:            "starting",
-    charger_state:     "OFF",
-    plan_charge_slots: "0",
-    plan_cost:         "0.000",
-    next_charge:       "none",
+    status:     STATUS.starting,
+    plan_cost:  "0.000",
+    next_charge:"none",
+    solar_pct:  "0",
   };
 
   setClient(client: MqttClient): void {
@@ -64,32 +73,28 @@ export class StatusPublisher {
     log("MQTT discovery and initial state published.");
   }
 
-  setError(message: string): void {
-    this.setState("status", message);
-  }
-
-  setStatus(status: AppStatus): void {
+  setStatus(status: string): void {
     this.setState("status", status);
-    if (status === "waiting_for_car") {
-      // Clear stale plan data from the previous session.
-      this.setState("plan_charge_slots", "0");
-      this.setState("plan_cost", "0.000");
-      this.setState("next_charge", "none");
-      this.setState("charger_state", "OFF");
+    if (status === STATUS.waitingForCar) {
+      this.setState("plan_cost",  "0.000");
+      this.setState("next_charge","none");
+      this.setState("solar_pct",  "0");
     }
   }
 
-  setChargerState(on: boolean): void {
-    this.setState("charger_state", on ? "ON" : "OFF");
+  setError(message: string): void {
+    this.setState("status", STATUS.error(message));
   }
 
   setPlan(slots: Slot[]): void {
     const charge = slots.filter(s => s.charge);
-    const cost = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
-    const next = charge[0];
-    this.setState("plan_charge_slots", String(charge.length));
-    this.setState("plan_cost", cost.toFixed(3));
-    this.setState("next_charge", next ? next.start.toISOString() : "none");
+    const solar  = charge.filter(s => s.effectiveCostEur === 0);
+    const cost   = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
+    const next   = charge[0];
+    const pct    = charge.length > 0 ? Math.round(solar.length / charge.length * 100) : 0;
+    this.setState("plan_cost",  cost.toFixed(3));
+    this.setState("next_charge",next ? next.start.toISOString() : "none");
+    this.setState("solar_pct",  String(pct));
   }
 
   private setState(id: string, value: string): void {
