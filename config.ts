@@ -11,6 +11,14 @@ export const CONFIG = {
     azimuth: 0,           // 0=south, -90=east, 90=west
     kwp: 7.5,             // installed kWp
     efficiencyFactor: 0.85,
+    // Tree shading: waypoints mapping local time → remaining output fraction.
+    // Values are linearly interpolated. Before the first entry: no shading (1.0).
+    // After the last entry: last fraction is held constant.
+    treeShadingSchedule: [
+      { time: "13:00", outputFraction: 1.0 },  // shading begins
+      { time: "14:30", outputFraction: 0.5 },  // 50% output
+      { time: "16:30", outputFraction: 0.1 },  // 90% reduction
+    ],
   },
   electricity: {
     transportCostEurKwh: 0.045, // sähkön siirto + verot, €/kWh

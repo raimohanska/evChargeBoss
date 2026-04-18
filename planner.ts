@@ -16,6 +16,27 @@ function slotsBetween(from: Date, to: Date): Date[] {
   return slots;
 }
 
+function treeShadingFactor(date: Date): number {
+  const schedule = CONFIG.solar.treeShadingSchedule;
+  const minutesOfDay = date.getHours() * 60 + date.getMinutes();
+  const points = schedule.map(({ time, outputFraction }) => {
+    const [h, m] = time.split(":").map(Number);
+    return { minutes: h * 60 + m, outputFraction };
+  });
+
+  if (minutesOfDay <= points[0].minutes) return 1.0;
+  if (minutesOfDay >= points[points.length - 1].minutes) return points[points.length - 1].outputFraction;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
+    if (minutesOfDay >= a.minutes && minutesOfDay < b.minutes) {
+      const t = (minutesOfDay - a.minutes) / (b.minutes - a.minutes);
+      return a.outputFraction + t * (b.outputFraction - a.outputFraction);
+    }
+  }
+  return 1.0;
+}
+
 function nextDayAt(timeStr: string): Date {
   const [h, m] = timeStr.split(":").map(Number);
   const d = new Date();
@@ -57,9 +78,10 @@ export async function plan(): Promise<Slot[]> {
     const epoch = start.getTime();
 
     const spotPriceEurPerKwh = assertNotNull(spotMap.get(epoch), `spot price @ ${start.toISOString()}`);
-    const solarForecastW = solarMap.get(epoch)
+    const rawSolarW = solarMap.get(epoch)
       ?? solarMap.get(solarEpochs.findLast((k) => k <= epoch) ?? -1)
       ?? 0;
+    const solarForecastW = rawSolarW * treeShadingFactor(start);
     const transportCostEurPerKwh = CONFIG.electricity.transportCostEurKwh;
 
     // Fraction of charger power not covered by solar (clamped to [0, 1])
