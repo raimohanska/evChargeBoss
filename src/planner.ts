@@ -21,8 +21,8 @@ function datesInRange(from: Date, to: Date): string[] {
 function slotsBetween(from: Date, to: Date): Date[] {
   const slots: Date[] = [];
   const t = new Date(from);
-  // align to next 15-min boundary
-  t.setMinutes(Math.ceil(t.getMinutes() / 15) * 15, 0, 0);
+  // align to current 15-min boundary (floor) so the ongoing slot is included
+  t.setMinutes(Math.floor(t.getMinutes() / 15) * 15, 0, 0);
   while (t < to) {
     slots.push(new Date(t));
     t.setMinutes(t.getMinutes() + 15);
