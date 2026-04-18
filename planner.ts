@@ -4,6 +4,19 @@ import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
 import { fetchSolarForecast, persistSolarCache } from "./solar.ts";
 import { log, assertNotNull } from "./utils.ts";
 
+function datesInRange(from: Date, to: Date): string[] {
+  const dates: string[] = [];
+  const d = new Date(from);
+  d.setHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setHours(0, 0, 0, 0);
+  while (d <= end) {
+    dates.push(d.toLocaleDateString("sv-SE"));
+    d.setDate(d.getDate() + 1);
+  }
+  return dates;
+}
+
 function slotsBetween(from: Date, to: Date): Date[] {
   const slots: Date[] = [];
   const t = new Date(from);
@@ -52,10 +65,10 @@ export async function plan(from?: Date): Promise<Slot[]> {
 
   log(`Planning ${slotStarts.length} slots from ${now.toLocaleTimeString()} to ${target.toLocaleString()}`);
 
-  const date = now.toISOString().slice(0, 10);
+  const dates = datesInRange(now, target);
   const [spotMap, solarMap] = await Promise.all([
-    fetchSpotPrices(date),
-    fetchSolarForecast(date),
+    fetchSpotPrices(dates),
+    fetchSolarForecast(dates),
   ]);
 
   const missingSpot = slotStarts.filter((s) => !spotMap.has(s.getTime()));
@@ -65,14 +78,14 @@ export async function plan(from?: Date): Promise<Slot[]> {
       missingSpot.map((s) => `  ✗ spot@${s.toISOString()}`).join("\n")
     );
   }
-  persistSpotCache(spotMap, date);
+  persistSpotCache(spotMap);
 
   // Build a sorted list of solar epochs for nearest-preceding lookup
   const solarEpochs = [...solarMap.keys()].sort((a, b) => a - b);
 
   const missingSolar = slotStarts.filter((s) => !solarMap.has(s.getTime())).length;
   if (missingSolar > 0) log(`  ${missingSolar} solar slots without exact match — using nearest preceding value`);
-  persistSolarCache(solarMap, date);
+  persistSolarCache(solarMap);
 
   const slots: Slot[] = slotStarts.map((start) => {
     const end = new Date(start.getTime() + 15 * 60 * 1000);

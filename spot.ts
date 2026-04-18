@@ -8,30 +8,42 @@ interface SpotHintaEntry {
   PriceWithTax: number; // €/kWh incl. VAT
 }
 
-export async function fetchSpotPrices(date: string): Promise<Map<number, number>> {
-  const cached = readCache<Record<string, number>>(`.spot-cache-${date}.json`);
-  if (cached) {
-    const map = new Map(Object.entries(cached).map(([k, v]) => [new Date(k).getTime(), v]));
-    log(`  Spot prices loaded from cache (${map.size} slots)`);
+export async function fetchSpotPrices(dates: string[]): Promise<Map<number, number>> {
+  const missingDates = dates.filter((d) => readCache(`.spot-cache-${d}.json`) === null);
+
+  if (missingDates.length > 0) {
+    log(`Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(", ")})`);
+    const res = await fetch("https://api.spot-hinta.fi/TodayAndDayForward");
+    if (!res.ok) throw new Error(`spot-hinta.fi HTTP ${res.status}`);
+    const data = (await res.json()) as SpotHintaEntry[];
+    const map = new Map<number, number>();
+    for (const entry of data) {
+      map.set(new Date(entry.DateTime).getTime(), entry.PriceWithTax);
+    }
+    log(`  Got ${map.size} quarter-hour price slots`);
     return map;
   }
 
-  log("Fetching spot prices from api.spot-hinta.fi...");
-  const res = await fetch("https://api.spot-hinta.fi/TodayAndDayForward");
-  if (!res.ok) throw new Error(`spot-hinta.fi HTTP ${res.status}`);
-  const data = (await res.json()) as SpotHintaEntry[];
-
   const map = new Map<number, number>();
-  for (const entry of data) {
-    map.set(new Date(entry.DateTime).getTime(), entry.PriceWithTax);
+  for (const date of dates) {
+    const cached = readCache<Record<string, number>>(`.spot-cache-${date}.json`)!;
+    for (const [k, v] of Object.entries(cached)) {
+      map.set(new Date(k).getTime(), v);
+    }
   }
-  log(`  Got ${map.size} quarter-hour price slots`);
+  log(`  Spot prices loaded from cache (${map.size} slots)`);
   return map;
 }
 
-export function persistSpotCache(map: Map<number, number>, date: string): void {
-  writeCache(`.spot-cache-${date}.json`, Object.fromEntries(
-    [...map.entries()].map(([k, v]) => [new Date(k).toISOString(), v])
-  ));
-  log("  Spot prices cached.");
+export function persistSpotCache(map: Map<number, number>): void {
+  const byDate = new Map<string, Record<string, number>>();
+  for (const [epoch, price] of map) {
+    const date = new Date(epoch).toLocaleDateString("sv-SE");
+    if (!byDate.has(date)) byDate.set(date, {});
+    byDate.get(date)![new Date(epoch).toISOString()] = price;
+  }
+  for (const [date, data] of byDate) {
+    writeCache(`.spot-cache-${date}.json`, data);
+  }
+  log(`  Spot prices cached (${byDate.size} day file(s)).`);
 }
