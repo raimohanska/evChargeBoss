@@ -1,4 +1,17 @@
 export const CONFIG = {
+  mqtt: {
+    brokerUrl: "mqtt://homeassistant.local:1883",
+    username: "",           // leave empty if no auth required
+    password: "",
+    // Topic that publishes power readings (JSON with a numeric field)
+    powerTopic: "zigbee2mqtt/ev-relay",
+    powerField: "power",    // JSON key containing watts, e.g. {"power": 150}
+    powerThresholdW: 10,    // watts above which we consider a car plugged in
+    // Topic and payloads for switching the charger relay
+    chargerTopic: "zigbee2mqtt/ev-relay/set",
+    onPayload:  JSON.stringify({ state: "ON" }),
+    offPayload: JSON.stringify({ state: "OFF" }),
+  },
   charging: {
     targetKwh: 7,         // energy needed
     powerKw: 3,           // charger power

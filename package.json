@@ -5,6 +5,7 @@
     "test": "TZ=Europe/Helsinki node --experimental-strip-types --test test/planner.test.ts"
   },
   "dependencies": {
+    "mqtt": "^4.3.8",
     "node-fetch": "^2.7.0"
   },
   "devDependencies": {

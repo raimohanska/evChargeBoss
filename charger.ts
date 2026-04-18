@@ -11,12 +11,6 @@ export const simulateDriver: ChargerDriver = {
   },
 };
 
-// TODO: replace stub with real MQTT once broker config is added to CONFIG
-export const mqttDriver: ChargerDriver = {
-  async send(on: boolean) {
-    log(`[MQTT] → ${on ? "ON " : "OFF"}  (not yet implemented — add mqtt config)`);
-  },
-};
 
 export async function runCharging(slots: Slot[], driver: ChargerDriver): Promise<void> {
   const now = new Date();

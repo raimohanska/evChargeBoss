@@ -69,8 +69,8 @@
 
 import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
-import { runCharging, simulateDriver, mqttDriver } from "./charger.ts";
-import { IncompleteDataError } from "./errors.ts";
+import { runCharging, simulateDriver } from "./charger.ts";
+import { connectMqtt, waitForPlugIn, createMqttChargerDriver } from "./mqtt-client.ts";
 import { log, sleep } from "./utils.ts";
 
 type Mode = "charge" | "plan" | "simulate";
@@ -106,26 +106,39 @@ async function main() {
     return;
   }
 
-  const driver = mode === "simulate" ? simulateDriver : mqttDriver;
-  // TODO (charge mode): connect MQTT broker, subscribe to trigger topic
+  if (mode === "simulate") {
+    let from = initialFrom;
+    while (true) {
+      if (from) log(`Planning from ${from.toISOString()}`);
+      try {
+        const slots = await plan(from);
+        from = undefined;
+        printPlan(slots);
+        await runCharging(slots, simulateDriver);
+      } catch (err) {
+        log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
+        log("Retrying in 60s...");
+        await sleep(60_000);
+      }
+    }
+  }
 
-  let from = initialFrom;
+  // charge mode: connect to MQTT, wait for car plug-in, then plan and charge
+  let mqttClient;
   while (true) {
-    if (from) log(`Planning from ${from.toISOString()}`);
-
     try {
-      const slots = await plan(from);
-      from = undefined; // subsequent iterations always use current time
+      if (!mqttClient) mqttClient = await connectMqtt();
+      const driver = createMqttChargerDriver(mqttClient);
+
+      await waitForPlugIn(mqttClient);
+
+      const slots = await plan();
       printPlan(slots);
       await runCharging(slots, driver);
     } catch (err) {
-      if (err instanceof IncompleteDataError) {
-        log(`ERROR: ${err.message}`);
-        log(err.missingSlots.map((s) => `  ✗ spot@${s.toISOString()}`).join("\n"));
-      } else {
-        log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
       log("Retrying in 60s...");
+      mqttClient = undefined; // reconnect on next iteration
       await sleep(60_000);
     }
   }
