@@ -1,6 +1,9 @@
 import { readFileSync, existsSync } from "fs";
 
+export type Mode = "charge" | "plan" | "simulate";
+
 export interface Config {
+  mode: Mode,
   mqtt: {
     brokerUrl: string;
     username: string;
