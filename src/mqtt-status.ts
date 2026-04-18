@@ -50,8 +50,6 @@ const SENSORS: SensorDef[] = [
 
 function stateTopic(id: string) { return `${BASE}/${id}`; }
 function discoveryTopic(id: string) { return `${DISCOVERY}/sensor/${DEVICE_ID}_${id}/config`; }
-/** Convert HH:MM config string to HH:MM:SS format required by HA time entity. */
-function toHaTime(hhmm: string): string { return `${hhmm}:00`; }
 
 export class StatusPublisher {
   private client: MqttClient | null = null;
@@ -86,22 +84,24 @@ export class StatusPublisher {
       this.pub(stateTopic(s.id), this.state[s.id]);
     }
 
-    // HA time entity for target charge time (renders a native time-picker in the UI)
+    // HA text entity for target charge time (HH:MM input with pattern validation)
     const timeCmdTopic   = `${BASE}/target_time/set`;
     const timeStateTopic = `${BASE}/target_time/state`;
-    const timeDiscoveryTopic = `${DISCOVERY}/time/${DEVICE_ID}_target_time/config`;
+    const timeDiscoveryTopic = `${DISCOVERY}/text/${DEVICE_ID}_target_time/config`;
     const timeDiscoveryPayload = JSON.stringify({
       unique_id:     `${DEVICE_ID}_target_time`,
       name:          "Charge Target Time",
       icon:          "mdi:clock-end",
       state_topic:   timeStateTopic,
       command_topic: timeCmdTopic,
+      pattern:       "^([01][0-9]|2[0-3]):[0-5][0-9]$",
       device:        DEVICE,
     });
-    log(`[MQTT] Publishing time entity discovery to ${timeDiscoveryTopic}: ${timeDiscoveryPayload}`);
+    // Remove any previously-retained `time` discovery (old entity type, now replaced by `text`)
+    this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time/config`, "", true);
+    log(`[MQTT] Publishing text entity discovery to ${timeDiscoveryTopic}: ${timeDiscoveryPayload}`);
     this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
-    log(`[MQTT] Publishing time entity state to ${timeStateTopic}: ${toHaTime(getTargetTime())}`);
-    this.pub(timeStateTopic, toHaTime(getTargetTime()));
+    this.pub(timeStateTopic, getTargetTime());
 
     client.subscribe(timeCmdTopic, (err) => {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
@@ -113,7 +113,7 @@ export class StatusPublisher {
       const newTime = `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
       targetTimeOverride = newTime;
       log(`[MQTT] Target time updated to ${newTime}`);
-      this.pub(timeStateTopic, toHaTime(newTime));
+      this.pub(timeStateTopic, newTime);
       this.replanCallback?.();
     });
 
