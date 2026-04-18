@@ -36,8 +36,10 @@ function getConfigPath(): string {
   const idx = process.argv.indexOf("--config");
   if (idx !== -1 && process.argv[idx + 1]) return process.argv[idx + 1];
   if (existsSync("config.json")) return "config.json";
+  const tty = process.stdout.isTTY === true;
   console.warn(
-    "\n⚠️  WARNING: config.json not found — falling back to config-example.json." +
+    `\n${tty ? "\u26a0\ufe0f  WARNING:" : "WARNING:"} config.json not found` +
+    ` ${tty ? "\u2014" : "-"} falling back to config-example.json.` +
     "\n   This uses placeholder values. Copy config-example.json to config.json" +
     "\n   and edit it to configure your system before running for real.\n"
   );

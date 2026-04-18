@@ -1,3 +1,5 @@
+export const IS_TTY = process.stdout.isTTY === true;
+
 export const log = (msg: string) => console.log(`[${new Date().toISOString()}] ${msg}`);
 
 /** Format a Date as YYYY-MM-DD in local time, without relying on Intl/locale data. */
