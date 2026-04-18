@@ -170,4 +170,8 @@ async function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error(`[${new Date().toISOString()}] Fatal: ${msg}`);
+  process.exit(1);
+});
