@@ -1,6 +1,6 @@
 import type { MqttClient } from "./mqtt-client.ts";
 import type { Slot } from "./types.ts";
-import { log } from "./utils.ts";
+import { localTimeShort, log } from "./utils.ts";
 
 // All possible status values. Static states are plain strings; dynamic ones are functions.
 export const STATUS = {
@@ -93,7 +93,7 @@ export class StatusPublisher {
     const next   = charge[0];
     const pct    = charge.length > 0 ? Math.round(solar.length / charge.length * 100) : 0;
     this.setState("plan_cost",  cost.toFixed(3));
-    this.setState("next_charge",next ? next.start.toISOString() : "none");
+    this.setState("next_charge",next ? localTimeShort(next.start) : "-");
     this.setState("solar_pct",  String(pct));
   }
 
