@@ -7,13 +7,13 @@ import { localDateTimeString } from "../src/utils.ts";
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 
-// Fixed planning start: 2026-04-18 10:00 local (Helsinki, UTC+3).
-// Window: 2026-04-18T10:00 → 2026-04-19T12:00. Both days are in fixtures.
-const FROM = new Date("2026-04-18T10:00:00");
+// Fixed planning start: 2026-04-18 14:00 local (Helsinki, UTC+3).
+// 12:00 has already passed, so target is next day → window: 2026-04-18T14:00 → 2026-04-19T12:00.
+const FROM = new Date("2026-04-18T14:00:00");
 
 test("correct number of total and charge slots", async () => {
   const slots = await plan(FROM);
-  assert.equal(slots.length, 104, "total slots in window");
+  assert.equal(slots.length, 88, "total slots in window");
   assert.equal(slots.filter((s) => s.charge).length, 10, "charge slots = ceil(7 kWh / 0.75 kWh per slot)");
 });
 
