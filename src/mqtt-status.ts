@@ -1,4 +1,5 @@
 import type { MqttClient } from "./mqtt-client.ts";
+import { CONFIG } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { localTimeShort, log } from "./utils.ts";
 
@@ -88,10 +89,11 @@ export class StatusPublisher {
 
   setPlan(slots: Slot[]): void {
     const charge = slots.filter(s => s.charge);
-    const solar  = charge.filter(s => s.effectiveCostEur === 0);
     const cost   = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
     const next   = charge[0];
-    const pct    = charge.length > 0 ? Math.round(solar.length / charge.length * 100) : 0;
+    const totalSolarFraction = charge.reduce(
+      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / CONFIG.charging.powerKw), 0);
+    const pct = charge.length > 0 ? Math.round(totalSolarFraction / charge.length * 100) : 0;
     this.setState("plan_cost",  cost.toFixed(3));
     this.setState("next_charge",next ? localTimeShort(next.start) : "-");
     this.setState("solar_pct",  String(pct));
