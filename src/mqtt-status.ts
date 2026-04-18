@@ -139,7 +139,7 @@ export class StatusPublisher {
     const totalSolarFraction = charge.reduce(
       (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / CONFIG.charging.powerKw), 0);
     const pct = charge.length > 0 ? Math.round(totalSolarFraction / charge.length * 100) : 0;
-    this.setState("plan_cost", cost.toFixed(3));
+    this.setState("plan_cost", cost.toFixed(2));
     this.setState("solar_pct", String(pct));
   }
 
