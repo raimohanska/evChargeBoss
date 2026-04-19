@@ -77,6 +77,17 @@ import { STATUS, StatusPublisher, getTargetTime } from "./mqtt-status.ts";
 import { Canceller, localTimeShort, log, sleep } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
 
+function parseTargetTime(timeStr: string, from: Date): Date {
+  const [h, m] = timeStr.split(":").map(Number);
+  const today = new Date(from);
+  today.setHours(h, m, 0, 0);
+  if (today > from) return today;
+  const tomorrow = new Date(from);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(h, m, 0, 0);
+  return tomorrow;
+}
+
 
 function errorStatus(err: unknown): string {
   if (err instanceof IncompleteDataError) {
@@ -98,7 +109,9 @@ async function main() {
   log(`=== EV Charger Planner [${modeLabel}] ===`);
 
   if (mode === "plan") {
-    const slots = await plan(initialFrom);
+    const targetTimeStr = CONFIG.charging.targetTime;
+    const targetDate = parseTargetTime(targetTimeStr, initialFrom ?? new Date());
+    const slots = await plan(initialFrom, { targetTime: targetDate });
     printPlan(slots);
     return;
   }
@@ -134,8 +147,13 @@ async function main() {
 
         publisher?.setStatus(STATUS.fetchingData);
         replanController = new Canceller();
+
+        const targetTimeStr = publisher ? getTargetTime() : CONFIG.charging.targetTime;
+        const planFrom_ = planFrom ?? new Date();
+        const targetDate = parseTargetTime(targetTimeStr, planFrom_);
+
         const slots = await plan(planFrom, {
-          targetTime: publisher ? getTargetTime() : undefined,
+          targetTime: targetDate,
           targetKwh: remainingKwh,
         });
         planFrom = undefined;

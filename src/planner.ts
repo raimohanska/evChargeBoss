@@ -51,6 +51,7 @@ function treeShadingFactor(date: Date): number {
   return 1.0;
 }
 
+
 function nextTargetTime(timeStr: string, from: Date): Date {
   const [h, m] = timeStr.split(":").map(Number);
   const today = new Date(from);
@@ -64,10 +65,10 @@ function nextTargetTime(timeStr: string, from: Date): Date {
 
 export async function plan(
   from?: Date,
-  overrides?: { targetTime?: string; targetKwh?: number },
+  overrides?: { targetTime?: Date; targetKwh?: number },
 ): Promise<Slot[]> {
   const now = from ?? new Date();
-  const target = nextTargetTime(overrides?.targetTime ?? CONFIG.charging.targetTime, now);
+  const target = overrides?.targetTime ?? nextTargetTime(CONFIG.charging.targetTime, now);
   const slotStarts = slotsBetween(now, target);
 
   log(`Planning ${slotStarts.length} slots from ${now.toLocaleTimeString()} to ${target.toLocaleString()}`);
