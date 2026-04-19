@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { plan } from "../src/planner.ts";
 import { localDateTimeString } from "../src/utils.ts";
+import { CONFIG } from "../src/config.ts";
 
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
@@ -11,20 +12,34 @@ process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 // 12:00 has already passed, so target is next day → window: 2026-04-18T14:00 → 2026-04-19T12:00.
 const FROM = new Date("2026-04-18T14:00:00");
 
+function parseTargetTime(timeStr: string, from: Date): Date {
+  const [h, m] = timeStr.split(":").map(Number);
+  const today = new Date(from);
+  today.setHours(h, m, 0, 0);
+  if (today > from) return today;
+  const tomorrow = new Date(from);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(h, m, 0, 0);
+  return tomorrow;
+}
+
+const TARGET_TIME = parseTargetTime(CONFIG.charging.targetTime, FROM);
+const TARGET_KWH = CONFIG.charging.targetKwh;
+
 test("correct number of total and charge slots", async () => {
-  const slots = await plan(FROM);
+  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH);
   assert.equal(slots.length, 88, "total slots in window");
   assert.equal(slots.filter((s) => s.charge).length, 10, "charge slots = ceil(7 kWh / 0.75 kWh per slot)");
 });
 
 test("8 solar-free charge slots", async () => {
-  const slots = await plan(FROM);
+  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH);
   const freeCount = slots.filter((s) => s.charge && s.effectiveCostEur === 0).length;
   assert.equal(freeCount, 8);
 });
 
 test("total charging cost ~0.028 €", async () => {
-  const slots = await plan(FROM);
+  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH);
   const total = slots.filter((s) => s.charge).reduce((sum, s) => sum + s.effectiveCostEur, 0);
   assert.ok(
     Math.abs(total - 0.028) < 0.0005,
@@ -33,7 +48,7 @@ test("total charging cost ~0.028 €", async () => {
 });
 
 test("selected charge slots are the cheapest 10 on 2026-04-19 morning", async () => {
-  const slots = await plan(FROM);
+  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH);
   const chargeTimes = slots
     .filter((s) => s.charge)
     .map((s) => localDateTimeString(s.start));
@@ -53,7 +68,7 @@ test("selected charge slots are the cheapest 10 on 2026-04-19 morning", async ()
 });
 
 test("every slot has spot price and solar forecast populated", async () => {
-  const slots = await plan(FROM);
+  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH);
   for (const s of slots) {
     assert.ok(s.spotPriceEurPerKwh >= 0, `negative spot price at ${s.start.toISOString()}`);
     assert.ok(s.solarForecastW >= 0, `negative solar at ${s.start.toISOString()}`);

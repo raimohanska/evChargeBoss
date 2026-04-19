@@ -110,8 +110,9 @@ async function main() {
 
   if (mode === "plan") {
     const targetTimeStr = CONFIG.charging.targetTime;
-    const targetDate = parseTargetTime(targetTimeStr, initialFrom ?? new Date());
-    const slots = await plan(initialFrom, { targetTime: targetDate });
+    const now = initialFrom ?? new Date();
+    const targetDate = parseTargetTime(targetTimeStr, now);
+    const slots = await plan(now, targetDate, CONFIG.charging.targetKwh);
     printPlan(slots);
     return;
   }
@@ -152,10 +153,7 @@ async function main() {
         const planFrom_ = planFrom ?? new Date();
         const targetDate = parseTargetTime(targetTimeStr, planFrom_);
 
-        const slots = await plan(planFrom, {
-          targetTime: targetDate,
-          targetKwh: remainingKwh,
-        });
+        const slots = await plan(planFrom_, targetDate, remainingKwh);
         planFrom = undefined;
 
         if (replanController.signal.aborted) {
