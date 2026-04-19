@@ -1,4 +1,5 @@
 import type { MqttClient } from "./mqtt-client.ts";
+import { getOrCreateMqttClient } from "./mqtt-client.ts";
 import { CONFIG } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { log } from "./utils.ts";
@@ -65,11 +66,16 @@ function stateTopic(id: string) { return `${BASE}/${id}`; }
 function discoveryTopic(id: string) { return `${DISCOVERY}/sensor/${DEVICE_ID}_${id}/config`; }
 
 export class StatusPublisher implements Publisher {
-  private replanCallback: (() => void) | null = null;
-
   constructor(private client: MqttClient) {
     this.initializeDiscovery();
   }
+
+  static async create(): Promise<StatusPublisher> {
+    const client = await getOrCreateMqttClient();
+    return new StatusPublisher(client);
+  }
+
+  private replanCallback: (() => void) | null = null;
 
   setReplanCallback(cb: () => void): void {
     this.replanCallback = cb;

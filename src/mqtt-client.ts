@@ -16,10 +16,6 @@ export async function getOrCreateMqttClient(): Promise<MqttClient> {
   return globalMqttClient;
 }
 
-export function getMqttClient(): MqttClient | undefined {
-  return globalMqttClient;
-}
-
 export async function connectMqtt(): Promise<MqttClient> {
   const { brokerUrl, username, password } = CONFIG.mqtt!;
   return new Promise((resolve, reject) => {
@@ -77,10 +73,9 @@ async function waitForPlugIn(client: MqttClient): Promise<void> {
 
 // Returns a ChargingSession that uses the global MQTT client for charger commands
 // and listens to power readings on the power topic.
-export function makeMqttSession(publisher: Publisher): ChargingSession {
+export async function makeMqttSession(publisher: Publisher): Promise<ChargingSession> {
   if (!CONFIG.mqtt) throw new Error("mqtt config is required for charge mode");
-  const client = getMqttClient();
-  if (!client) throw new Error("MQTT client not initialized");
+  const client = await getOrCreateMqttClient();
   const { chargerTopic, onPayload, offPayload, powerTopic, powerField, energyField } = CONFIG.mqtt;
 
   // Persistent watts listeners — kept alive for the whole session
