@@ -152,7 +152,7 @@ async function main() {
           ? STATUS.plannedChargeStart(localTimeShort(firstCharge.start))
           : STATUS.idle);
 
-        const newlyCharged = await runCharging(slots, session.driver, publisher, replanController.signal, session.wattsSource);
+        const newlyCharged = await runCharging(slots, session.driver, publisher, replanController.signal, session.wattsSource, chargedKwh);
         chargedKwh += newlyCharged;
 
         if (!replanController.signal.aborted) {

@@ -88,9 +88,11 @@ export function makeSimulateSession(): ChargingSession {
 }
 
 /**
- * Runs the charging schedule. Returns kWh delivered in fully-completed charge slots.
+ * Runs the charging schedule.
+ * Returns kWh delivered: relay energy delta when available, otherwise completed slots × powerKw × 0.25.
  * If signal is aborted mid-session the charger is turned off and the function returns early.
  * If wattsSource is provided, status reflects actual watts rather than the schedule alone.
+ * prevChargedKwh: energy already charged earlier in this session (for cumulative display).
  */
 export async function runCharging(
   slots: Slot[],
@@ -98,6 +100,7 @@ export async function runCharging(
   publisher?: StatusPublisher,
   signal?: CancelSignal,
   wattsSource?: WattsSource,
+  prevChargedKwh = 0,
 ): Promise<number> {
   const now = new Date();
   const upcoming = slots.filter((s) => s.end > now);
@@ -121,13 +124,15 @@ export async function runCharging(
   const threshold = CONFIG.mqtt?.powerThresholdW ?? 10;
   let activeRunEnd: Date | null = null;  // non-null only while in a charge slot
   let chargeRunActive = false;           // true once watts seen in current charge run
-  let startEnergy: number | null = null; // relay energy reading at session start
+  let startEnergy: number | null = null; // relay energy reading at this run's start
+  let lastEnergy:  number | null = null; // most recent relay energy reading
 
   const unsubWatts = wattsSource?.subscribe(({ watts, energyKwh }) => {
     // Energy tracking
     if (energyKwh !== undefined) {
       if (startEnergy === null) startEnergy = energyKwh;
-      publisher?.setChargedEnergy(energyKwh - startEnergy);
+      lastEnergy = energyKwh;
+      publisher?.setChargedEnergy(prevChargedKwh + energyKwh - startEnergy);
     }
     // Status tracking
     if (activeRunEnd === null || !publisher) return;
@@ -193,5 +198,9 @@ export async function runCharging(
 
   unsubWatts?.();
   if (!signal?.aborted) log("Charging session complete.");
+  // Prefer relay-measured energy; fall back to plan-based estimate
+  if (startEnergy !== null && lastEnergy !== null) {
+    return lastEnergy - startEnergy;
+  }
   return completedChargeSlots * CONFIG.charging.powerKw * 0.25;
 }
