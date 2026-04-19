@@ -27,6 +27,17 @@ export const STATUS = {
   error:              (msg: string) => msg,
 } as const;
 
+// Common interface for publishers
+export interface Publisher {
+  setReplanCallback(cb: () => void): void;
+  resetTargetTime(): void;
+  setStatus(status: string): void;
+  setError(message: string): void;
+  setPlan(slots: Slot[]): void;
+  setChargedEnergy(kwh: number): void;
+  setClient(client: MqttClient): void;
+}
+
 const DEVICE_ID = "evchargeboss";
 const BASE = "evchargeboss";
 const DISCOVERY = "homeassistant";
@@ -54,7 +65,7 @@ const SENSORS: SensorDef[] = [
 function stateTopic(id: string) { return `${BASE}/${id}`; }
 function discoveryTopic(id: string) { return `${DISCOVERY}/sensor/${DEVICE_ID}_${id}/config`; }
 
-export class StatusPublisher {
+export class StatusPublisher implements Publisher {
   private client: MqttClient | null = null;
   private replanCallback: (() => void) | null = null;
 
@@ -169,5 +180,43 @@ export class StatusPublisher {
     this.client.publish(topic, payload, { retain }, (err) => {
       if (err) log(`[MQTT status] publish error on ${topic}: ${err.message}`);
     });
+  }
+}
+
+export class LoggingPublisher implements Publisher {
+  private replanCallback: (() => void) | null = null;
+
+  setReplanCallback(cb: () => void): void {
+    this.replanCallback = cb;
+  }
+
+  resetTargetTime(): void {
+    targetTimeOverride = null;
+    log(`[Publisher] Target time reset to ${getTargetTime()}`);
+  }
+
+  setStatus(status: string): void {
+    log(`[Status] ${status}`);
+  }
+
+  setError(message: string): void {
+    log(`[Error] ${message}`);
+  }
+
+  setPlan(slots: Slot[]): void {
+    const charge = slots.filter(s => s.charge);
+    const cost   = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
+    const totalSolarFraction = charge.reduce(
+      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / CONFIG.charging.powerKw), 0);
+    const pct = charge.length > 0 ? Math.round(totalSolarFraction / charge.length * 100) : 0;
+    log(`[Plan] Cost: €${cost.toFixed(2)}, Solar: ${pct}%`);
+  }
+
+  setChargedEnergy(kwh: number): void {
+    log(`[Charged] ${kwh.toFixed(2)} kWh`);
+  }
+
+  setClient(): void {
+    // no-op for logging publisher
   }
 }

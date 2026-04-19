@@ -2,7 +2,8 @@ import { CONFIG } from "./config.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { runCharging } from "./charger.ts";
-import { getTargetTime, STATUS, StatusPublisher } from "./mqtt-status.ts";
+import { getTargetTime, STATUS } from "./mqtt-status.ts";
+import type { Publisher } from "./mqtt-status.ts";
 import { Canceller, localTimeShort, log, sleep } from "./utils.ts";
 import type { ChargingSession } from "./charger.ts";
 
@@ -19,19 +20,19 @@ export function parseTargetTime(timeStr: string, from: Date): Date {
 
 export async function runMainLoop(
   session: ChargingSession,
-  publisher: StatusPublisher | undefined,
+  publisher: Publisher,
   initialFrom: Date | undefined,
   errorStatus: (err: unknown) => string,
 ): Promise<never> {
   // replanController is replaced each inner-loop iteration; the callback always aborts the current one.
   let replanController = new Canceller();
-  publisher?.setReplanCallback(() => replanController.abort());
+  publisher.setReplanCallback(() => replanController.abort());
 
   let from = initialFrom;
   while (true) {
     if (from) log(`Planning from ${from.toISOString()}`);
     try {
-      publisher?.setStatus(STATUS.waitingForCar);
+      publisher.setStatus(STATUS.waitingForCar);
       await session.waitForStart();
 
       let chargedKwh = 0;
@@ -43,10 +44,10 @@ export async function runMainLoop(
         const remainingKwh = Math.max(0, CONFIG.charging.targetKwh - chargedKwh);
         if (remainingKwh === 0) { log("Target kWh already reached."); break; }
 
-        publisher?.setStatus(STATUS.fetchingData);
+        publisher.setStatus(STATUS.fetchingData);
         replanController = new Canceller();
 
-        const targetTimeStr = publisher ? getTargetTime() : CONFIG.charging.targetTime;
+        const targetTimeStr = getTargetTime();
         const planFrom_ = planFrom ?? new Date();
         const targetDate = parseTargetTime(targetTimeStr, planFrom_);
 
@@ -58,10 +59,10 @@ export async function runMainLoop(
           continue;
         }
 
-        publisher?.setPlan(slots);
+        publisher.setPlan(slots);
         printPlan(slots);
         const firstCharge = slots.find(s => s.charge);
-        publisher?.setStatus(firstCharge
+        publisher.setStatus(firstCharge
           ? STATUS.plannedChargeStart(localTimeShort(firstCharge.start))
           : STATUS.idle);
 
@@ -69,17 +70,17 @@ export async function runMainLoop(
         chargedKwh += newlyCharged;
 
         if (!replanController.signal.aborted) {
-          publisher?.resetTargetTime();
+          publisher.resetTargetTime();
           break; // session complete
         }
         log(`Target time changed — re-planning with ${(CONFIG.charging.targetKwh - chargedKwh).toFixed(2)} kWh remaining.`);
       }
 
-      publisher?.setStatus(STATUS.idle);
+      publisher.setStatus(STATUS.idle);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log(`ERROR: ${msg}`);
-      publisher?.setError(errorStatus(err));
+      publisher.setError(errorStatus(err));
       log("Retrying in 60s...");
       await sleep(60_000);
     }

@@ -73,7 +73,7 @@ import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { makeSimulateSession } from "./charger.ts";
 import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
-import { STATUS, StatusPublisher } from "./mqtt-status.ts";
+import { STATUS, StatusPublisher, LoggingPublisher } from "./mqtt-status.ts";
 import { log } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
 import { runMainLoop, parseTargetTime } from "./main-loop.ts";
@@ -107,12 +107,12 @@ async function main() {
     return;
   }
 
-  const publisher = CONFIG.mqtt ? new StatusPublisher() : undefined;
+  const publisher = CONFIG.mqtt ? new StatusPublisher() : new LoggingPublisher();
   const session = mode === "simulate" ? makeSimulateSession() : makeMqttSession(publisher);
 
-  if (mode === "simulate" && publisher) {
+  if (mode === "simulate" && CONFIG.mqtt) {
     connectMqtt()
-      .then(client => publisher.setClient(client))
+      .then(client => (publisher as StatusPublisher).setClient(client))
       .catch(err => log(`MQTT unavailable, status publishing disabled: ${err.message}`));
   }
 
