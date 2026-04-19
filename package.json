@@ -1,7 +1,8 @@
 {
   "type": "module",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node12 --outfile=dist/bundle.cjs --inject:src/polyfill.ts",
+    "typecheck": "tsc",
+    "build": "tsc && esbuild src/index.ts --bundle --platform=node --target=node12 --outfile=dist/bundle.cjs --inject:src/polyfill.ts",
     "test": "TZ=Europe/Helsinki CONFIG_FILE=test/fixtures/config.json node --experimental-strip-types --test test/planner.test.ts"
   },
   "dependencies": {
@@ -11,6 +12,7 @@
   },
   "devDependencies": {
     "@types/node-fetch": "^2.6.13",
-    "esbuild": "^0.28.0"
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.3"
   }
 }
