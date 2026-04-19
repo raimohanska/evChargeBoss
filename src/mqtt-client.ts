@@ -1,6 +1,6 @@
 import mqtt from "mqtt";
 import { CONFIG } from "./config.ts";
-import type { ChargingSession, WattsSource } from "./charger.ts";
+import type { ChargingSession, WattsSource, WattsUpdate } from "./charger.ts";
 import type { StatusPublisher } from "./mqtt-status.ts";
 import { log } from "./utils.ts";
 
@@ -67,10 +67,10 @@ async function waitForPlugIn(client: MqttClient): Promise<void> {
 export function makeMqttSession(publisher?: StatusPublisher): ChargingSession {
   if (!CONFIG.mqtt) throw new Error("mqtt config is required for charge mode");
   let client: MqttClient | undefined;
-  const { chargerTopic, onPayload, offPayload, powerTopic, powerField } = CONFIG.mqtt;
+  const { chargerTopic, onPayload, offPayload, powerTopic, powerField, energyField } = CONFIG.mqtt;
 
   // Persistent watts listeners — kept alive for the whole session
-  const wattsListeners: Array<(w: number) => void> = [];
+  const wattsListeners: Array<(u: WattsUpdate) => void> = [];
 
   const wattsSource: WattsSource = {
     subscribe(cb) {
@@ -106,9 +106,12 @@ export function makeMqttSession(publisher?: StatusPublisher): ChargingSession {
           try {
             const data = JSON.parse(message.toString()) as Record<string, unknown>;
             const w = data[powerField];
-            if (typeof w === "number") {
-              for (const l of wattsListeners) l(w);
-            }
+            if (typeof w !== "number") return;
+            const e = energyField ? data[energyField] : undefined;
+            for (const l of wattsListeners) l({
+              watts: w,
+              ...(typeof e === "number" && { energyKwh: e }),
+            });
           } catch {}
         });
       }

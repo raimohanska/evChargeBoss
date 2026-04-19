@@ -12,6 +12,7 @@ const ConfigSchema = z.strictObject({
     powerTopic: z.string(),
     powerField: z.string(),
     powerThresholdW: z.number(),
+    energyField: z.string().optional(),
     chargerTopic: z.string(),
     onPayload: z.string(),
     offPayload: z.string(),

@@ -9,9 +9,13 @@ export interface ChargerDriver {
   send(on: boolean): Promise<void>;
 }
 
+export interface WattsUpdate {
+  watts: number;
+  energyKwh?: number; // cumulative relay energy reading, if available
+}
+
 export interface WattsSource {
-  /** Register a callback invoked with the latest watt reading. Returns an unsubscribe fn. */
-  subscribe(cb: (watts: number) => void): () => void;
+  subscribe(cb: (update: WattsUpdate) => void): () => void;
 }
 
 // A session encapsulates how to wait for "ready to charge" and which driver to use.
@@ -22,15 +26,18 @@ export interface ChargingSession {
   wattsSource?: WattsSource;
 }
 
+const SIM_TICK_MS = 2000;
+
 /** Simulated session with randomised watts that mimic a real EV charging cycle. */
 export function makeSimulateSession(): ChargingSession {
-  const listeners: Array<(w: number) => void> = [];
+  const listeners: Array<(u: WattsUpdate) => void> = [];
   let chargerOn = false;
+  let cumulativeEnergyKwh = 0;
   let startHandle: ReturnType<typeof setTimeout> | null = null;
   let tickHandle:  ReturnType<typeof setInterval> | null = null;
 
-  function notify(w: number) {
-    for (const l of listeners) l(w);
+  function notify(u: WattsUpdate) {
+    for (const l of listeners) l(u);
   }
 
   function startEmitting() {
@@ -39,19 +46,23 @@ export function makeSimulateSession(): ChargingSession {
     startHandle = setTimeout(() => {
       startHandle = null;
       if (!chargerOn) return;
-      notify(2900 + Math.random() * 200);
+      const w = 2900 + Math.random() * 200;
+      cumulativeEnergyKwh += (w / 1000) * (SIM_TICK_MS / 3_600_000);
+      notify({ watts: w, energyKwh: cumulativeEnergyKwh });
       tickHandle = setInterval(() => {
         if (!chargerOn) return;
         // ~3% chance of a brief pause (EV battery management / balancing)
-        notify(Math.random() < 0.03 ? 0 : 2900 + Math.random() * 200);
-      }, 1500 + Math.random() * 1500);
+        const w = Math.random() < 0.03 ? 0 : 2900 + Math.random() * 200;
+        cumulativeEnergyKwh += (w / 1000) * (SIM_TICK_MS / 3_600_000);
+        notify({ watts: w, energyKwh: cumulativeEnergyKwh });
+      }, SIM_TICK_MS);
     }, delay);
   }
 
   function stopEmitting() {
     if (startHandle !== null) { clearTimeout(startHandle); startHandle = null; }
     if (tickHandle  !== null) { clearInterval(tickHandle); tickHandle  = null; }
-    notify(0);
+    notify({ watts: 0, energyKwh: cumulativeEnergyKwh });
   }
 
   return {
@@ -106,12 +117,19 @@ export async function runCharging(
   }
   if (signal?.aborted) return 0;
 
-  // Watts-based status tracking
+  // Watts-based status + energy tracking
   const threshold = CONFIG.mqtt?.powerThresholdW ?? 10;
   let activeRunEnd: Date | null = null;  // non-null only while in a charge slot
   let chargeRunActive = false;           // true once watts seen in current charge run
+  let startEnergy: number | null = null; // relay energy reading at session start
 
-  const unsubWatts = wattsSource?.subscribe((watts) => {
+  const unsubWatts = wattsSource?.subscribe(({ watts, energyKwh }) => {
+    // Energy tracking
+    if (energyKwh !== undefined) {
+      if (startEnergy === null) startEnergy = energyKwh;
+      publisher?.setChargedEnergy(energyKwh - startEnergy);
+    }
+    // Status tracking
     if (activeRunEnd === null || !publisher) return;
     if (watts > threshold) {
       chargeRunActive = true;

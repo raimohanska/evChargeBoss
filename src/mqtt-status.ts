@@ -45,9 +45,10 @@ interface SensorDef {
 }
 
 const SENSORS: SensorDef[] = [
-  { id: "status",     name: "Status",                  icon: "mdi:ev-station" },
-  { id: "plan_cost",  name: "Estimated Charge Cost (€)",icon: "mdi:currency-eur" },
-  { id: "solar_pct",  name: "Solar Power Share (%)",    icon: "mdi:solar-power" },
+  { id: "status",         name: "Status",                  icon: "mdi:ev-station" },
+  { id: "plan_cost",      name: "Estimated Charge Cost (€)",icon: "mdi:currency-eur" },
+  { id: "solar_pct",      name: "Solar Power Share (%)",    icon: "mdi:solar-power" },
+  { id: "charged_energy", name: "Charged Energy (kWh)",     icon: "mdi:lightning-bolt", unit: "kWh", state_class: "measurement" },
 ];
 
 function stateTopic(id: string) { return `${BASE}/${id}`; }
@@ -67,9 +68,10 @@ export class StatusPublisher {
   }
 
   private state: Record<string, string> = {
-    status:    STATUS.starting,
-    plan_cost: "-",
-    solar_pct: "-",
+    status:         STATUS.starting,
+    plan_cost:      "-",
+    solar_pct:      "-",
+    charged_energy: "-",
   };
 
   setClient(client: MqttClient): void {
@@ -132,8 +134,9 @@ export class StatusPublisher {
     log(`[Status] ${status}`);
     this.setState("status", status);
     if (status === STATUS.waitingForCar) {
-      this.setState("plan_cost", "-");
-      this.setState("solar_pct", "-");
+      this.setState("plan_cost",      "-");
+      this.setState("solar_pct",      "-");
+      this.setState("charged_energy", "-");
     }
   }
 
@@ -150,6 +153,10 @@ export class StatusPublisher {
     const pct = charge.length > 0 ? Math.round(totalSolarFraction / charge.length * 100) : 0;
     this.setState("plan_cost", cost.toFixed(2));
     this.setState("solar_pct", String(pct));
+  }
+
+  setChargedEnergy(kwh: number): void {
+    this.setState("charged_energy", kwh.toFixed(2));
   }
 
   private setState(id: string, value: string): void {
