@@ -66,7 +66,10 @@ function stateTopic(id: string) { return `${BASE}/${id}`; }
 function discoveryTopic(id: string) { return `${DISCOVERY}/sensor/${DEVICE_ID}_${id}/config`; }
 
 export class StatusPublisher implements Publisher {
-  constructor(private client: MqttClient) {
+  private client: MqttClient;
+
+  constructor(client: MqttClient) {
+    this.client = client;
     this.initializeDiscovery();
   }
 
