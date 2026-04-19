@@ -223,3 +223,8 @@ export class LoggingPublisher implements Publisher {
     log(`[Charged] ${kwh.toFixed(2)} kWh`);
   }
 }
+
+export async function createPublisher(): Promise<Publisher> {
+  if (CONFIG.mqtt) return StatusPublisher.create();
+  return new LoggingPublisher();
+}

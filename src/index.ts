@@ -73,7 +73,7 @@ import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { makeSimulateSession } from "./charger.ts";
 import { makeMqttSession } from "./mqtt-client.ts";
-import { STATUS, StatusPublisher, LoggingPublisher } from "./mqtt-status.ts";
+import { STATUS, createPublisher } from "./mqtt-status.ts";
 import { log } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
 import { runMainLoop, parseTargetTime } from "./main-loop.ts";
@@ -108,7 +108,7 @@ async function main() {
   }
 
   // Create publisher: StatusPublisher (with async MQTT init) or LoggingPublisher
-  const publisher = CONFIG.mqtt ? await StatusPublisher.create() : new LoggingPublisher();
+  const publisher = await createPublisher();
 
   // Create session
   const session = mode === "simulate" ? makeSimulateSession() : await makeMqttSession(publisher);
