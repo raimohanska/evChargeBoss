@@ -1,6 +1,6 @@
 import mqtt from "mqtt";
 import { CONFIG } from "./config.ts";
-import type { ChargingSession } from "./charger.ts";
+import type { ChargingSession, WattsSource } from "./charger.ts";
 import type { StatusPublisher } from "./mqtt-status.ts";
 import { log } from "./utils.ts";
 
@@ -67,7 +67,20 @@ async function waitForPlugIn(client: MqttClient): Promise<void> {
 export function makeMqttSession(publisher?: StatusPublisher): ChargingSession {
   if (!CONFIG.mqtt) throw new Error("mqtt config is required for charge mode");
   let client: MqttClient | undefined;
-  const { chargerTopic, onPayload, offPayload } = CONFIG.mqtt;
+  const { chargerTopic, onPayload, offPayload, powerTopic, powerField } = CONFIG.mqtt;
+
+  // Persistent watts listeners — kept alive for the whole session
+  const wattsListeners: Array<(w: number) => void> = [];
+
+  const wattsSource: WattsSource = {
+    subscribe(cb) {
+      wattsListeners.push(cb);
+      return () => {
+        const i = wattsListeners.indexOf(cb);
+        if (i !== -1) wattsListeners.splice(i, 1);
+      };
+    },
+  };
 
   const driver = {
     async send(on: boolean): Promise<void> {
@@ -87,9 +100,20 @@ export function makeMqttSession(publisher?: StatusPublisher): ChargingSession {
       if (!client) {
         client = await connectMqtt();
         publisher?.setClient(client);
+        // Forward all power-topic readings to watts listeners
+        client.on("message", (topic: string, message: Buffer) => {
+          if (topic !== powerTopic) return;
+          try {
+            const data = JSON.parse(message.toString()) as Record<string, unknown>;
+            const w = data[powerField];
+            if (typeof w === "number") {
+              for (const l of wattsListeners) l(w);
+            }
+          } catch {}
+        });
       }
       try {
-        await driver.send(true)
+        await driver.send(true);
         await waitForPlugIn(client);
       } catch (err) {
         client.end();
@@ -98,5 +122,6 @@ export function makeMqttSession(publisher?: StatusPublisher): ChargingSession {
       }
     },
     driver,
+    wattsSource,
   };
 }

@@ -71,7 +71,7 @@ import { CONFIG } from "./config.ts";
 import { IncompleteDataError } from "./errors.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
-import { runCharging, simulateSession } from "./charger.ts";
+import { runCharging, makeSimulateSession } from "./charger.ts";
 import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
 import { STATUS, StatusPublisher, getTargetTime } from "./mqtt-status.ts";
 import { Canceller, localTimeShort, log, sleep } from "./utils.ts";
@@ -104,7 +104,7 @@ async function main() {
   }
 
   const publisher = CONFIG.mqtt ? new StatusPublisher() : undefined;
-  const session = mode === "simulate" ? simulateSession : makeMqttSession(publisher);
+  const session = mode === "simulate" ? makeSimulateSession() : makeMqttSession(publisher);
 
   if (mode === "simulate" && publisher) {
     connectMqtt()
@@ -152,7 +152,7 @@ async function main() {
           ? STATUS.plannedChargeStart(localTimeShort(firstCharge.start))
           : STATUS.idle);
 
-        const newlyCharged = await runCharging(slots, session.driver, publisher, replanController.signal);
+        const newlyCharged = await runCharging(slots, session.driver, publisher, replanController.signal, session.wattsSource);
         chargedKwh += newlyCharged;
 
         if (!replanController.signal.aborted) {

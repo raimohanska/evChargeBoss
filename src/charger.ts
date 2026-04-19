@@ -9,32 +9,84 @@ export interface ChargerDriver {
   send(on: boolean): Promise<void>;
 }
 
+export interface WattsSource {
+  /** Register a callback invoked with the latest watt reading. Returns an unsubscribe fn. */
+  subscribe(cb: (watts: number) => void): () => void;
+}
+
 // A session encapsulates how to wait for "ready to charge" and which driver to use.
 // waitForStart() resolves when it is time to plan and begin charging.
 export interface ChargingSession {
   waitForStart(): Promise<void>;
   driver: ChargerDriver;
+  wattsSource?: WattsSource;
 }
 
-export const simulateSession: ChargingSession = {
-  waitForStart: async () => {},
-  driver: {
-    async send(on: boolean) {
-      log(`[SIMULATE] → ${on ? "ON " : "OFF"}`);
-    },
-  },
-};
+/** Simulated session with randomised watts that mimic a real EV charging cycle. */
+export function makeSimulateSession(): ChargingSession {
+  const listeners: Array<(w: number) => void> = [];
+  let chargerOn = false;
+  let startHandle: ReturnType<typeof setTimeout> | null = null;
+  let tickHandle:  ReturnType<typeof setInterval> | null = null;
 
+  function notify(w: number) {
+    for (const l of listeners) l(w);
+  }
+
+  function startEmitting() {
+    // Simulate car startup handshake: 2–6 s before watts appear
+    const delay = 2000 + Math.random() * 4000;
+    startHandle = setTimeout(() => {
+      startHandle = null;
+      if (!chargerOn) return;
+      notify(2900 + Math.random() * 200);
+      tickHandle = setInterval(() => {
+        if (!chargerOn) return;
+        // ~3% chance of a brief pause (EV battery management / balancing)
+        notify(Math.random() < 0.03 ? 0 : 2900 + Math.random() * 200);
+      }, 1500 + Math.random() * 1500);
+    }, delay);
+  }
+
+  function stopEmitting() {
+    if (startHandle !== null) { clearTimeout(startHandle); startHandle = null; }
+    if (tickHandle  !== null) { clearInterval(tickHandle); tickHandle  = null; }
+    notify(0);
+  }
+
+  return {
+    waitForStart: async () => {},
+    driver: {
+      async send(on: boolean) {
+        log(`[SIMULATE] → ${on ? "ON " : "OFF"}`);
+        chargerOn = on;
+        if (on) startEmitting();
+        else    stopEmitting();
+      },
+    },
+    wattsSource: {
+      subscribe(cb) {
+        listeners.push(cb);
+        return () => {
+          const i = listeners.indexOf(cb);
+          if (i !== -1) listeners.splice(i, 1);
+        };
+      },
+    },
+  };
+}
 
 /**
  * Runs the charging schedule. Returns kWh delivered in fully-completed charge slots.
  * If signal is aborted mid-session the charger is turned off and the function returns early.
+ * If wattsSource is provided, status reflects actual watts rather than the schedule alone.
  */
 export async function runCharging(
   slots: Slot[],
   driver: ChargerDriver,
   publisher?: StatusPublisher,
   signal?: CancelSignal,
+  wattsSource?: WattsSource,
 ): Promise<number> {
   const now = new Date();
   const upcoming = slots.filter((s) => s.end > now);
@@ -54,7 +106,24 @@ export async function runCharging(
   }
   if (signal?.aborted) return 0;
 
+  // Watts-based status tracking
+  const threshold = CONFIG.mqtt?.powerThresholdW ?? 10;
+  let activeRunEnd: Date | null = null;  // non-null only while in a charge slot
+  let chargeRunActive = false;           // true once watts seen in current charge run
+
+  const unsubWatts = wattsSource?.subscribe((watts) => {
+    if (activeRunEnd === null || !publisher) return;
+    if (watts > threshold) {
+      chargeRunActive = true;
+      publisher.setStatus(STATUS.charging(localTimeShort(activeRunEnd)));
+    } else if (chargeRunActive) {
+      publisher.setStatus(STATUS.chargingFinished);
+    }
+    // if !chargeRunActive: stay at "Waiting for charging to start"
+  });
+
   let completedChargeSlots = 0;
+  let prevSlotCharge = false;
   const slotsToExecute = upcoming.filter((s) => s.start >= firstCharge.start);
 
   // Execute from the first charge slot onward (handles any OFF slots between charge slots)
@@ -64,14 +133,24 @@ export async function runCharging(
     if (msUntilStart > 0) await sleepAbortable(msUntilStart, signal);
     if (signal?.aborted) break;
 
-    // Update status: for charge slots show end of this consecutive run; for gaps show next charge start
     if (slot.charge) {
+      // Find end of this consecutive charging run
       let runEnd = slot.end;
       for (let j = i + 1; j < slotsToExecute.length && slotsToExecute[j].charge; j++) {
         runEnd = slotsToExecute[j].end;
       }
-      publisher?.setStatus(STATUS.charging(localTimeShort(runEnd)));
+      activeRunEnd = runEnd;
+
+      if (!prevSlotCharge) {
+        // Starting a new charge run
+        chargeRunActive = false;
+        publisher?.setStatus(wattsSource
+          ? STATUS.waitingForChargingToStart
+          : STATUS.charging(localTimeShort(runEnd)));
+      }
+      // If continuing a run, the watts callback manages the status
     } else {
+      activeRunEnd = null;
       const nextCharge = slotsToExecute.slice(i + 1).find(s => s.charge);
       if (nextCharge) publisher?.setStatus(STATUS.chargePaused(localTimeShort(nextCharge.start)));
     }
@@ -81,6 +160,7 @@ export async function runCharging(
       : "too expensive";
     log(`[${slot.charge ? "ON " : "OFF"}] ${localTimeShort(slot.start)}–${localTimeShort(slot.end)} | ${label}`);
     await driver.send(slot.charge);
+    prevSlotCharge = slot.charge;
 
     const msUntilEnd = slot.end.getTime() - Date.now();
     if (msUntilEnd > 0) await sleepAbortable(msUntilEnd, signal);
@@ -93,6 +173,7 @@ export async function runCharging(
     if (slot.charge) completedChargeSlots++;
   }
 
+  unsubWatts?.();
   if (!signal?.aborted) log("Charging session complete.");
   return completedChargeSlots * CONFIG.charging.powerKw * 0.25;
 }
