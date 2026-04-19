@@ -129,6 +129,7 @@ export class StatusPublisher {
   }
 
   setStatus(status: string): void {
+    log(`[Status] ${status}`);
     this.setState("status", status);
     if (status === STATUS.waitingForCar) {
       this.setState("plan_cost", "-");
@@ -137,6 +138,7 @@ export class StatusPublisher {
   }
 
   setError(message: string): void {
+    log(`[Status] ${message}`);
     this.setState("status", STATUS.error(message));
   }
 
