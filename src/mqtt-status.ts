@@ -48,7 +48,7 @@ const SENSORS: SensorDef[] = [
   { id: "status",         name: "Status",                  icon: "mdi:ev-station" },
   { id: "plan_cost",      name: "Estimated Charge Cost (€)",icon: "mdi:currency-eur" },
   { id: "solar_pct",      name: "Solar Power Share (%)",    icon: "mdi:solar-power" },
-  { id: "charged_energy", name: "Charged Energy (kWh)",     icon: "mdi:lightning-bolt", unit: "kWh", state_class: "measurement" },
+  { id: "charged_energy", name: "Charged Energy (kWh)",     icon: "mdi:lightning-bolt" },
 ];
 
 function stateTopic(id: string) { return `${BASE}/${id}`; }
