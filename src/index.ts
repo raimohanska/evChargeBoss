@@ -108,7 +108,7 @@ async function main() {
   }
 
   // Create publisher: StatusPublisher (with async MQTT init) or LoggingPublisher
-  const publisher = await createPublisher();
+  const publisher = await createPublisher(mode === "charge");
 
   // Create session
   const session = mode === "simulate" ? makeSimulateSession() : await makeMqttSession(publisher);

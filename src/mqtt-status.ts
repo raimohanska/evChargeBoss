@@ -227,7 +227,15 @@ export class LoggingPublisher implements Publisher {
   }
 }
 
-export async function createPublisher(): Promise<Publisher> {
-  if (CONFIG.mqtt) return StatusPublisher.create();
+export async function createPublisher(mqttRequired: boolean): Promise<Publisher> {
+  if (CONFIG.mqtt) {
+    try {
+      return await StatusPublisher.create();
+    } catch (err) {
+      if (mqttRequired) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`MQTT unavailable, using logging publisher: ${msg}`);
+    }
+  }
   return new LoggingPublisher();
 }
