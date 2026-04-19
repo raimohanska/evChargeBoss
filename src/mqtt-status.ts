@@ -35,7 +35,6 @@ export interface Publisher {
   setError(message: string): void;
   setPlan(slots: Slot[]): void;
   setChargedEnergy(kwh: number): void;
-  setClient(client: MqttClient): void;
 }
 
 const DEVICE_ID = "evchargeboss";
@@ -66,8 +65,11 @@ function stateTopic(id: string) { return `${BASE}/${id}`; }
 function discoveryTopic(id: string) { return `${DISCOVERY}/sensor/${DEVICE_ID}_${id}/config`; }
 
 export class StatusPublisher implements Publisher {
-  private client: MqttClient | null = null;
   private replanCallback: (() => void) | null = null;
+
+  constructor(private client: MqttClient) {
+    this.initializeDiscovery();
+  }
 
   setReplanCallback(cb: () => void): void {
     this.replanCallback = cb;
@@ -85,8 +87,7 @@ export class StatusPublisher implements Publisher {
     charged_energy: "-",
   };
 
-  setClient(client: MqttClient): void {
-    this.client = client;
+  private initializeDiscovery(): void {
     for (const s of SENSORS) {
       const config: Record<string, unknown> = {
         unique_id: `${DEVICE_ID}_${s.id}`,
@@ -124,10 +125,10 @@ export class StatusPublisher implements Publisher {
     this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
     this.pub(timeStateTopic, getTargetTime());
 
-    client.subscribe(timeCmdTopic, (err) => {
+    this.client.subscribe(timeCmdTopic, (err) => {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
     });
-    client.on("message", (topic: string, payload: Buffer) => {
+    this.client.on("message", (topic: string, payload: Buffer) => {
       if (topic !== timeCmdTopic) return;
       const parts = payload.toString().trim().split(":");
       if (parts.length < 2) return;
@@ -214,9 +215,5 @@ export class LoggingPublisher implements Publisher {
 
   setChargedEnergy(kwh: number): void {
     log(`[Charged] ${kwh.toFixed(2)} kWh`);
-  }
-
-  setClient(): void {
-    // no-op for logging publisher
   }
 }

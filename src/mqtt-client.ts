@@ -6,6 +6,20 @@ import { log } from "./utils.ts";
 
 export type MqttClient = mqtt.MqttClient;
 
+let globalMqttClient: MqttClient | undefined;
+
+export async function getOrCreateMqttClient(): Promise<MqttClient> {
+  if (!CONFIG.mqtt) throw new Error("MQTT not configured");
+  if (!globalMqttClient) {
+    globalMqttClient = await connectMqtt();
+  }
+  return globalMqttClient;
+}
+
+export function getMqttClient(): MqttClient | undefined {
+  return globalMqttClient;
+}
+
 export async function connectMqtt(): Promise<MqttClient> {
   const { brokerUrl, username, password } = CONFIG.mqtt!;
   return new Promise((resolve, reject) => {
@@ -61,12 +75,12 @@ async function waitForPlugIn(client: MqttClient): Promise<void> {
   });
 }
 
-// Returns a ChargingSession that connects to the broker once, then for each
-// session waits until the power topic reports watts above the threshold
-// (car plugged in), reconnecting automatically after any error.
+// Returns a ChargingSession that uses the global MQTT client for charger commands
+// and listens to power readings on the power topic.
 export function makeMqttSession(publisher: Publisher): ChargingSession {
   if (!CONFIG.mqtt) throw new Error("mqtt config is required for charge mode");
-  let client: MqttClient | undefined;
+  const client = getMqttClient();
+  if (!client) throw new Error("MQTT client not initialized");
   const { chargerTopic, onPayload, offPayload, powerTopic, powerField, energyField } = CONFIG.mqtt;
 
   // Persistent watts listeners — kept alive for the whole session
@@ -86,7 +100,7 @@ export function makeMqttSession(publisher: Publisher): ChargingSession {
     async send(on: boolean): Promise<void> {
       const payload = on ? onPayload : offPayload;
       return new Promise((resolve, reject) => {
-        client!.publish(chargerTopic, payload, (err) => {
+        client.publish(chargerTopic, payload, (err) => {
           if (err) return reject(err);
           log(`[MQTT] → ${on ? "ON " : "OFF"} published to ${chargerTopic}`);
           resolve();
@@ -95,12 +109,13 @@ export function makeMqttSession(publisher: Publisher): ChargingSession {
     },
   };
 
+  let messageHandlerAttached = false;
+
   return {
     async waitForStart() {
-      if (!client) {
-        client = await connectMqtt();
-        publisher.setClient(client);
-        // Forward all power-topic readings to watts listeners
+      // Attach message handler once on first call
+      if (!messageHandlerAttached) {
+        messageHandlerAttached = true;
         client.on("message", (topic: string, message: Buffer) => {
           if (topic !== powerTopic) return;
           try {
@@ -120,7 +135,6 @@ export function makeMqttSession(publisher: Publisher): ChargingSession {
         await waitForPlugIn(client);
       } catch (err) {
         client.end();
-        client = undefined;
         throw err;
       }
     },

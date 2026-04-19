@@ -72,7 +72,7 @@ import { IncompleteDataError } from "./errors.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { makeSimulateSession } from "./charger.ts";
-import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
+import { getOrCreateMqttClient, getMqttClient, makeMqttSession } from "./mqtt-client.ts";
 import { STATUS, StatusPublisher, LoggingPublisher } from "./mqtt-status.ts";
 import { log } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
@@ -107,15 +107,28 @@ async function main() {
     return;
   }
 
-  const publisher = CONFIG.mqtt ? new StatusPublisher() : new LoggingPublisher();
-  const session = mode === "simulate" ? makeSimulateSession() : makeMqttSession(publisher);
-
-  if (mode === "simulate" && CONFIG.mqtt) {
-    connectMqtt()
-      .then(client => (publisher as StatusPublisher).setClient(client))
-      .catch(err => log(`MQTT unavailable, status publishing disabled: ${err.message}`));
+  // Initialize MQTT if configured
+  if (CONFIG.mqtt) {
+    try {
+      await getOrCreateMqttClient();
+      log("MQTT initialized");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (mode === "charge") {
+        throw new Error(`Cannot start charge mode without MQTT: ${msg}`);
+      }
+      log(`MQTT unavailable, continuing with logging-only mode: ${msg}`);
+    }
   }
 
+  // Create publisher with client if available
+  const mqttClient = getMqttClient();
+  const publisher = mqttClient ? new StatusPublisher(mqttClient) : new LoggingPublisher();
+
+  // Create session
+  const session = mode === "simulate" ? makeSimulateSession() : makeMqttSession(publisher);
+
+  // Run main loop
   await runMainLoop(session, publisher, initialFrom, errorStatus);
 }
 
