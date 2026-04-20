@@ -48,7 +48,7 @@ test("Plan for the 17:00 session: 7 solar-free charge slots 10:00–11:45 next d
 });
 
 test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge session", async () => {
-  const { loopPromise, relay, teardown } = await startMqttSession(makeTestConfig(), FROM, SPEEDUP);
+  const { loopPromise, relay, teardown } = await startMqttSession(FROM, SPEEDUP);
   try {
     await relay.assertOn("2026-04-18T17:00");   // waitForStart() fires immediately at session start
     await relay.assertOff("2026-04-19T10:00");  // gap: charger off until the charge window

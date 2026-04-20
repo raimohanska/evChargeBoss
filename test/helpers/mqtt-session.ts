@@ -6,6 +6,7 @@ import { runMainLoop } from "../../src/main-loop.ts";
 import { IncompleteDataError } from "../../src/errors.ts";
 import { STATUS } from "../../src/mqtt-status.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
+import { makeTestConfig } from "./config.ts";
 
 function errorStatus(err: unknown): string {
   if (err instanceof IncompleteDataError) return STATUS.waitingForSpot;
@@ -18,7 +19,8 @@ export interface MqttTestSession {
   teardown(): void;
 }
 
-export async function startMqttSession(config: Config, from: Date, speedup: number): Promise<MqttTestSession> {
+export async function startMqttSession(from: Date, speedup: number): Promise<MqttTestSession> {
+  const config = makeTestConfig() 
   const [sessionClient, relayClient] = await Promise.all([
     connectMqtt(config.mqtt!),
     connectMqtt(config.mqtt!),
