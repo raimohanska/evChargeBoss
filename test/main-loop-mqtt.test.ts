@@ -6,8 +6,8 @@
  *
  * Scenario
  * --------
- * from = 2026-04-18T17:00, targetTime = "12:00" (next day), targetKwh = 0.75 (1 slot).
- * The cheapest single slot in the 17:00–12:00 window is 2026-04-19T10:00 (solar-free, 0 €).
+ * from = 2026-04-18T17:00, targetTime = "12:00" (next day), targetKwh = 5 (7 slots).
+ * All 7 slots fall in the solar window 10:00–11:45 next day (solar-free, 0 €).
  * Because the charge slot is far in the future, runCharging sends:
  *
  *   ON  ← waitForStart() announces the charger is ready and waits for plug-in
@@ -44,24 +44,27 @@ function makeTestConfig(): Config {
     ...base,
     mode: "charge" as const,
     mqtt: { ...base.mqtt!, brokerUrl: "mqtt://localhost:1883" },
-    charging: { ...base.charging, targetKwh: 0.75 },
+    charging: { ...base.charging, targetKwh: 5 },
     test: { timeSpeedupFactor: SPEEDUP, justOnce: true },
   };
 }
 
-test("Plan for the 17:00 session: 1 solar-free charge slot at 10:00 next day", async () => {
+test("Plan for the 17:00 session: 7 solar-free charge slots 10:00–11:45 next day", async () => {
   const config = makeTestConfig();
   const targetDate = parseTargetTime(config.charging.targetTime, FROM);
   const slots = await plan(FROM, targetDate, config.charging.targetKwh, config);
 
   const chargeSlots = slots.filter(s => s.charge);
-  assert.equal(chargeSlots.length, 1, "exactly 1 charge slot for 0.75 kWh");
+  assert.equal(chargeSlots.length, 7, "7 charge slots for 5 kWh at 3 kW");
 
-  const chargeSlot = chargeSlots[0];
-  assert.equal(chargeSlot.start.toISOString().slice(0, 10), "2026-04-19", "charge slot is next day");
-  assert.equal(chargeSlot.start.getHours(), 10, "charge slot starts at 10:00");
-  assert.equal(chargeSlot.start.getMinutes(), 0, "charge slot starts on the hour");
-  assert.equal(chargeSlot.effectiveCostEur, 0, "solar-free: zero cost");
+  const first = chargeSlots[0];
+  const last = chargeSlots[chargeSlots.length - 1];
+  assert.equal(first.start.toISOString().slice(0, 10), "2026-04-19", "charge slots are next day");
+  assert.equal(first.start.getHours(), 10, "first slot starts at 10:00");
+  assert.equal(first.start.getMinutes(), 0, "first slot starts on the hour");
+  assert.equal(last.end.getHours(), 11, "last slot ends at 11:45");
+  assert.equal(last.end.getMinutes(), 45, "last slot ends at 11:45");
+  assert.ok(chargeSlots.every(s => s.effectiveCostEur === 0), "all slots solar-free: zero cost");
 });
 
 function errorStatus(err: unknown): string {
@@ -99,7 +102,7 @@ test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge s
     const t2 = await relay.assertNextState(true, 10_000);
     assertAt(t2, "2026-04-19T10:00", "Second ON (charge slot start)");
 
-    // Session completes (90 ms real for the 15-min slot), loop exits via justOnce.
+    // Session completes (630 ms real for 7 × 15-min slots), loop exits via justOnce.
     await loopPromise;
 
   } finally {
