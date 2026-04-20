@@ -25,29 +25,13 @@ import { loadConfig } from "../src/config.ts";
 import type { Config } from "../src/config.ts";
 import { connectMqtt, makeMqttSession } from "../src/mqtt-client.ts";
 import { createPublisher } from "../src/mqtt-status.ts";
-import { makeClock, localDateTimeString } from "../src/utils.ts";
-import { runMainLoop } from "../src/main-loop.ts";
+import { makeClock } from "../src/utils.ts";
+import { runMainLoop, parseTargetTime } from "../src/main-loop.ts";
 import { IncompleteDataError } from "../src/errors.ts";
 import { STATUS } from "../src/mqtt-status.ts";
+import { plan } from "../src/planner.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
-
-// Assert that a relay event time is within TOLERANCE_MS of a local HH:MM on 2026-04-18.
-function assertAt(actual: Date, expectedTime: string, label: string): void {
-  const expected = new Date(`2026-04-18T${expectedTime}:00`);
-  const TOLERANCE_MS = 10 * 60_000; // 10 virtual minutes — absorbs MQTT roundtrip jitter
-  assert.ok(
-    Math.abs(actual.getTime() - expected.getTime()) < TOLERANCE_MS,
-    `${label}: got ${localDateTimeString(actual)}, expected ~${expectedTime}`,
-  );
-}
-
-function assertBefore(actual: Date, expectedTime: string, label: string): void {
-  const expected = new Date(`2026-04-18T${expectedTime}:00`);
-  assert.ok(
-    actual < expected,
-    `${label}: got ${localDateTimeString(actual)}, expected before ${expectedTime}`,
-  );
-}
+import { assertAt, assertBefore } from "./test-helpers.ts";
 
 
 
@@ -64,6 +48,20 @@ function makeTestConfig(): Config {
     test: { timeSpeedupFactor: SPEEDUP, justOnce: true },
   };
 }
+
+test("Plan for the 10:00 session: 1 charge slot at 11:45", async () => {
+  const config = makeTestConfig();
+  const targetDate = parseTargetTime(config.charging.targetTime, FROM);
+  const slots = await plan(FROM, targetDate, config.charging.targetKwh, config);
+
+  const chargeSlots = slots.filter(s => s.charge);
+  assert.equal(chargeSlots.length, 1, "exactly 1 charge slot for 0.75 kWh");
+
+  const chargeSlot = chargeSlots[0];
+  assert.equal(chargeSlot.start.getHours(), 11, "charge slot starts at hour 11");
+  assert.equal(chargeSlot.start.getMinutes(), 45, "charge slot starts at minute 45");
+  assert.equal(chargeSlot.end.getHours(), 12, "charge slot ends at 12:00");
+});
 
 function errorStatus(err: unknown): string {
   if (err instanceof IncompleteDataError) return STATUS.waitingForSpot;
@@ -90,19 +88,19 @@ test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge s
 
     // waitForStart() sends ON then waits for power readings from the relay simulator.
     const t0 = await relay.assertNextState(true);
+    assertAt(t0, "10:00", "First ON (session start)");
 
     // runCharging sees a gap before the 11:45 slot → sends OFF, then sleeps.
     const t1 = await relay.assertNextState(false);
+    assertBefore(t1, "11:45", "OFF (gap before charge slot)");
 
     // The 11:45 slot arrives → ON.
     const t2 = await relay.assertNextState(true);
+    assertAt(t2, "11:45", "Second ON (charge slot start)");
 
     // Session completes (90 ms real for the 15-min slot), loop exits via justOnce.
     await loopPromise;
 
-    assertAt(t0, "10:00", "First ON (session start)");
-    assertBefore(t1, "11:45", "OFF (gap before charge slot)");
-    assertAt(t2, "11:45", "Second ON (charge slot start)");
   } finally {
     relay.cleanup();
     sessionClient.end();
