@@ -1,19 +1,23 @@
 import type { MqttClient } from "../src/mqtt-client.ts";
 import type { MqttConfig } from "../src/config.ts";
 import type { Clock } from "../src/utils.ts";
-import { realClock } from "../src/utils.ts";
+import { realClock, localDateTimeString } from "../src/utils.ts";
 import assert from "node:assert/strict";
+
+// 10 virtual minutes — absorbs MQTT roundtrip jitter at high speedup factors
+const TIMING_TOLERANCE_MS = 10 * 60_000;
+// Generous default: a 17-hour virtual gap takes ~6 s real at 10 000× speedup
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 /**
  * Simulates a physical relay sitting on MQTT.
  *
- * Subscribes to the charger command topic and tracks every ON/OFF command in
- * order.  When turned ON it begins publishing power readings so waitForPlugIn
- * resolves; when turned OFF it stops.
+ * Subscribes to the charger command topic and tracks every ON/OFF command in order.
+ * When turned ON it begins publishing power readings so waitForPlugIn resolves;
+ * when turned OFF it stops.
  *
- * assertNextState(expected) consumes the next command from the queue and fails
- * if it does not match.  If no command has arrived yet it waits up to
- * timeoutMs milliseconds before rejecting.
+ * assertOn(expectedDateTime) — wait for the next ON and assert it arrived ~at that time.
+ * assertOff(beforeDateTime)  — wait for the next OFF and assert it arrived before that time.
  */
 export class MqttRelaySimulator {
   private readonly states: boolean[] = [];
@@ -85,12 +89,27 @@ export class MqttRelaySimulator {
     );
   }
 
-  /**
-   * Waits for the next relay command and asserts it equals `expected`.
-   * Reads from the already-received queue first; blocks if the queue is empty.
-   * Returns the simulated time at which the relay command arrived.
-   */
-  async assertNextState(expected: boolean, timeoutMs = 2000): Promise<Date> {
+  /** Wait for next relay command, assert it is ON, assert it arrived ~at expectedDateTime ("YYYY-MM-DDTHH:MM"). */
+  async assertOn(expectedDateTime: string): Promise<void> {
+    const t = await this.nextCommand(true);
+    const expected = new Date(`${expectedDateTime}:00`);
+    assert.ok(
+      Math.abs(t.getTime() - expected.getTime()) < TIMING_TOLERANCE_MS,
+      `Expected relay ON at ~${expectedDateTime}, arrived at ${localDateTimeString(t)}`,
+    );
+  }
+
+  /** Wait for next relay command, assert it is OFF, assert it arrived strictly before beforeDateTime ("YYYY-MM-DDTHH:MM"). */
+  async assertOff(beforeDateTime: string): Promise<void> {
+    const t = await this.nextCommand(false);
+    const before = new Date(`${beforeDateTime}:00`);
+    assert.ok(
+      t < before,
+      `Expected relay OFF before ${beforeDateTime}, arrived at ${localDateTimeString(t)}`,
+    );
+  }
+
+  private async nextCommand(expected: boolean): Promise<Date> {
     let actual: boolean;
 
     if (this.consumedIdx < this.states.length) {
@@ -101,10 +120,10 @@ export class MqttRelaySimulator {
           () => {
             this.pending = null;
             reject(new Error(
-              `Relay simulator: timed out after ${timeoutMs}ms waiting for state ${expected ? "ON" : "OFF"}`,
+              `Relay simulator: timed out after ${DEFAULT_TIMEOUT_MS}ms waiting for ${expected ? "ON" : "OFF"}`,
             ));
           },
-          timeoutMs,
+          DEFAULT_TIMEOUT_MS,
         );
         this.pending = { resolve, reject, timer };
       });
@@ -113,7 +132,7 @@ export class MqttRelaySimulator {
 
     assert.equal(
       actual, expected,
-      `Expected relay ${expected ? "ON" : "OFF"} but received ${actual ? "ON" : "OFF"}`,
+      `Expected relay ${expected ? "ON" : "OFF"} but got ${actual ? "ON" : "OFF"}`,
     );
     return this.timestamps[this.consumedIdx - 1];
   }

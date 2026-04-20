@@ -31,7 +31,6 @@ import { IncompleteDataError } from "../src/errors.ts";
 import { STATUS } from "../src/mqtt-status.ts";
 import { plan } from "../src/planner.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
-import { assertAt, assertBefore } from "./test-helpers.ts";
 
 
 
@@ -90,20 +89,11 @@ test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge s
   try {
     const loopPromise = runMainLoop(session, publisher, config, FROM, errorStatus, clock);
 
-    // waitForStart() sends ON then waits for power readings from the relay simulator.
-    const t0 = await relay.assertNextState(true);
-    assertAt(t0, "2026-04-18T17:00", "First ON (session start)");
+    await relay.assertOn("2026-04-18T17:00");   // waitForStart() fires immediately at session start
+    await relay.assertOff("2026-04-19T10:00");  // gap: charger off until the charge window
+    await relay.assertOn("2026-04-19T10:00");   // first charge slot begins
 
-    // runCharging sees a 17-hour gap before the 10:00 next-day slot → sends OFF, then sleeps.
-    const t1 = await relay.assertNextState(false);
-    assertBefore(t1, "2026-04-19T10:00", "OFF (gap before charge slot)");
-
-    // 17 hours at 10 000× speedup ≈ 6 s real time — use a generous timeout.
-    const t2 = await relay.assertNextState(true, 10_000);
-    assertAt(t2, "2026-04-19T10:00", "Second ON (charge slot start)");
-
-    // Session completes (630 ms real for 7 × 15-min slots), loop exits via justOnce.
-    await loopPromise;
+    await loopPromise; // 7 × 15-min slots complete (~630 ms real), loop exits via justOnce
 
   } finally {
     relay.cleanup();
