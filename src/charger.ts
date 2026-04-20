@@ -2,7 +2,8 @@ import type { Slot } from "./types.ts";
 import { STATUS } from "./mqtt-status.ts";
 import type { Publisher } from "./mqtt-status.ts";
 import type { CancelSignal } from "./utils.ts";
-import { log, localTimeShort, sleepAbortable } from "./utils.ts";
+import { log, localTimeShort, realClock } from "./utils.ts";
+import type { Clock } from "./utils.ts";
 
 export interface ChargerDriver {
   send(on: boolean): Promise<void>;
@@ -102,8 +103,9 @@ export async function runCharging(
   prevChargedKwh = 0,
   powerThresholdW = 10,
   powerKw = 0,
+  clock: Clock = realClock,
 ): Promise<number> {
-  const now = new Date();
+  const now = clock.now();
   const upcoming = slots.filter((s) => s.end > now);
 
   const firstCharge = upcoming.find((s) => s.charge);
@@ -113,11 +115,11 @@ export async function runCharging(
   }
 
   // Sleep directly to the first charge slot, skipping all the preceding OFF slots
-  const msUntilFirst = firstCharge.start.getTime() - Date.now();
+  const msUntilFirst = firstCharge.start.getTime() - clock.now().getTime();
   if (msUntilFirst > 0) {
     await driver.send(false);
     log(`Charging starts at ${localTimeShort(firstCharge.start)} (in ${Math.round(msUntilFirst / 1000)}s)`);
-    await sleepAbortable(msUntilFirst, signal);
+    await clock.sleepAbortable(msUntilFirst, signal);
   }
   if (signal?.aborted) return 0;
 
@@ -152,8 +154,8 @@ export async function runCharging(
   // Execute from the first charge slot onward (handles any OFF slots between charge slots)
   for (let i = 0; i < slotsToExecute.length; i++) {
     const slot = slotsToExecute[i];
-    const msUntilStart = slot.start.getTime() - Date.now();
-    if (msUntilStart > 0) await sleepAbortable(msUntilStart, signal);
+    const msUntilStart = slot.start.getTime() - clock.now().getTime();
+    if (msUntilStart > 0) await clock.sleepAbortable(msUntilStart, signal);
     if (signal?.aborted) break;
 
     if (slot.charge) {
@@ -185,8 +187,8 @@ export async function runCharging(
     await driver.send(slot.charge);
     prevSlotCharge = slot.charge;
 
-    const msUntilEnd = slot.end.getTime() - Date.now();
-    if (msUntilEnd > 0) await sleepAbortable(msUntilEnd, signal);
+    const msUntilEnd = slot.end.getTime() - clock.now().getTime();
+    if (msUntilEnd > 0) await clock.sleepAbortable(msUntilEnd, signal);
 
     if (signal?.aborted) {
       if (slot.charge) await driver.send(false);

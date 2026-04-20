@@ -36,11 +36,16 @@ const ConfigSchema = z.strictObject({
   electricity: z.strictObject({
     transportCostEurKwh: z.number().nonnegative(),
   }),
+  test: z.object({
+    timeSpeedupFactor: z.number().positive().optional(),
+    justOnce: z.boolean().optional(),
+  }).optional(),
 });
 
 export type Mode = z.infer<typeof ModeSchema>;
 export type Config = z.infer<typeof ConfigSchema>;
 export type MqttConfig = NonNullable<Config['mqtt']>;
+export type TestConfig = NonNullable<Config['test']>;
 
 function getConfigPath(): string {
   if (process.env.CONFIG_FILE) return process.env.CONFIG_FILE;

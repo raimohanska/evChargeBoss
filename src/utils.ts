@@ -64,3 +64,30 @@ export function sleepAbortable(ms: number, signal?: CancelSignal): Promise<void>
     signal?.addEventListener("abort", () => { clearTimeout(t); resolve(); });
   });
 }
+
+/**
+ * A clock that can run faster than real time for testing.
+ * now() returns a virtual timestamp; sleep/sleepAbortable durations are divided
+ * by speedupFactor so a 15-minute slot can pass in milliseconds under test.
+ */
+export interface Clock {
+  now(): Date;
+  sleep(ms: number): Promise<void>;
+  sleepAbortable(ms: number, signal?: CancelSignal): Promise<void>;
+}
+
+/**
+ * Build a clock optionally anchored to a fixed start time and running at
+ * speedupFactor × real speed. speedupFactor=1 and no startTime gives real-time behaviour.
+ */
+export function makeClock(speedupFactor = 1, startTime?: Date): Clock {
+  const realStart = Date.now();
+  const virtualStart = startTime?.getTime() ?? Date.now();
+  return {
+    now: () => new Date(virtualStart + (Date.now() - realStart) * speedupFactor),
+    sleep: (ms) => sleep(Math.ceil(ms / speedupFactor)),
+    sleepAbortable: (ms, signal) => sleepAbortable(Math.ceil(ms / speedupFactor), signal),
+  };
+}
+
+export const realClock: Clock = makeClock(1);

@@ -76,7 +76,7 @@ import { makeSimulateSession } from "./charger.ts";
 import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
 import type { MqttClient } from "./mqtt-client.ts";
 import { STATUS, createPublisher } from "./mqtt-status.ts";
-import { log } from "./utils.ts";
+import { log, makeClock } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
 import { runMainLoop, parseTargetTime } from "./main-loop.ts";
 
@@ -127,7 +127,8 @@ async function main() {
     ? makeSimulateSession()
     : makeMqttSession(mqttClient!, config.mqtt!, publisher);
 
-  await runMainLoop(session, publisher, config, initialFrom, errorStatus);
+  const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
+  await runMainLoop(session, publisher, config, initialFrom, errorStatus, clock);
 }
 
 main().catch((err) => {
