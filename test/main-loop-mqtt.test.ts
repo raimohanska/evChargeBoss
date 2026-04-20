@@ -71,33 +71,44 @@ function errorStatus(err: unknown): string {
   return STATUS.error(err instanceof Error ? err.message : String(err));
 }
 
-test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge session", async () => {
-  const config = makeTestConfig();
+interface MqttTestSession {
+  loopPromise: Promise<void>;
+  relay: MqttRelaySimulator;
+  teardown(): void;
+}
 
-  // Two independent connections: one for the system loop, one for the relay simulator.
+async function startMqttSession(config: Config, from: Date, speedup: number): Promise<MqttTestSession> {
   const [sessionClient, relayClient] = await Promise.all([
     connectMqtt(config.mqtt!),
     connectMqtt(config.mqtt!),
   ]);
 
-  // LoggingPublisher (no MQTT client) — publisher is only used for status logs here.
   const publisher = createPublisher(config);
   const session = makeMqttSession(sessionClient, config.mqtt!, publisher);
-  const clock = makeClock(SPEEDUP, FROM);
+  const clock = makeClock(speedup, from);
   const relay = new MqttRelaySimulator(relayClient, config.mqtt!, clock);
 
-  try {
-    const loopPromise = runMainLoop(session, publisher, config, FROM, errorStatus, clock);
+  const loopPromise = runMainLoop(session, publisher, config, from, errorStatus, clock);
 
+  return {
+    loopPromise,
+    relay,
+    teardown() {
+      relay.cleanup();
+      sessionClient.end();
+      relayClient.end();
+    },
+  };
+}
+
+test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge session", async () => {
+  const { loopPromise, relay, teardown } = await startMqttSession(makeTestConfig(), FROM, SPEEDUP);
+  try {
     await relay.assertOn("2026-04-18T17:00");   // waitForStart() fires immediately at session start
     await relay.assertOff("2026-04-19T10:00");  // gap: charger off until the charge window
     await relay.assertOn("2026-04-19T10:00");   // first charge slot begins
-
     await loopPromise; // 7 × 15-min slots complete (~630 ms real), loop exits via justOnce
-
   } finally {
-    relay.cleanup();
-    sessionClient.end();
-    relayClient.end();
+    teardown();
   }
 });
