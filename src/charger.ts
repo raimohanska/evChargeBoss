@@ -24,6 +24,7 @@ export interface ChargingSession {
   waitForStart(): Promise<void>;
   driver: ChargerDriver;
   wattsSource?: WattsSource;
+  end(): void
 }
 
 const SIM_TICK_MS = 2000;
@@ -41,6 +42,7 @@ export function makeSimulateSession(): ChargingSession {
   }
 
   function startEmitting() {
+    clearEmitting()
     // Simulate car startup handshake: 2–6 s before watts appear
     const delay = 2000 + Math.random() * 4000;
     startHandle = setTimeout(() => {
@@ -59,16 +61,20 @@ export function makeSimulateSession(): ChargingSession {
     }, delay);
   }
 
-  function stopEmitting() {
+  function clearEmitting() {
     if (startHandle !== null) { clearTimeout(startHandle); startHandle = null; }
     if (tickHandle  !== null) { clearInterval(tickHandle); tickHandle  = null; }
+  }
+
+  function stopEmitting() {
+    clearEmitting()
     notify({ watts: 0, energyKwh: cumulativeEnergyKwh });
   }
 
   return {
     waitForStart: async () => {},
     driver: {
-      async send(on: boolean) {
+      async send(on: boolean) {        
         log(`[SIMULATE] → ${on ? "ON " : "OFF"}`);
         chargerOn = on;
         if (on) startEmitting();
@@ -84,6 +90,9 @@ export function makeSimulateSession(): ChargingSession {
         };
       },
     },
+    end() {
+      stopEmitting()
+    }
   };
 }
 
@@ -119,7 +128,7 @@ export async function runCharging(
   if (msUntilFirst > 0) {
     await driver.send(false);
     log(`Charging starts at ${localTimeShort(firstCharge.start)} (in ${Math.round(msUntilFirst / 1000)}s)`);
-    await clock.sleepAbortable(msUntilFirst, signal);
+    await clock.sleep(msUntilFirst, signal);
   }
   if (signal?.aborted) return 0;
 
@@ -155,7 +164,7 @@ export async function runCharging(
   for (let i = 0; i < slotsToExecute.length; i++) {
     const slot = slotsToExecute[i];
     const msUntilStart = slot.start.getTime() - clock.now().getTime();
-    if (msUntilStart > 0) await clock.sleepAbortable(msUntilStart, signal);
+    if (msUntilStart > 0) await clock.sleep(msUntilStart, signal);
     if (signal?.aborted) break;
 
     if (slot.charge) {
@@ -166,6 +175,7 @@ export async function runCharging(
       }
       activeRunEnd = runEnd;
 
+
       if (!prevSlotCharge) {
         // Starting a new charge run
         chargeRunActive = false;
@@ -173,6 +183,8 @@ export async function runCharging(
           ? STATUS.waitingForChargingToStart
           : STATUS.charging(localTimeShort(runEnd)));
       }
+
+      
       // If continuing a run, the watts callback manages the status
     } else {
       activeRunEnd = null;
@@ -184,11 +196,12 @@ export async function runCharging(
       ? slot.effectiveCostEur === 0 ? "solar-free" : `${slot.effectiveCostEur.toFixed(3)} €`
       : "too expensive";
     log(`[${slot.charge ? "ON " : "OFF"}] ${localTimeShort(slot.start)}–${localTimeShort(slot.end)} | ${label}`);
+    
     await driver.send(slot.charge);
     prevSlotCharge = slot.charge;
 
     const msUntilEnd = slot.end.getTime() - clock.now().getTime();
-    if (msUntilEnd > 0) await clock.sleepAbortable(msUntilEnd, signal);
+    if (msUntilEnd > 0) await clock.sleep(msUntilEnd, signal);
 
     if (signal?.aborted) {
       if (slot.charge) await driver.send(false);
@@ -197,6 +210,7 @@ export async function runCharging(
 
     if (slot.charge) completedChargeSlots++;
   }
+  
 
   unsubWatts?.();
   if (!signal?.aborted) log("Charging session complete.");

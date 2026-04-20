@@ -28,10 +28,6 @@ export function assertNotNull<T>(value: T | undefined, label: string): T {
   return value;
 }
 
-export function sleep(ms: number) {
-  return new Promise<void>((r) => setTimeout(r, ms));
-}
-
 export interface CancelSignal {
   aborted: boolean;
   addEventListener(ev: string, cb: () => void): void;
@@ -56,8 +52,7 @@ export class Canceller {
   }
 }
 
-/** Like sleep(), but resolves early (without throwing) if the CancelSignal fires. */
-export function sleepAbortable(ms: number, signal?: CancelSignal): Promise<void> {
+export function sleep(ms: number, signal?: CancelSignal): Promise<void> {
   if (ms <= 0 || signal?.aborted) return Promise.resolve();
   return new Promise<void>((resolve) => {
     const t = setTimeout(resolve, ms);
@@ -72,8 +67,7 @@ export function sleepAbortable(ms: number, signal?: CancelSignal): Promise<void>
  */
 export interface Clock {
   now(): Date;
-  sleep(ms: number): Promise<void>;
-  sleepAbortable(ms: number, signal?: CancelSignal): Promise<void>;
+  sleep(ms: number, signal?: CancelSignal): Promise<void>;
 }
 
 /**
@@ -85,8 +79,7 @@ export function makeClock(speedupFactor = 1, startTime?: Date): Clock {
   const virtualStart = startTime?.getTime() ?? Date.now();
   return {
     now: () => new Date(virtualStart + (Date.now() - realStart) * speedupFactor),
-    sleep: (ms) => sleep(Math.ceil(ms / speedupFactor)),
-    sleepAbortable: (ms, signal) => sleepAbortable(Math.ceil(ms / speedupFactor), signal),
+    sleep: (ms, signal) => sleep(Math.ceil(ms / speedupFactor), signal),
   };
 }
 

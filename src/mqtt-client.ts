@@ -92,14 +92,12 @@ export function makeMqttSession(client: MqttClient, mqttConfig: MqttConfig, publ
     },
   };
 
-  let messageHandlerAttached = false;
-
   return {
+    end() {
+      client.end()
+    },
     async waitForStart() {
-      // Attach message handler once on first call
-      if (!messageHandlerAttached) {
-        messageHandlerAttached = true;
-        client.on("message", (topic: string, message: Buffer) => {
+      const msgHandler = (topic: string, message: Buffer) => {
           if (topic !== powerTopic) return;
           try {
             const data = JSON.parse(message.toString()) as Record<string, unknown>;
@@ -111,14 +109,16 @@ export function makeMqttSession(client: MqttClient, mqttConfig: MqttConfig, publ
               ...(typeof e === "number" && { energyKwh: e }),
             });
           } catch {}
-        });
-      }
+        }
+        client.on("message", msgHandler);
       try {
         await driver.send(true);
         await waitForPlugIn(client, mqttConfig);
       } catch (err) {
         client.end();
         throw err;
+      } finally {
+        client.off("message", msgHandler)
       }
     },
     driver,

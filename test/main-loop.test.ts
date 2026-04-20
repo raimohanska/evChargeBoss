@@ -38,4 +38,5 @@ test("main loop completes one session without error (simulate mode, cached data)
   await runMainLoop(session, publisher, config, FROM, errorStatus, clock);
   // Reaching here means the loop exited cleanly via justOnce.
   assert.ok(true);
+  session.end()
 });
