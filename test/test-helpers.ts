@@ -3,19 +3,23 @@ import { localDateTimeString } from "../src/utils.ts";
 
 const TOLERANCE_MS = 10 * 60_000; // 10 virtual minutes — absorbs MQTT roundtrip jitter
 
-/** Assert that a relay event time is within TOLERANCE_MS of a local HH:MM on 2026-04-18. */
-export function assertAt(actual: Date, expectedTime: string, label: string): void {
-  const expected = new Date(`2026-04-18T${expectedTime}:00`);
+/**
+ * Assert that a relay event time is within 10 virtual minutes of an expected local datetime.
+ * expectedDateTime format: "YYYY-MM-DDTHH:MM"
+ */
+export function assertAt(actual: Date, expectedDateTime: string, label: string): void {
+  const expected = new Date(`${expectedDateTime}:00`);
   assert.ok(
     Math.abs(actual.getTime() - expected.getTime()) < TOLERANCE_MS,
-    `${label}: got ${localDateTimeString(actual)}, expected ~${expectedTime}`,
+    `${label}: got ${localDateTimeString(actual)}, expected ~${expectedDateTime}`,
   );
 }
 
-export function assertBefore(actual: Date, expectedTime: string, label: string): void {
-  const expected = new Date(`2026-04-18T${expectedTime}:00`);
+/** Assert that a relay event time is strictly before an expected local datetime. */
+export function assertBefore(actual: Date, expectedDateTime: string, label: string): void {
+  const expected = new Date(`${expectedDateTime}:00`);
   assert.ok(
     actual < expected,
-    `${label}: got ${localDateTimeString(actual)}, expected before ${expectedTime}`,
+    `${label}: got ${localDateTimeString(actual)}, expected before ${expectedDateTime}`,
   );
 }
