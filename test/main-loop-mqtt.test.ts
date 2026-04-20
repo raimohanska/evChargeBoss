@@ -68,6 +68,8 @@ test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge s
   const relay = new MqttRelaySimulator(relayClient, config.mqtt!);
   const clock = makeClock(SPEEDUP, FROM);
 
+
+
   try {
     const loopPromise = runMainLoop(session, publisher, config, FROM, errorStatus, clock);
 
