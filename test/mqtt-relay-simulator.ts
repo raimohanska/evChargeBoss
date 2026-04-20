@@ -1,5 +1,7 @@
 import type { MqttClient } from "../src/mqtt-client.ts";
 import type { MqttConfig } from "../src/config.ts";
+import type { Clock } from "../src/utils.ts";
+import { realClock } from "../src/utils.ts";
 import assert from "node:assert/strict";
 
 /**
@@ -15,6 +17,7 @@ import assert from "node:assert/strict";
  */
 export class MqttRelaySimulator {
   private readonly states: boolean[] = [];
+  private readonly timestamps: Date[] = [];
   private consumedIdx = 0;
   private pending: {
     resolve: (s: boolean) => void;
@@ -25,13 +28,16 @@ export class MqttRelaySimulator {
 
   private readonly client: MqttClient
   private readonly mqttConfig: MqttConfig
+  private readonly clock: Clock
 
   constructor(
     client: MqttClient,
     mqttConfig: MqttConfig,
+    clock: Clock = realClock,
   ) {
     this.client = client
     this.mqttConfig = mqttConfig
+    this.clock = clock
     client.subscribe(mqttConfig.chargerTopic, (err) => {
       if (err) throw new Error(`Relay simulator subscribe failed: ${err.message}`);
     });
@@ -45,6 +51,7 @@ export class MqttRelaySimulator {
 
   private onCommand(on: boolean): void {
     this.states.push(on);
+    this.timestamps.push(this.clock.now());
     if (on) this.startEmittingPower();
     else    this.stopEmittingPower();
 
@@ -81,8 +88,9 @@ export class MqttRelaySimulator {
   /**
    * Waits for the next relay command and asserts it equals `expected`.
    * Reads from the already-received queue first; blocks if the queue is empty.
+   * Returns the simulated time at which the relay command arrived.
    */
-  async assertNextState(expected: boolean, timeoutMs = 2000): Promise<void> {
+  async assertNextState(expected: boolean, timeoutMs = 2000): Promise<Date> {
     let actual: boolean;
 
     if (this.consumedIdx < this.states.length) {
@@ -107,6 +115,7 @@ export class MqttRelaySimulator {
       actual, expected,
       `Expected relay ${expected ? "ON" : "OFF"} but received ${actual ? "ON" : "OFF"}`,
     );
+    return this.timestamps[this.consumedIdx - 1];
   }
 
   cleanup(): void {

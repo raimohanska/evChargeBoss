@@ -19,12 +19,13 @@
  */
 
 import { test } from "node:test";
+import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "../src/config.ts";
 import type { Config } from "../src/config.ts";
 import { connectMqtt, makeMqttSession } from "../src/mqtt-client.ts";
 import { createPublisher } from "../src/mqtt-status.ts";
-import { makeClock } from "../src/utils.ts";
+import { makeClock, localDateTimeString } from "../src/utils.ts";
 import { runMainLoop } from "../src/main-loop.ts";
 import { IncompleteDataError } from "../src/errors.ts";
 import { STATUS } from "../src/mqtt-status.ts";
@@ -61,29 +62,48 @@ test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge s
     connectMqtt(config.mqtt!),
   ]);
 
-  
   // LoggingPublisher (no MQTT client) — publisher is only used for status logs here.
   const publisher = createPublisher(config);
   const session = makeMqttSession(sessionClient, config.mqtt!, publisher);
-  const relay = new MqttRelaySimulator(relayClient, config.mqtt!);
   const clock = makeClock(SPEEDUP, FROM);
+  const relay = new MqttRelaySimulator(relayClient, config.mqtt!, clock);
 
-
+  // MQTT message delivery adds ~50 ms real time ≈ 8 simulated minutes at 10 000× speedup.
+  // All time-based assertions use a 10-minute virtual tolerance to absorb this jitter.
+  const TOLERANCE_MS = 10 * 60_000;
 
   try {
     const loopPromise = runMainLoop(session, publisher, config, FROM, errorStatus, clock);
 
     // waitForStart() sends ON then waits for power readings from the relay simulator.
-    await relay.assertNextState(true);
+    const t0 = await relay.assertNextState(true);
 
-    // runCharging sees a 1h45m gap before the 11:45 slot → sends OFF, then sleeps.
-    await relay.assertNextState(false);
+    // runCharging sees a gap before the 11:45 slot → sends OFF, then sleeps.
+    const t1 = await relay.assertNextState(false);
 
-    // The 11:45 slot arrives (630 ms real at 10 000× speedup) → ON.
-    await relay.assertNextState(true);
+    // The 11:45 slot arrives → ON.
+    const t2 = await relay.assertNextState(true);
 
     // Session completes (90 ms real for the 15-min slot), loop exits via justOnce.
     await loopPromise;
+
+    // First ON fires immediately at session start (~10:00), before any sleeping.
+    assert.ok(
+      t0.getTime() - new Date("2026-04-18T10:00:00").getTime() < TOLERANCE_MS,
+      `First ON at ${localDateTimeString(t0)}, expected ~10:00`,
+    );
+
+    // OFF fires after planning but before the charge slot starts at 11:45.
+    assert.ok(
+      t1 < new Date("2026-04-18T11:45:00"),
+      `OFF at ${localDateTimeString(t1)}, expected before 11:45`,
+    );
+
+    // Second ON fires when the plan's first charge slot begins at 11:45.
+    assert.ok(
+      Math.abs(t2.getTime() - new Date("2026-04-18T11:45:00").getTime()) < TOLERANCE_MS,
+      `Second ON at ${localDateTimeString(t2)}, expected ~11:45`,
+    );
   } finally {
     relay.cleanup();
     sessionClient.end();
