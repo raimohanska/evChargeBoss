@@ -31,8 +31,25 @@ import { IncompleteDataError } from "../src/errors.ts";
 import { STATUS } from "../src/mqtt-status.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
 
-process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
-process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
+// Assert that a relay event time is within TOLERANCE_MS of a local HH:MM on 2026-04-18.
+function assertAt(actual: Date, expectedTime: string, label: string): void {
+  const expected = new Date(`2026-04-18T${expectedTime}:00`);
+  const TOLERANCE_MS = 10 * 60_000; // 10 virtual minutes — absorbs MQTT roundtrip jitter
+  assert.ok(
+    Math.abs(actual.getTime() - expected.getTime()) < TOLERANCE_MS,
+    `${label}: got ${localDateTimeString(actual)}, expected ~${expectedTime}`,
+  );
+}
+
+function assertBefore(actual: Date, expectedTime: string, label: string): void {
+  const expected = new Date(`2026-04-18T${expectedTime}:00`);
+  assert.ok(
+    actual < expected,
+    `${label}: got ${localDateTimeString(actual)}, expected before ${expectedTime}`,
+  );
+}
+
+
 
 const FROM = new Date("2026-04-18T10:00:00");
 const SPEEDUP = 10_000;
@@ -68,10 +85,6 @@ test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge s
   const clock = makeClock(SPEEDUP, FROM);
   const relay = new MqttRelaySimulator(relayClient, config.mqtt!, clock);
 
-  // MQTT message delivery adds ~50 ms real time ≈ 8 simulated minutes at 10 000× speedup.
-  // All time-based assertions use a 10-minute virtual tolerance to absorb this jitter.
-  const TOLERANCE_MS = 10 * 60_000;
-
   try {
     const loopPromise = runMainLoop(session, publisher, config, FROM, errorStatus, clock);
 
@@ -87,23 +100,9 @@ test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge s
     // Session completes (90 ms real for the 15-min slot), loop exits via justOnce.
     await loopPromise;
 
-    // First ON fires immediately at session start (~10:00), before any sleeping.
-    assert.ok(
-      t0.getTime() - new Date("2026-04-18T10:00:00").getTime() < TOLERANCE_MS,
-      `First ON at ${localDateTimeString(t0)}, expected ~10:00`,
-    );
-
-    // OFF fires after planning but before the charge slot starts at 11:45.
-    assert.ok(
-      t1 < new Date("2026-04-18T11:45:00"),
-      `OFF at ${localDateTimeString(t1)}, expected before 11:45`,
-    );
-
-    // Second ON fires when the plan's first charge slot begins at 11:45.
-    assert.ok(
-      Math.abs(t2.getTime() - new Date("2026-04-18T11:45:00").getTime()) < TOLERANCE_MS,
-      `Second ON at ${localDateTimeString(t2)}, expected ~11:45`,
-    );
+    assertAt(t0, "10:00", "First ON (session start)");
+    assertBefore(t1, "11:45", "OFF (gap before charge slot)");
+    assertAt(t2, "11:45", "Second ON (charge slot start)");
   } finally {
     relay.cleanup();
     sessionClient.end();
