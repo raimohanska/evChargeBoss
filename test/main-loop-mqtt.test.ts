@@ -21,32 +21,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "../src/config.ts";
-import type { Config } from "../src/config.ts";
-import { connectMqtt, makeMqttSession } from "../src/mqtt-client.ts";
-import { createPublisher } from "../src/mqtt-status.ts";
-import { makeClock } from "../src/utils.ts";
-import { runMainLoop, parseTargetTime } from "../src/main-loop.ts";
-import { IncompleteDataError } from "../src/errors.ts";
-import { STATUS } from "../src/mqtt-status.ts";
+import { parseTargetTime } from "../src/main-loop.ts";
 import { plan } from "../src/planner.ts";
-import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
+import { FROM, SPEEDUP, makeTestConfig } from "./helpers/config.ts";
+import { startMqttSession } from "./helpers/mqtt-session.ts";
 
-
-
-const FROM = new Date("2026-04-18T17:00:00");
-const SPEEDUP = 10_000;
-
-function makeTestConfig(): Config {
-  const base = loadConfig();
-  return {
-    ...base,
-    mode: "charge" as const,
-    mqtt: { ...base.mqtt!, brokerUrl: "mqtt://localhost:1883" },
-    charging: { ...base.charging, targetKwh: 5 },
-    test: { timeSpeedupFactor: SPEEDUP, justOnce: true },
-  };
-}
+process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
+process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
 
 test("Plan for the 17:00 session: 7 solar-free charge slots 10:00–11:45 next day", async () => {
   const config = makeTestConfig();
@@ -65,41 +46,6 @@ test("Plan for the 17:00 session: 7 solar-free charge slots 10:00–11:45 next d
   assert.equal(last.end.getMinutes(), 45, "last slot ends at 11:45");
   assert.ok(chargeSlots.every(s => s.effectiveCostEur === 0), "all slots solar-free: zero cost");
 });
-
-function errorStatus(err: unknown): string {
-  if (err instanceof IncompleteDataError) return STATUS.waitingForSpot;
-  return STATUS.error(err instanceof Error ? err.message : String(err));
-}
-
-interface MqttTestSession {
-  loopPromise: Promise<void>;
-  relay: MqttRelaySimulator;
-  teardown(): void;
-}
-
-async function startMqttSession(config: Config, from: Date, speedup: number): Promise<MqttTestSession> {
-  const [sessionClient, relayClient] = await Promise.all([
-    connectMqtt(config.mqtt!),
-    connectMqtt(config.mqtt!),
-  ]);
-
-  const publisher = createPublisher(config);
-  const session = makeMqttSession(sessionClient, config.mqtt!, publisher);
-  const clock = makeClock(speedup, from);
-  const relay = new MqttRelaySimulator(relayClient, config.mqtt!, clock);
-
-  const loopPromise = runMainLoop(session, publisher, config, from, errorStatus, clock);
-
-  return {
-    loopPromise,
-    relay,
-    teardown() {
-      relay.cleanup();
-      sessionClient.end();
-      relayClient.end();
-    },
-  };
-}
 
 test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge session", async () => {
   const { loopPromise, relay, teardown } = await startMqttSession(makeTestConfig(), FROM, SPEEDUP);

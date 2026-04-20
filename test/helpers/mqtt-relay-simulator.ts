@@ -1,7 +1,7 @@
-import type { MqttClient } from "../src/mqtt-client.ts";
-import type { MqttConfig } from "../src/config.ts";
-import type { Clock } from "../src/utils.ts";
-import { realClock, localDateTimeString } from "../src/utils.ts";
+import type { MqttClient } from "../../src/mqtt-client.ts";
+import type { MqttConfig } from "../../src/config.ts";
+import type { Clock } from "../../src/utils.ts";
+import { realClock, localDateTimeString } from "../../src/utils.ts";
 import assert from "node:assert/strict";
 
 // 10 virtual minutes — absorbs MQTT roundtrip jitter at high speedup factors
