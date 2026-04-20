@@ -40,6 +40,7 @@ const ConfigSchema = z.strictObject({
 
 export type Mode = z.infer<typeof ModeSchema>;
 export type Config = z.infer<typeof ConfigSchema>;
+export type MqttConfig = NonNullable<Config['mqtt']>;
 
 function getConfigPath(): string {
   if (process.env.CONFIG_FILE) return process.env.CONFIG_FILE;
@@ -56,7 +57,7 @@ function getConfigPath(): string {
   return "config-example.json";
 }
 
-function loadConfig(): Config {
+export function loadConfig(): Config {
   const path = getConfigPath();
   let raw: unknown;
   try {
@@ -79,4 +80,3 @@ function loadConfig(): Config {
   process.exit(1);
 }
 
-export const CONFIG: Config = loadConfig();

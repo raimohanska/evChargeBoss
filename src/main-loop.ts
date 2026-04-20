@@ -1,11 +1,17 @@
-import { CONFIG } from "./config.ts";
+import type { Config } from "./config.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { runCharging } from "./charger.ts";
-import { getTargetTime, STATUS } from "./mqtt-status.ts";
+import { STATUS } from "./mqtt-status.ts";
 import type { Publisher } from "./mqtt-status.ts";
 import { Canceller, localTimeShort, log, sleep } from "./utils.ts";
 import type { ChargingSession } from "./charger.ts";
+
+export interface SessionState {
+  chargedKwh: number;
+  replanController: Canceller;
+  planFrom: Date | undefined;
+}
 
 export function parseTargetTime(timeStr: string, from: Date): Date {
   const [h, m] = timeStr.split(":").map(Number);
@@ -21,40 +27,46 @@ export function parseTargetTime(timeStr: string, from: Date): Date {
 export async function runMainLoop(
   session: ChargingSession,
   publisher: Publisher,
+  config: Config,
   initialFrom: Date | undefined,
   errorStatus: (err: unknown) => string,
 ): Promise<never> {
-  // replanController is replaced each inner-loop iteration; the callback always aborts the current one.
-  let replanController = new Canceller();
-  publisher.setReplanCallback(() => replanController.abort());
+  const state: SessionState = {
+    chargedKwh: 0,
+    replanController: new Canceller(),
+    planFrom: initialFrom,
+  };
 
-  let from = initialFrom;
+  // The callback always aborts whichever controller is current; state.replanController
+  // is replaced each inner-loop iteration so this closure always points to the latest one.
+  publisher.setReplanCallback(() => state.replanController.abort());
+
   while (true) {
-    if (from) log(`Planning from ${from.toISOString()}`);
+    if (state.planFrom) log(`Planning from ${state.planFrom.toISOString()}`);
     try {
       publisher.setStatus(STATUS.waitingForCar);
       await session.waitForStart();
 
-      let chargedKwh = 0;
-      let planFrom = from;
-      from = undefined;
+      state.chargedKwh = 0;
+      let planFrom = state.planFrom;
+      state.planFrom = undefined;
 
       // Inner loop: re-plan whenever the target time changes mid-session.
       while (true) {
-        const remainingKwh = Math.max(0, CONFIG.charging.targetKwh - chargedKwh);
+        const remainingKwh = Math.max(0, config.charging.targetKwh - state.chargedKwh);
         if (remainingKwh === 0) { log("Target kWh already reached."); break; }
 
         publisher.setStatus(STATUS.fetchingData);
-        replanController = new Canceller();
+        state.replanController = new Canceller();
 
-        const targetTimeStr = getTargetTime();
+        const targetTimeStr = publisher.getTargetTimeOverride() ?? config.charging.targetTime;
         const planFrom_ = planFrom ?? new Date();
         const targetDate = parseTargetTime(targetTimeStr, planFrom_);
 
-        const slots = await plan(planFrom_, targetDate, remainingKwh);
+        const slots = await plan(planFrom_, targetDate, remainingKwh, config);
         planFrom = undefined;
 
-        if (replanController.signal.aborted) {
+        if (state.replanController.signal.aborted) {
           log("Target time changed during planning — re-planning.");
           continue;
         }
@@ -66,14 +78,17 @@ export async function runMainLoop(
           ? STATUS.plannedChargeStart(localTimeShort(firstCharge.start))
           : STATUS.idle);
 
-        const newlyCharged = await runCharging(slots, session.driver, publisher, replanController.signal, session.wattsSource, chargedKwh);
-        chargedKwh += newlyCharged;
+        const newlyCharged = await runCharging(
+          slots, session.driver, publisher, state.replanController.signal, session.wattsSource,
+          state.chargedKwh, config.mqtt?.powerThresholdW ?? 10, config.charging.powerKw,
+        );
+        state.chargedKwh += newlyCharged;
 
-        if (!replanController.signal.aborted) {
+        if (!state.replanController.signal.aborted) {
           publisher.resetTargetTime();
           break; // session complete
         }
-        log(`Target time changed — re-planning with ${(CONFIG.charging.targetKwh - chargedKwh).toFixed(2)} kWh remaining.`);
+        log(`Target time changed — re-planning with ${(config.charging.targetKwh - state.chargedKwh).toFixed(2)} kWh remaining.`);
       }
 
       publisher.setStatus(STATUS.idle);

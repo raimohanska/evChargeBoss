@@ -1,15 +1,7 @@
 import type { MqttClient } from "./mqtt-client.ts";
-import { getOrCreateMqttClient } from "./mqtt-client.ts";
-import { CONFIG } from "./config.ts";
+import type { Config } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { log } from "./utils.ts";
-
-let targetTimeOverride: string | null = null;
-
-/** Returns the active target charge time (HA override if set, otherwise config). */
-export function getTargetTime(): string {
-  return targetTimeOverride ?? CONFIG.charging.targetTime;
-}
 
 // All possible status values. Static states are plain strings; dynamic ones are functions.
 export const STATUS = {
@@ -32,6 +24,7 @@ export const STATUS = {
 export interface Publisher {
   setReplanCallback(cb: () => void): void;
   resetTargetTime(): void;
+  getTargetTimeOverride(): string | null;
   setStatus(status: string): void;
   setError(message: string): void;
   setPlan(slots: Slot[]): void;
@@ -67,15 +60,13 @@ function discoveryTopic(id: string) { return `${DISCOVERY}/sensor/${DEVICE_ID}_$
 
 export class StatusPublisher implements Publisher {
   private client: MqttClient;
+  private config: Config;
+  private targetTimeOverride: string | null = null;
 
-  constructor(client: MqttClient) {
+  constructor(client: MqttClient, config: Config) {
     this.client = client;
+    this.config = config;
     this.initializeDiscovery();
-  }
-
-  static async create(): Promise<StatusPublisher> {
-    const client = await getOrCreateMqttClient();
-    return new StatusPublisher(client);
   }
 
   private replanCallback: (() => void) | null = null;
@@ -84,9 +75,13 @@ export class StatusPublisher implements Publisher {
     this.replanCallback = cb;
   }
 
+  getTargetTimeOverride(): string | null {
+    return this.targetTimeOverride;
+  }
+
   resetTargetTime(): void {
-    targetTimeOverride = null;
-    this.pub(`${BASE}/target_time/state`, getTargetTime());
+    this.targetTimeOverride = null;
+    this.pub(`${BASE}/target_time/state`, this.config.charging.targetTime);
   }
 
   private state: Record<string, string> = {
@@ -132,7 +127,7 @@ export class StatusPublisher implements Publisher {
     // Remove any previously-retained `time` discovery (old entity type, now replaced by `text`)
     this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time/config`, "", true);
     this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
-    this.pub(timeStateTopic, getTargetTime());
+    this.pub(timeStateTopic, this.targetTimeOverride ?? this.config.charging.targetTime);
 
     this.client.subscribe(timeCmdTopic, (err) => {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
@@ -142,7 +137,7 @@ export class StatusPublisher implements Publisher {
       const parts = payload.toString().trim().split(":");
       if (parts.length < 2) return;
       const newTime = `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
-      targetTimeOverride = newTime;
+      this.targetTimeOverride = newTime;
       log(`[MQTT] Target time updated to ${newTime}`);
       this.pub(timeStateTopic, newTime);
       this.replanCallback?.();
@@ -170,7 +165,7 @@ export class StatusPublisher implements Publisher {
     const charge = slots.filter(s => s.charge);
     const cost   = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
     const totalSolarFraction = charge.reduce(
-      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / CONFIG.charging.powerKw), 0);
+      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / this.config.charging.powerKw), 0);
     const pct = charge.length > 0 ? Math.round(totalSolarFraction / charge.length * 100) : 0;
     this.setState("plan_cost", cost.toFixed(2));
     this.setState("solar_pct", String(pct));
@@ -194,15 +189,25 @@ export class StatusPublisher implements Publisher {
 }
 
 export class LoggingPublisher implements Publisher {
+  private config: Config;
+  private targetTimeOverride: string | null = null;
   private replanCallback: (() => void) | null = null;
+
+  constructor(config: Config) {
+    this.config = config;
+  }
 
   setReplanCallback(cb: () => void): void {
     this.replanCallback = cb;
   }
 
+  getTargetTimeOverride(): string | null {
+    return this.targetTimeOverride;
+  }
+
   resetTargetTime(): void {
-    targetTimeOverride = null;
-    log(`[Publisher] Target time reset to ${getTargetTime()}`);
+    this.targetTimeOverride = null;
+    log(`[Publisher] Target time reset to ${this.config.charging.targetTime}`);
   }
 
   setStatus(status: string): void {
@@ -217,7 +222,7 @@ export class LoggingPublisher implements Publisher {
     const charge = slots.filter(s => s.charge);
     const cost   = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
     const totalSolarFraction = charge.reduce(
-      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / CONFIG.charging.powerKw), 0);
+      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / this.config.charging.powerKw), 0);
     const pct = charge.length > 0 ? Math.round(totalSolarFraction / charge.length * 100) : 0;
     log(`[Plan] Cost: €${cost.toFixed(2)}, Solar: ${pct}%`);
   }
@@ -227,15 +232,7 @@ export class LoggingPublisher implements Publisher {
   }
 }
 
-export async function createPublisher(mqttRequired: boolean): Promise<Publisher> {
-  if (CONFIG.mqtt) {
-    try {
-      return await StatusPublisher.create();
-    } catch (err) {
-      if (mqttRequired) throw err;
-      const msg = err instanceof Error ? err.message : String(err);
-      log(`MQTT unavailable, using logging publisher: ${msg}`);
-    }
-  }
-  return new LoggingPublisher();
+export function createPublisher(config: Config, client?: MqttClient): Publisher {
+  if (client) return new StatusPublisher(client, config);
+  return new LoggingPublisher(config);
 }

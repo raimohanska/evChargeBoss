@@ -1,4 +1,4 @@
-import { CONFIG } from "./config.ts";
+import type { Config } from "./config.ts";
 import { readCache, writeCache } from "./cache.ts";
 import { log, localDateString, localDateTimeString } from "./utils.ts";
 import { fetchSolarForecastOpenMeteo } from "./solar-openmeteo.ts";
@@ -10,18 +10,18 @@ interface ForecastSolarResult {
   watt_hours_period: Record<string, number>;
 }
 
-export async function fetchSolarForecast(dates: string[]): Promise<Map<number, number>> {
+export async function fetchSolarForecast(dates: string[], solarConfig: Config['solar']): Promise<Map<number, number>> {
   const missingDates = dates.filter((d) => readCache(`${CACHE_DIR}/.solar-cache-${d}.json`) === null);
 
   if (missingDates.length > 0) {
     log(`Fetching solar forecast... (missing: ${missingDates.join(", ")})`);
-    const { lat, lon, declination, azimuth, kwp } = CONFIG.solar;
+    const { lat, lon, declination, azimuth, kwp } = solarConfig;
     const url = `https://api.forecast.solar/estimate/${lat}/${lon}/${declination}/${azimuth}/${kwp}`;
     log("Fetching solar forecast from " + url);
     const res = await fetch(url);
     if (!res.ok) {
       log(`  forecast.solar HTTP ${res.status} — falling back to Open-Meteo`);
-      return fetchSolarForecastOpenMeteo();
+      return fetchSolarForecastOpenMeteo(solarConfig);
     }
     const json = (await res.json()) as { result: ForecastSolarResult };
     const map = new Map<number, number>();

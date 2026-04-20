@@ -1,4 +1,4 @@
-import { CONFIG } from "./config.ts";
+import type { Config } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
 import { fetchSolarForecast, persistSolarCache } from "./solar.ts";
@@ -30,8 +30,7 @@ function slotsBetween(from: Date, to: Date): Date[] {
   return slots;
 }
 
-function treeShadingFactor(date: Date): number {
-  const schedule = CONFIG.solar.treeShadingSchedule;
+function treeShadingFactor(date: Date, schedule: Config['solar']['treeShadingSchedule']): number {
   const minutesOfDay = date.getHours() * 60 + date.getMinutes();
   const points = schedule.map(({ time, outputFraction }) => {
     const [h, m] = time.split(":").map(Number);
@@ -56,6 +55,7 @@ export async function plan(
   from: Date,
   targetTime: Date,
   targetKwh: number,
+  config: Config,
 ): Promise<Slot[]> {
   const now = from;
   const target = targetTime;
@@ -66,7 +66,7 @@ export async function plan(
   const dates = datesInRange(now, target);
   const [spotMap, solarMap] = await Promise.all([
     fetchSpotPrices(dates),
-    fetchSolarForecast(dates),
+    fetchSolarForecast(dates, config.solar),
   ]);
 
   const missingSpot = slotStarts.filter((s) => !spotMap.has(s.getTime()));
@@ -85,6 +85,7 @@ export async function plan(
   if (missingSolar > 0) log(`  ${missingSolar} solar slots without exact match — using nearest preceding value`);
   persistSolarCache(solarMap);
 
+  const { powerKw } = config.charging;
   const slots: Slot[] = slotStarts.map((start) => {
     const end = new Date(start.getTime() + 15 * 60 * 1000);
     const epoch = start.getTime();
@@ -93,11 +94,11 @@ export async function plan(
     const rawSolarW = solarMap.get(epoch)
       ?? solarMap.get([...solarEpochs].reverse().find((k) => k <= epoch) ?? -1)
       ?? 0;
-    const solarForecastW = rawSolarW * treeShadingFactor(start);
-    const transportCostEurPerKwh = CONFIG.electricity.transportCostEurKwh;
+    const solarForecastW = rawSolarW * treeShadingFactor(start, config.solar.treeShadingSchedule);
+    const transportCostEurPerKwh = config.electricity.transportCostEurKwh;
 
     // Fraction of charger power not covered by solar (clamped to [0, 1])
-    const gridFraction = Math.max(0, CONFIG.charging.powerKw - solarForecastW / 1000) / CONFIG.charging.powerKw;
+    const gridFraction = Math.max(0, powerKw - solarForecastW / 1000) / powerKw;
 
     return {
       start,
@@ -105,13 +106,12 @@ export async function plan(
       spotPriceEurPerKwh,
       transportCostEurPerKwh,
       solarForecastW,
-      effectiveCostEur: gridFraction * (spotPriceEurPerKwh + transportCostEurPerKwh) * CONFIG.charging.powerKw * 0.25,
+      effectiveCostEur: gridFraction * (spotPriceEurPerKwh + transportCostEurPerKwh) * powerKw * 0.25,
       charge: false,
     };
   });
 
   // Select cheapest N slots
-  const { powerKw } = CONFIG.charging;
   const slotsNeeded = Math.ceil(targetKwh / (powerKw * 0.25)); // 0.25h per slot
   log(`Need ${slotsNeeded} slots to deliver ${targetKwh} kWh at ${powerKw} kW`);
 

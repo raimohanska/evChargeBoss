@@ -64,15 +64,17 @@
 //   }
 //
 // The NOUS D3Z DIN-rail relay (25A, Zigbee) via Zigbee2MQTT is the intended
-// hardware target for the charger topic. It also provides energy monitoring,
-// which can be used to verify actual vs. planned charging and tune the plan.
+// hardware target for the charger topic. Add new modes (timer, webhook, etc.)
+// by implementing ChargingSession. The main loop in src/main-loop.ts does not
+// need to change.
 
-import { CONFIG } from "./config.ts";
+import { loadConfig } from "./config.ts";
 import { IncompleteDataError } from "./errors.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./printer.ts";
 import { makeSimulateSession } from "./charger.ts";
-import { makeMqttSession } from "./mqtt-client.ts";
+import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
+import type { MqttClient } from "./mqtt-client.ts";
 import { STATUS, createPublisher } from "./mqtt-status.ts";
 import { log } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
@@ -93,28 +95,39 @@ function errorStatus(err: unknown): string {
 }
 
 async function main() {
-  const { mode, from: initialFrom } = parseArgs();
+  const config = loadConfig();
+  const { mode, from: initialFrom } = parseArgs(config.mode);
 
   const modeLabel = mode === "charge" ? "charging" : mode;
   log(`=== EV Charger Planner [${modeLabel}] ===`);
 
   if (mode === "plan") {
-    const targetTimeStr = CONFIG.charging.targetTime;
+    const targetTimeStr = config.charging.targetTime;
     const now = initialFrom ?? new Date();
     const targetDate = parseTargetTime(targetTimeStr, now);
-    const slots = await plan(now, targetDate, CONFIG.charging.targetKwh);
+    const slots = await plan(now, targetDate, config.charging.targetKwh, config);
     printPlan(slots);
     return;
   }
 
-  // Create publisher: StatusPublisher (with async MQTT init) or LoggingPublisher
-  const publisher = await createPublisher(mode === "charge");
+  // Connect to MQTT if configured (shared client for publisher + session)
+  let mqttClient: MqttClient | undefined;
+  if (config.mqtt) {
+    try {
+      mqttClient = await connectMqtt(config.mqtt);
+    } catch (err) {
+      if (mode === "charge") throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`MQTT unavailable, using logging publisher: ${msg}`);
+    }
+  }
 
-  // Create session
-  const session = mode === "simulate" ? makeSimulateSession() : await makeMqttSession(publisher);
+  const publisher = createPublisher(config, mqttClient);
+  const session = mode === "simulate"
+    ? makeSimulateSession()
+    : makeMqttSession(mqttClient!, config.mqtt!, publisher);
 
-  // Run main loop
-  await runMainLoop(session, publisher, initialFrom, errorStatus);
+  await runMainLoop(session, publisher, config, initialFrom, errorStatus);
 }
 
 main().catch((err) => {

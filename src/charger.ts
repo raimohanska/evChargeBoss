@@ -1,7 +1,6 @@
 import type { Slot } from "./types.ts";
 import { STATUS } from "./mqtt-status.ts";
 import type { Publisher } from "./mqtt-status.ts";
-import { CONFIG } from "./config.ts";
 import type { CancelSignal } from "./utils.ts";
 import { log, localTimeShort, sleepAbortable } from "./utils.ts";
 
@@ -101,6 +100,8 @@ export async function runCharging(
   signal?: CancelSignal,
   wattsSource?: WattsSource,
   prevChargedKwh = 0,
+  powerThresholdW = 10,
+  powerKw = 0,
 ): Promise<number> {
   const now = new Date();
   const upcoming = slots.filter((s) => s.end > now);
@@ -121,7 +122,6 @@ export async function runCharging(
   if (signal?.aborted) return 0;
 
   // Watts-based status + energy tracking
-  const threshold = CONFIG.mqtt?.powerThresholdW ?? 10;
   let activeRunEnd: Date | null = null;  // non-null only while in a charge slot
   let chargeRunActive = false;           // true once watts seen in current charge run
   let startEnergy: number | null = null; // relay energy reading at this run's start
@@ -136,7 +136,7 @@ export async function runCharging(
     }
     // Status tracking
     if (activeRunEnd === null || !publisher) return;
-    if (watts > threshold) {
+    if (watts > powerThresholdW) {
       chargeRunActive = true;
       publisher.setStatus(STATUS.charging(localTimeShort(activeRunEnd)));
     } else if (chargeRunActive) {
@@ -202,5 +202,5 @@ export async function runCharging(
   if (startEnergy !== null && lastEnergy !== null) {
     return lastEnergy - startEnergy;
   }
-  return completedChargeSlots * CONFIG.charging.powerKw * 0.25;
+  return completedChargeSlots * powerKw * 0.25;
 }

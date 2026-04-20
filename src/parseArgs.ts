@@ -1,11 +1,11 @@
-import { CONFIG, type Mode } from "./config.ts";
+import type { Mode } from "./config.ts";
 
 // Flags:
 //   --config <path>   config file (default: config.json)  — consumed by config.ts at import time
 //   --plan            plan once, print, and exit
 //   --simulate        full charge loop with console output instead of MQTT
 //   --from <date>     start planning from a past date (e.g. 2026-04-18T08:00)
-export function parseArgs(): { mode: Mode; from?: Date; } {
+export function parseArgs(defaultMode: Mode): { mode: Mode; from?: Date; } {
   const argv = process.argv.slice(2);
 
   const fromIdx = argv.indexOf("--from");
@@ -17,7 +17,7 @@ export function parseArgs(): { mode: Mode; from?: Date; } {
     if (isNaN(from.getTime())) throw new Error(`--from: invalid date "${raw}"`);
   }
 
-  let mode: Mode = CONFIG.mode
+  let mode: Mode = defaultMode;
   if (argv.includes("--plan")) mode = "plan";
   else if (argv.includes("--simulate")) mode = "simulate";
 
