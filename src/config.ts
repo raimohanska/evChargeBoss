@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { z } from 'zod';
 
-const ModeSchema = z.enum(['charge', 'plan', 'simulate']);
+const ModeSchema = z.enum(['charge', 'plan']);
 
 const ConfigSchema = z.strictObject({
   mode: ModeSchema,

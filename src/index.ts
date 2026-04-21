@@ -72,7 +72,6 @@ import { loadConfig } from './config.ts';
 import { IncompleteDataError } from './errors.ts';
 import { plan } from './planner.ts';
 import { printPlan } from './printer.ts';
-import { makeSimulateSession } from './charger.ts';
 import { connectMqtt, makeMqttSession } from './mqtt-client.ts';
 import type { MqttClient } from './mqtt-client.ts';
 import { STATUS, createPublisher } from './mqtt-status.ts';
@@ -132,10 +131,7 @@ async function main() {
   }
 
   const publisher = createPublisher(config, mqttClient);
-  const session =
-    mode === 'simulate'
-      ? makeSimulateSession()
-      : makeMqttSession(mqttClient!, config.mqtt!, publisher);
+  const session = makeMqttSession(mqttClient!, config.mqtt!, publisher);
 
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
   await runMainLoop(

@@ -33,7 +33,6 @@ node --experimental-strip-types src/index.ts
 | Flag | Behaviour |
 |------|-----------|
 | *(none)* | **Charge mode** — connects to MQTT, waits for car plug-in detection (power > threshold), plans, then controls the relay. Loops forever. |
-| `--simulate` | Same loop as charge mode but uses console output instead of MQTT. Useful for testing without hardware. |
 | `--plan` | Fetch data, print the plan, exit. No charging. |
 
 All modes accept:

@@ -52,14 +52,18 @@ describe("main-loop MQTT integration", { concurrency: false }, () => {
       SPEEDUP,
     );
     try {
-      await relay.assertOn("2026-04-18T17:00"); // session start
-      await relay.assertOff("2026-04-19T10:00"); // sleeping through the overnight gap
+      await relay.assertOn("2026-04-18T17:00"); // session start — plug-in detected
 
-      publishTargetTime("21:00"); // trigger replan — deadline moves to tonight
+      // The first plan puts all charging at 10:00 next day, so the relay turns off
+      // almost immediately and the loop goes to sleep for the overnight gap.
+      await relay.assertOff("2026-04-18T17:30"); // off within half an hour of start
 
-      // Replan finds evening slots starting at 17:00 (already past), so charging
-      // restarts immediately — well before the original next-day slot.
-      await relay.assertOnBefore("2026-04-19T00:00");
+      // Change the deadline to 21:00 tonight while the loop is still in the
+      // overnight sleep.  The replan callback fires, aborts the sleep, and the
+      // loop picks evening slots starting at 17:00 (already past), so charging
+      // restarts immediately.
+      publishTargetTime("21:00");
+      await relay.assertOnBefore("2026-04-19T00:00"); // back on the same evening
 
       await loopPromise;
     } finally {
@@ -100,6 +104,9 @@ describe("main-loop MQTT integration", { concurrency: false }, () => {
       await advanceToSolarWindow(relay);
       publishTargetTime("14:00"); // extend deadline while the 10:00 slot is running
       await relay.assertOff("2026-04-19T10:15"); // slot aborted before natural end
+      // After replanning with the extended deadline the loop picks new slots and
+      // immediately resumes charging — relay turns back ON within the same window.
+      await relay.assertOnBefore("2026-04-19T10:30");
       await loopPromise;
     } finally {
       teardown();
