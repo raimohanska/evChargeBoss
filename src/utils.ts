@@ -1,27 +1,26 @@
 export const IS_TTY = process.stdout.isTTY === true;
 
-export const log = (msg: string) =>
-  console.log(`[${new Date().toISOString()}] ${msg}`);
+export const log = (msg: string) => console.log(`[${new Date().toISOString()}] ${msg}`);
 
 /** Format a Date as YYYY-MM-DD in local time, without relying on Intl/locale data. */
 export function localDateString(d: Date): string {
   const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
 /** Format a Date as YYYY-MM-DDTHH:MM:SS in local time, without relying on Intl/locale data. */
 export function localDateTimeString(d: Date): string {
-  const h = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
-  const sec = String(d.getSeconds()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  const sec = String(d.getSeconds()).padStart(2, "0");
   return `${localDateString(d)}T${h}:${min}:${sec}`;
 }
 
 /** Format a Date as H:MM in local time (no leading zero on hour). */
 export function localTimeShort(d: Date): string {
-  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 export function assertNotNull<T>(value: T | undefined, label: string): T {
@@ -56,11 +55,11 @@ export class Canceller {
   }
 }
 
-export function sleep(ms: number, signal?: CancelSignal): Promise<void> {
+function sleep(ms: number, signal?: CancelSignal): Promise<void> {
   if (ms <= 0 || signal?.aborted) return Promise.resolve();
   return new Promise<void>((resolve) => {
     const t = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => {
+    signal?.addEventListener("abort", () => {
       clearTimeout(t);
       resolve();
     });
@@ -85,8 +84,7 @@ export function makeClock(speedupFactor = 1, startTime?: Date): Clock {
   const realStart = Date.now();
   const virtualStart = startTime?.getTime() ?? Date.now();
   return {
-    now: () =>
-      new Date(virtualStart + (Date.now() - realStart) * speedupFactor),
+    now: () => new Date(virtualStart + (Date.now() - realStart) * speedupFactor),
     sleep: (ms, signal) => sleep(Math.ceil(ms / speedupFactor), signal),
   };
 }

@@ -68,32 +68,27 @@
 // by implementing ChargingSession. The main loop in src/main-loop.ts does not
 // need to change.
 
-import { loadConfig } from './config.ts';
-import { IncompleteDataError } from './errors.ts';
-import { plan } from './planner.ts';
-import { printPlan } from './printer.ts';
-import { connectMqtt, makeMqttSession } from './mqtt-client.ts';
-import type { MqttClient } from './mqtt-client.ts';
-import { STATUS, createPublisher } from './mqtt-status.ts';
-import { log, makeClock } from './utils.ts';
-import { parseArgs } from './parseArgs.ts';
-import { runMainLoop, parseTargetTime } from './main-loop.ts';
+import { loadConfig } from "./config.ts";
+import { IncompleteDataError } from "./errors.ts";
+import { plan } from "./planner.ts";
+import { printPlan } from "./printer.ts";
+import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
+import { STATUS, createPublisher } from "./mqtt-status.ts";
+import { log, makeClock } from "./utils.ts";
+import { parseArgs } from "./parseArgs.ts";
+import { runMainLoop, parseTargetTime } from "./main-loop.ts";
 
 function errorStatus(err: unknown): string {
   if (err instanceof IncompleteDataError) {
     const m = err.message;
-    if (m.includes('spot price')) return STATUS.waitingForSpot;
-    if (m.includes('solar')) return STATUS.waitingForSolar;
+    if (m.includes("spot price")) return STATUS.waitingForSpot;
+    if (m.includes("solar")) return STATUS.waitingForSolar;
   }
   const msg = err instanceof Error ? err.message : String(err);
-  if (msg.includes('spot-hinta')) return STATUS.waitingForSpot;
-  if (
-    msg.includes('solar') ||
-    msg.includes('open-meteo') ||
-    msg.includes('forecast.solar')
-  )
+  if (msg.includes("spot-hinta")) return STATUS.waitingForSpot;
+  if (msg.includes("solar") || msg.includes("open-meteo") || msg.includes("forecast.solar"))
     return STATUS.waitingForSolar;
-  if (msg.toLowerCase().includes('mqtt')) return STATUS.mqttError;
+  if (msg.toLowerCase().includes("mqtt")) return STATUS.mqttError;
   return STATUS.error(msg);
 }
 
@@ -101,47 +96,30 @@ async function main() {
   const config = loadConfig();
   const { mode, from: initialFrom } = parseArgs(config.mode);
 
-  const modeLabel = mode === 'charge' ? 'charging' : mode;
+  const modeLabel = mode === "charge" ? "charging" : mode;
   log(`=== EV Charger Planner [${modeLabel}] ===`);
 
-  if (mode === 'plan') {
+  if (mode === "plan") {
     const targetTimeStr = config.charging.targetTime;
     const now = initialFrom ?? new Date();
     const targetDate = parseTargetTime(targetTimeStr, now);
-    const slots = await plan(
-      now,
-      targetDate,
-      config.charging.targetKwh,
-      config,
-    );
+    const slots = await plan(now, targetDate, config.charging.targetKwh, config);
     printPlan(slots);
     return;
   }
 
-  // Connect to MQTT if configured (shared client for publisher + session)
-  let mqttClient: MqttClient | undefined;
-  if (config.mqtt) {
-    try {
-      mqttClient = await connectMqtt(config.mqtt);
-    } catch (err) {
-      if (mode === 'charge') throw err;
-      const msg = err instanceof Error ? err.message : String(err);
-      log(`MQTT unavailable, using logging publisher: ${msg}`);
-    }
+  if (!config.mqtt) {
+    console.error("ERROR: charge mode requires mqtt to be configured in config.json");
+    process.exit(1);
   }
 
+  // Connect to MQTT broker
+  const mqttClient = await connectMqtt(config.mqtt);
   const publisher = createPublisher(config, mqttClient);
-  const session = makeMqttSession(mqttClient!, config.mqtt!, publisher);
+  const session = makeMqttSession(mqttClient, config.mqtt, publisher);
 
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
-  await runMainLoop(
-    session,
-    publisher,
-    config,
-    initialFrom,
-    errorStatus,
-    clock,
-  );
+  await runMainLoop(session, publisher, config, initialFrom, errorStatus, clock);
 }
 
 main().catch((err) => {

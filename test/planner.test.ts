@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { plan } from "../src/planner.ts";
 import { localDateTimeString } from "../src/utils.ts";
 import { loadConfig } from "../src/config.ts";
+import { parseTargetTime } from "../src/main-loop.ts";
 
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
@@ -12,17 +13,6 @@ process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 // 12:00 has already passed, so target is next day → window: 2026-04-18T14:00 → 2026-04-19T12:00.
 const FROM = new Date("2026-04-18T14:00:00");
 const CONFIG = loadConfig();
-
-function parseTargetTime(timeStr: string, from: Date): Date {
-  const [h, m] = timeStr.split(":").map(Number);
-  const today = new Date(from);
-  today.setHours(h, m, 0, 0);
-  if (today > from) return today;
-  const tomorrow = new Date(from);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(h, m, 0, 0);
-  return tomorrow;
-}
 
 const TARGET_TIME = parseTargetTime(CONFIG.charging.targetTime, FROM);
 const TARGET_KWH = CONFIG.charging.targetKwh;

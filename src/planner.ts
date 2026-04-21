@@ -1,9 +1,15 @@
-import type { Config } from './config.ts';
-import type { Slot } from './types.ts';
-import { fetchSpotPrices, persistSpotCache } from './spot.ts';
-import { fetchSolarForecast, persistSolarCache } from './solar.ts';
-import { log, assertNotNull, localDateString } from './utils.ts';
-import { IncompleteDataError } from './errors.ts';
+import type { Config } from "./config.ts";
+import type { Slot } from "./types.ts";
+import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
+import { fetchSolarForecast, persistSolarCache } from "./solar.ts";
+import {
+  log,
+  assertNotNull,
+  localDateString,
+  localTimeShort,
+  localDateTimeString,
+} from "./utils.ts";
+import { IncompleteDataError } from "./errors.ts";
 
 function datesInRange(from: Date, to: Date): string[] {
   const dates: string[] = [];
@@ -30,13 +36,10 @@ function slotsBetween(from: Date, to: Date): Date[] {
   return slots;
 }
 
-function treeShadingFactor(
-  date: Date,
-  schedule: Config['solar']['treeShadingSchedule'],
-): number {
+function treeShadingFactor(date: Date, schedule: Config["solar"]["treeShadingSchedule"]): number {
   const minutesOfDay = date.getHours() * 60 + date.getMinutes();
   const points = schedule.map(({ time, outputFraction }) => {
-    const [h, m] = time.split(':').map(Number);
+    const [h, m] = time.split(":").map(Number);
     return { minutes: h * 60 + m, outputFraction };
   });
 
@@ -66,7 +69,7 @@ export async function plan(
   const slotStarts = slotsBetween(now, target);
 
   log(
-    `Planning ${slotStarts.length} slots from ${now.toLocaleTimeString()} to ${target.toLocaleString()}`,
+    `Planning ${slotStarts.length} slots from ${localTimeShort(now)} to ${localDateTimeString(target)}`,
   );
 
   const dates = datesInRange(now, target);
@@ -84,16 +87,15 @@ export async function plan(
   }
   persistSpotCache(spotMap);
 
-  // Build a sorted list of solar epochs for nearest-preceding lookup
+  // Build a sorted list of solar epochs for nearest-preceding lookup.
+  // The reversed copy is also pre-built here so the .find() inside the
+  // per-slot map below does not allocate a new array for every slot.
   const solarEpochs = [...solarMap.keys()].sort((a, b) => a - b);
+  const solarEpochsReversed = [...solarEpochs].reverse();
 
-  const missingSolar = slotStarts.filter(
-    (s) => !solarMap.has(s.getTime()),
-  ).length;
+  const missingSolar = slotStarts.filter((s) => !solarMap.has(s.getTime())).length;
   if (missingSolar > 0)
-    log(
-      `  ${missingSolar} solar slots without exact match — using nearest preceding value`,
-    );
+    log(`  ${missingSolar} solar slots without exact match — using nearest preceding value`);
   persistSolarCache(solarMap);
 
   const { powerKw } = config.charging;
@@ -106,11 +108,8 @@ export async function plan(
       `spot price @ ${start.toISOString()}`,
     );
     const rawSolarW =
-      solarMap.get(epoch) ??
-      solarMap.get([...solarEpochs].reverse().find((k) => k <= epoch) ?? -1) ??
-      0;
-    const solarForecastW =
-      rawSolarW * treeShadingFactor(start, config.solar.treeShadingSchedule);
+      solarMap.get(epoch) ?? solarMap.get(solarEpochsReversed.find((k) => k <= epoch) ?? -1) ?? 0;
+    const solarForecastW = rawSolarW * treeShadingFactor(start, config.solar.treeShadingSchedule);
     const transportCostEurPerKwh = config.electricity.transportCostEurKwh;
 
     // Fraction of charger power not covered by solar (clamped to [0, 1])
@@ -123,10 +122,7 @@ export async function plan(
       transportCostEurPerKwh,
       solarForecastW,
       effectiveCostEur:
-        gridFraction *
-        (spotPriceEurPerKwh + transportCostEurPerKwh) *
-        powerKw *
-        0.25,
+        gridFraction * (spotPriceEurPerKwh + transportCostEurPerKwh) * powerKw * 0.25,
       charge: false,
     };
   });
@@ -136,13 +132,9 @@ export async function plan(
   log(`Need ${slotsNeeded} slots to deliver ${targetKwh} kWh at ${powerKw} kW`);
 
   const sorted = [...slots].sort(
-    (a, b) =>
-      a.effectiveCostEur - b.effectiveCostEur ||
-      a.start.getTime() - b.start.getTime(),
+    (a, b) => a.effectiveCostEur - b.effectiveCostEur || a.start.getTime() - b.start.getTime(),
   );
-  const selected = new Set(
-    sorted.slice(0, slotsNeeded).map((s) => s.start.getTime()),
-  );
+  const selected = new Set(sorted.slice(0, slotsNeeded).map((s) => s.start.getTime()));
   slots.forEach((s) => (s.charge = selected.has(s.start.getTime())));
 
   return slots;

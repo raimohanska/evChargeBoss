@@ -9,7 +9,7 @@ import { Canceller, localTimeShort, log, realClock } from "./utils.ts";
 import type { Clock } from "./utils.ts";
 import type { ChargingSession } from "./charger.ts";
 
-export interface SessionState {
+interface SessionState {
   readonly chargedKwh: number;
   readonly replanController: Canceller;
   readonly planFrom: Date | undefined;
