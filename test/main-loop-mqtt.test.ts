@@ -1,125 +1,65 @@
 /**
- * Integration test: main loop drives a real MQTT broker.
+ * Integration tests: main loop drives a real MQTT broker.
  *
  * Requires a Mosquitto broker on localhost:1883.
  * Start one with: docker compose up -d
  *
- * Scenario
- * --------
- * from = 2026-04-18T17:00, targetTime = "12:00" (next day), targetKwh = 5 (7 slots).
- * All 7 slots fall in the solar window 10:00–11:45 next day (solar-free, 0 €).
- * Because the charge slot is far in the future, runCharging sends:
+ * Base scenario (FROM=17:00, targetTime="12:00", targetKwh=5)
+ * -----------------------------------------------------------
+ * The planner selects 7 solar-free (0 €) slots at 10:00–11:45 on Apr 19
+ * (see planner.test.ts for the detailed assertion).  The relay therefore sees:
  *
- *   ON  ← waitForStart() announces the charger is ready and waits for plug-in
- *   OFF ← runCharging sleeps through the 17:00–10:00 gap with charger off
- *   ON  ← 10:00 (next day) charge slot starts
+ *   ON  (17:00) — waitForStart plug-in detection
+ *   OFF (17:00) — runCharging sleeps through the overnight gap
+ *   ON  (10:00) — solar-free charge slot begins
  *
- * A second test changes the target time to "21:00" mid-session.  The replan
- * finds the 7 cheapest evening slots (all starting tonight), so charging
- * restarts before midnight rather than waiting until next day.
- *
- * The MqttRelaySimulator sits on the charger topic, records every command, and
- * starts emitting power readings when it sees ON so waitForPlugIn resolves.
+ * advanceToSolarWindow() encodes this common three-step prelude used by most
+ * tests.  Tests that trigger a replan during the sleep skip the third step.
  */
 
-import { describe, test } from 'node:test';
-import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
-import { parseTargetTime } from '../src/main-loop.ts';
-import { plan } from '../src/planner.ts';
-import { FROM, SPEEDUP, makeTestConfig } from './helpers/config.ts';
-import { startMqttSession } from './helpers/mqtt-session.ts';
+import { describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
+import type { MqttRelaySimulator } from "./helpers/mqtt-relay-simulator.ts";
+import { FROM, SPEEDUP } from "./helpers/config.ts";
+import { startMqttSession } from "./helpers/mqtt-session.ts";
 
-process.env.CACHE_DIR = fileURLToPath(new URL('./fixtures', import.meta.url));
-process.env.CONFIG_FILE = fileURLToPath(
-  new URL('./fixtures/config.json', import.meta.url),
-);
+process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
+process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
+
+/** Consume the three relay commands that mark arrival at the 10:00 solar charge window. */
+async function advanceToSolarWindow(relay: MqttRelaySimulator): Promise<void> {
+  await relay.assertOn("2026-04-18T17:00"); // plug-in detection at session start
+  await relay.assertOff("2026-04-19T10:00"); // sleep through the overnight gap
+  await relay.assertOn("2026-04-19T10:00"); // solar-free slot begins charging
+}
 
 // Tests run sequentially: each MQTT session subscribes to the same topics, so
 // concurrent execution would cause relay simulators to receive each other's commands.
-describe('main-loop MQTT integration', { concurrency: false }, () => {
-  test('Plan for the 17:00 session: 7 solar-free charge slots 10:00–11:45 next day', async () => {
-    const config = makeTestConfig();
-    const targetDate = parseTargetTime(config.charging.targetTime, FROM);
-    const slots = await plan(
-      FROM,
-      targetDate,
-      config.charging.targetKwh,
-      config,
-    );
-
-    const chargeSlots = slots.filter((s) => s.charge);
-    assert.equal(chargeSlots.length, 7, '7 charge slots for 5 kWh at 3 kW');
-
-    const first = chargeSlots[0];
-    const last = chargeSlots[chargeSlots.length - 1];
-    assert.equal(
-      first.start.toISOString().slice(0, 10),
-      '2026-04-19',
-      'charge slots are next day',
-    );
-    assert.equal(first.start.getHours(), 10, 'first slot starts at 10:00');
-    assert.equal(first.start.getMinutes(), 0, 'first slot starts on the hour');
-    assert.equal(last.end.getHours(), 11, 'last slot ends at 11:45');
-    assert.equal(last.end.getMinutes(), 45, 'last slot ends at 11:45');
-    assert.ok(
-      chargeSlots.every((s) => s.effectiveCostEur === 0),
-      'all slots solar-free: zero cost',
-    );
-  });
-
-  test('Main loop with MQTT. Relay sees ON → OFF → ON during a single charge session', async () => {
-    const { loopPromise, relay, teardown } = await startMqttSession(
-      FROM,
-      SPEEDUP,
-    );
+describe("main-loop MQTT integration", { concurrency: false }, () => {
+  test("Relay sees ON → OFF → ON during a single charge session", async () => {
+    const { loopPromise, relay, teardown } = await startMqttSession(FROM, SPEEDUP);
     try {
-      await relay.assertOn('2026-04-18T17:00'); // waitForStart() fires immediately at session start
-      await relay.assertOff('2026-04-19T10:00'); // gap: charger off until the charge window
-      await relay.assertOn('2026-04-19T10:00'); // first charge slot begins
+      await advanceToSolarWindow(relay);
       await loopPromise; // 7 × 15-min slots complete (~630 ms real), loop exits via justOnce
     } finally {
       teardown();
     }
   });
 
-  test('Plan for target=21:00 tonight: 7 charge slots all starting this evening', async () => {
-    const config = makeTestConfig();
-    const targetDate = parseTargetTime('21:00', FROM);
-    const slots = await plan(
+  test("Changing target time earlier triggers replan and charges tonight instead of next day", async () => {
+    const { loopPromise, relay, publishTargetTime, teardown } = await startMqttSession(
       FROM,
-      targetDate,
-      config.charging.targetKwh,
-      config,
+      SPEEDUP,
     );
-
-    const chargeSlots = slots.filter((s) => s.charge);
-    assert.equal(chargeSlots.length, 7, '7 charge slots for 5 kWh at 3 kW');
-    assert.ok(
-      chargeSlots.every(
-        (s) => s.start.toISOString().slice(0, 10) === '2026-04-18',
-      ),
-      'all slots tonight',
-    );
-    assert.equal(
-      chargeSlots[0].start.getHours(),
-      17,
-      'earliest slot starts at 17:00 (session start)',
-    );
-  });
-
-  test('Changing target time earlier triggers replan and charges tonight instead of next day', async () => {
-    const { loopPromise, relay, publishTargetTime, teardown } =
-      await startMqttSession(FROM, SPEEDUP);
     try {
-      await relay.assertOn('2026-04-18T17:00'); // session start
-      await relay.assertOff('2026-04-19T10:00'); // initial plan: sleep until next day
+      await relay.assertOn("2026-04-18T17:00"); // session start
+      await relay.assertOff("2026-04-19T10:00"); // sleeping through the overnight gap
 
-      publishTargetTime('21:00'); // trigger replan — deadline moves to tonight
+      publishTargetTime("21:00"); // trigger replan — deadline moves to tonight
 
       // Replan finds evening slots starting at 17:00 (already past), so charging
       // restarts immediately — well before the original next-day slot.
-      await relay.assertOnBefore('2026-04-19T00:00');
+      await relay.assertOnBefore("2026-04-19T00:00");
 
       await loopPromise;
     } finally {
@@ -127,53 +67,39 @@ describe('main-loop MQTT integration', { concurrency: false }, () => {
     }
   });
 
-  // ---------- mid-slot abort scenarios ----------
+  // ── mid-slot abort tests ─────────────────────────────────────────────────────
   //
-  // Both tests wait for charging to actually start at the solar window (10:00 next day),
-  // then call publishTargetTime() while the charge slot is running.  The slot is
-  // aborted (relay sees OFF before the slot's natural end at 10:15) and the session
-  // replans with the new target.
+  // Both tests advance to the solar window, then call publishTargetTime() while
+  // the 10:00 slot is actively running.  The slot is aborted (relay sees OFF
+  // before the natural 10:15 end) and the session replans with the new target.
   //
-  // Using the 17-hour sleep gap (FROM=17:00 → charge at 10:00) keeps the assertion
-  // windows reliable: at SPEEDUP=10000 a single MQTT roundtrip advances virtual
-  // time by ~70 s, so a 15-minute slot window is comfortably large enough.
+  // A single MQTT roundtrip advances virtual time by ~70 s at 10 000× speedup,
+  // so assertOff("10:15") provides a comfortable 14-minute margin.
 
-  test('Mid-slot abort with earlier target: session replans and charges again immediately', async () => {
-    // publishTargetTime("10:45") shrinks the remaining window; the 10:00–10:45 solar
-    // slots are all 0 € so charging restarts immediately after the abort.
-    const { loopPromise, relay, publishTargetTime, teardown } =
-      await startMqttSession(FROM, SPEEDUP);
+  test("Mid-slot abort with earlier target: session replans and charges again immediately", async () => {
+    const { loopPromise, relay, publishTargetTime, teardown } = await startMqttSession(
+      FROM,
+      SPEEDUP,
+    );
     try {
-      await relay.assertOn('2026-04-18T17:00');
-      await relay.assertOff('2026-04-19T10:00');
-      await relay.assertOn('2026-04-19T10:00'); // 10:00 solar-free slot begins
-
-      publishTargetTime('10:45'); // tighten deadline while the slot is running
-
-      // Current slot is aborted well before its 10:15 end; replan starts immediately.
-      await relay.assertOff('2026-04-19T10:15');
-
+      await advanceToSolarWindow(relay);
+      publishTargetTime("10:45"); // tighten deadline while the 10:00 slot is running
+      await relay.assertOff("2026-04-19T10:15"); // slot aborted before natural end
       await loopPromise;
     } finally {
       teardown();
     }
   });
 
-  test('Mid-slot abort with later target: session replans and continues charging', async () => {
-    // publishTargetTime("14:00") extends the window; the plan still picks the same
-    // solar-free slots but the ongoing charge slot is first aborted and re-queued.
-    const { loopPromise, relay, publishTargetTime, teardown } =
-      await startMqttSession(FROM, SPEEDUP);
+  test("Mid-slot abort with later target: session replans and continues charging", async () => {
+    const { loopPromise, relay, publishTargetTime, teardown } = await startMqttSession(
+      FROM,
+      SPEEDUP,
+    );
     try {
-      await relay.assertOn('2026-04-18T17:00');
-      await relay.assertOff('2026-04-19T10:00');
-      await relay.assertOn('2026-04-19T10:00'); // 10:00 solar-free slot begins
-
-      publishTargetTime('14:00'); // extend deadline while the slot is running
-
-      // Current slot is aborted well before its 10:15 end; replan schedules new slots.
-      await relay.assertOff('2026-04-19T10:15');
-
+      await advanceToSolarWindow(relay);
+      publishTargetTime("14:00"); // extend deadline while the 10:00 slot is running
+      await relay.assertOff("2026-04-19T10:15"); // slot aborted before natural end
       await loopPromise;
     } finally {
       teardown();
