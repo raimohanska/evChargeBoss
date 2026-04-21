@@ -1,12 +1,12 @@
-import { connectMqtt, makeMqttSession } from "../../src/mqtt-client.ts";
-import type { Publisher } from "../../src/mqtt-status.ts";
-import { createPublisher, STATUS } from "../../src/mqtt-status.ts";
-import { makeClock } from "../../src/utils.ts";
-import { runMainLoop } from "../../src/main-loop.ts";
-import { IncompleteDataError } from "../../src/errors.ts";
-import type { Config } from "../../src/config.ts";
-import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
-import { makeTestConfig } from "./config.ts";
+import { connectMqtt, makeMqttSession } from '../../src/mqtt-client.ts';
+import type { Publisher } from '../../src/mqtt-status.ts';
+import { createPublisher, STATUS } from '../../src/mqtt-status.ts';
+import { makeClock } from '../../src/utils.ts';
+import { runMainLoop } from '../../src/main-loop.ts';
+import { IncompleteDataError } from '../../src/errors.ts';
+import type { Config } from '../../src/config.ts';
+import { MqttRelaySimulator } from './mqtt-relay-simulator.ts';
+import { makeTestConfig } from './config.ts';
 
 function errorStatus(err: unknown): string {
   if (err instanceof IncompleteDataError) return STATUS.waitingForSpot;
@@ -24,7 +24,7 @@ export interface MqttTestSession {
 export async function startMqttSession(
   from: Date,
   speedup: number,
-  chargingOverrides: Partial<Config["charging"]> = {},
+  chargingOverrides: Partial<Config['charging']> = {},
 ): Promise<MqttTestSession> {
   const config = makeTestConfig(chargingOverrides);
   const [sessionClient, relayClient] = await Promise.all([
@@ -40,12 +40,17 @@ export async function startMqttSession(
   let replanCb: (() => void) | null = null;
   const base = createPublisher(config);
   const publisher: Publisher = {
-    setReplanCallback: (cb) => { replanCb = cb; },
+    setReplanCallback: (cb) => {
+      replanCb = cb;
+    },
     getTargetTimeOverride: () => targetTimeOverride,
-    resetTargetTime: () => { targetTimeOverride = null; base.resetTargetTime(); },
-    setStatus:        (s) => base.setStatus(s),
-    setError:         (m) => base.setError(m),
-    setPlan:          (s) => base.setPlan(s),
+    resetTargetTime: () => {
+      targetTimeOverride = null;
+      base.resetTargetTime();
+    },
+    setStatus: (s) => base.setStatus(s),
+    setError: (m) => base.setError(m),
+    setPlan: (s) => base.setPlan(s),
     setChargedEnergy: (k) => base.setChargedEnergy(k),
   };
 
@@ -58,7 +63,14 @@ export async function startMqttSession(
   // relay has subscribed, causing the relay to miss the command permanently.
   await relay.ready;
 
-  const loopPromise = runMainLoop(session, publisher, config, from, errorStatus, clock);
+  const loopPromise = runMainLoop(
+    session,
+    publisher,
+    config,
+    from,
+    errorStatus,
+    clock,
+  );
 
   return {
     loopPromise,

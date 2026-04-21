@@ -1,8 +1,8 @@
-import type { MqttClient } from "../../src/mqtt-client.ts";
-import type { MqttConfig } from "../../src/config.ts";
-import type { Clock } from "../../src/utils.ts";
-import { realClock, localDateTimeString } from "../../src/utils.ts";
-import assert from "node:assert/strict";
+import type { MqttClient } from '../../src/mqtt-client.ts';
+import type { MqttConfig } from '../../src/config.ts';
+import type { Clock } from '../../src/utils.ts';
+import { realClock, localDateTimeString } from '../../src/utils.ts';
+import assert from 'node:assert/strict';
 
 // 10 virtual minutes — absorbs MQTT roundtrip jitter at high speedup factors
 const TIMING_TOLERANCE_MS = 10 * 60_000;
@@ -30,9 +30,9 @@ export class MqttRelaySimulator {
   } | null = null;
   private powerTimer: ReturnType<typeof setInterval> | null = null;
 
-  private readonly client: MqttClient
-  private readonly mqttConfig: MqttConfig
-  private readonly clock: Clock
+  private readonly client: MqttClient;
+  private readonly mqttConfig: MqttConfig;
+  private readonly clock: Clock;
 
   /** Resolves when the charger-topic subscription is confirmed (SUBACK received). */
   readonly ready: Promise<void>;
@@ -42,16 +42,17 @@ export class MqttRelaySimulator {
     mqttConfig: MqttConfig,
     clock: Clock = realClock,
   ) {
-    this.client = client
-    this.mqttConfig = mqttConfig
-    this.clock = clock
+    this.client = client;
+    this.mqttConfig = mqttConfig;
+    this.clock = clock;
     this.ready = new Promise<void>((resolve, reject) => {
       client.subscribe(mqttConfig.chargerTopic, (err) => {
-        if (err) reject(new Error(`Relay simulator subscribe failed: ${err.message}`));
+        if (err)
+          reject(new Error(`Relay simulator subscribe failed: ${err.message}`));
         else resolve();
       });
     });
-    client.on("message", (topic: string, payload: Buffer) => {
+    client.on('message', (topic: string, payload: Buffer) => {
       if (topic !== mqttConfig.chargerTopic) return;
       const str = payload.toString();
       if (str === mqttConfig.onPayload) this.onCommand(true);
@@ -63,7 +64,7 @@ export class MqttRelaySimulator {
     this.states.push(on);
     this.timestamps.push(this.clock.now());
     if (on) this.startEmittingPower();
-    else    this.stopEmittingPower();
+    else this.stopEmittingPower();
 
     const p = this.pending;
     if (p) {
@@ -75,10 +76,11 @@ export class MqttRelaySimulator {
 
   private startEmittingPower(): void {
     if (this.powerTimer) return; // already running
-    const publish = () => this.client.publish(
-      this.mqttConfig.powerTopic,
-      JSON.stringify({ [this.mqttConfig.powerField]: 3000 }),
-    );
+    const publish = () =>
+      this.client.publish(
+        this.mqttConfig.powerTopic,
+        JSON.stringify({ [this.mqttConfig.powerField]: 3000 }),
+      );
     // Set timer first so the guard in stopEmittingPower can clear it before
     // the repeated publish fires.  Publish once immediately so waitForPlugIn
     // resolves within a single MQTT roundtrip instead of waiting for the first
@@ -92,7 +94,7 @@ export class MqttRelaySimulator {
     if (this.powerTimer) {
       clearInterval(this.powerTimer);
       this.powerTimer = null;
-    }    
+    }
     // Emit zero watts so any active watt-listener sees the charger is off.
     this.client.publish(
       this.mqttConfig.powerTopic,
@@ -137,23 +139,23 @@ export class MqttRelaySimulator {
       actual = this.states[this.consumedIdx++];
     } else {
       actual = await new Promise<boolean>((resolve, reject) => {
-        const timer = setTimeout(
-          () => {
-            this.pending = null;
-            reject(new Error(
-              `Relay simulator: timed out after ${DEFAULT_TIMEOUT_MS}ms waiting for ${expected ? "ON" : "OFF"}`,
-            ));
-          },
-          DEFAULT_TIMEOUT_MS,
-        );
+        const timer = setTimeout(() => {
+          this.pending = null;
+          reject(
+            new Error(
+              `Relay simulator: timed out after ${DEFAULT_TIMEOUT_MS}ms waiting for ${expected ? 'ON' : 'OFF'}`,
+            ),
+          );
+        }, DEFAULT_TIMEOUT_MS);
         this.pending = { resolve, reject, timer };
       });
       this.consumedIdx++;
     }
 
     assert.equal(
-      actual, expected,
-      `Expected relay ${expected ? "ON" : "OFF"} but got ${actual ? "ON" : "OFF"}`,
+      actual,
+      expected,
+      `Expected relay ${expected ? 'ON' : 'OFF'} but got ${actual ? 'ON' : 'OFF'}`,
     );
     return this.timestamps[this.consumedIdx - 1];
   }
@@ -162,7 +164,9 @@ export class MqttRelaySimulator {
     this.stopEmittingPower();
     if (this.pending) {
       clearTimeout(this.pending.timer);
-      this.pending.reject(new Error("MqttRelaySimulator cleaned up while assertion was pending"));
+      this.pending.reject(
+        new Error('MqttRelaySimulator cleaned up while assertion was pending'),
+      );
       this.pending = null;
     }
     this.client.unsubscribe(this.mqttConfig.chargerTopic);

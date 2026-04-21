@@ -4,7 +4,9 @@
     "typecheck": "tsc",
     "build": "tsc && esbuild src/index.ts --bundle --platform=node --target=node12 --outfile=dist/bundle.cjs --inject:src/polyfill.ts",
     "test": "TZ=Europe/Helsinki CONFIG_FILE=test/fixtures/config.json node --experimental-strip-types --test --test-concurrency=1 test/planner.test.ts test/main-loop.test.ts test/main-loop-mqtt.test.ts",
-    "test:integration": "TZ=Europe/Helsinki CONFIG_FILE=test/fixtures/config.json node --experimental-strip-types --test test/main-loop-mqtt.test.ts"
+    "test:integration": "TZ=Europe/Helsinki CONFIG_FILE=test/fixtures/config.json node --experimental-strip-types --test test/main-loop-mqtt.test.ts",
+    "lint": "eslint src/ test/ --max-warnings=0",
+    "format": "prettier --write src/ test/"
   },
   "dependencies": {
     "mqtt": "^4.3.8",
@@ -12,8 +14,13 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node-fetch": "^2.6.13",
     "esbuild": "^0.28.0",
-    "typescript": "^6.0.3"
+    "eslint": "^10.2.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.0"
   }
 }

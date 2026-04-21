@@ -1,12 +1,12 @@
-import type { Config } from "./config.ts";
-import { plan } from "./planner.ts";
-import { printPlan } from "./printer.ts";
-import { runCharging } from "./charger.ts";
-import { STATUS } from "./mqtt-status.ts";
-import type { Publisher } from "./mqtt-status.ts";
-import { Canceller, localTimeShort, log, realClock } from "./utils.ts";
-import type { Clock } from "./utils.ts";
-import type { ChargingSession } from "./charger.ts";
+import type { Config } from './config.ts';
+import { plan } from './planner.ts';
+import { printPlan } from './printer.ts';
+import { runCharging } from './charger.ts';
+import { STATUS } from './mqtt-status.ts';
+import type { Publisher } from './mqtt-status.ts';
+import { Canceller, localTimeShort, log, realClock } from './utils.ts';
+import type { Clock } from './utils.ts';
+import type { ChargingSession } from './charger.ts';
 
 export interface SessionState {
   readonly chargedKwh: number;
@@ -15,7 +15,7 @@ export interface SessionState {
 }
 
 export function parseTargetTime(timeStr: string, from: Date): Date {
-  const [h, m] = timeStr.split(":").map(Number);
+  const [h, m] = timeStr.split(':').map(Number);
   const today = new Date(from);
   today.setHours(h, m, 0, 0);
   if (today > from) return today;
@@ -41,8 +41,14 @@ async function runSession(
 
   // Inner loop: re-plan whenever the target time changes mid-session.
   while (true) {
-    const remainingKwh = Math.max(0, config.charging.targetKwh - state.chargedKwh);
-    if (remainingKwh === 0) { log("Target kWh already reached."); break; }
+    const remainingKwh = Math.max(
+      0,
+      config.charging.targetKwh - state.chargedKwh,
+    );
+    if (remainingKwh === 0) {
+      log('Target kWh already reached.');
+      break;
+    }
 
     publisher.setStatus(STATUS.fetchingData);
     state = { ...state, replanController: new Canceller() };
@@ -50,7 +56,8 @@ async function runSession(
     // closure over its own `state` would still reference the pre-session object.
     publisher.setReplanCallback(() => state.replanController.abort());
 
-    const targetTimeStr = publisher.getTargetTimeOverride() ?? config.charging.targetTime;
+    const targetTimeStr =
+      publisher.getTargetTimeOverride() ?? config.charging.targetTime;
     const planFrom_ = planFrom ?? clock.now();
     const targetDate = parseTargetTime(targetTimeStr, planFrom_);
 
@@ -58,21 +65,29 @@ async function runSession(
     planFrom = undefined;
 
     if (state.replanController.signal.aborted) {
-      log("Target time changed during planning — re-planning.");
+      log('Target time changed during planning — re-planning.');
       continue;
     }
 
-    
     publisher.setPlan(slots);
     printPlan(slots);
-    const firstCharge = slots.find(s => s.charge);
-    publisher.setStatus(firstCharge
-      ? STATUS.plannedChargeStart(localTimeShort(firstCharge.start))
-      : STATUS.idle);
+    const firstCharge = slots.find((s) => s.charge);
+    publisher.setStatus(
+      firstCharge
+        ? STATUS.plannedChargeStart(localTimeShort(firstCharge.start))
+        : STATUS.idle,
+    );
 
     const newlyCharged = await runCharging(
-      slots, session.driver, publisher, state.replanController.signal, session.wattsSource,
-      state.chargedKwh, config.mqtt?.powerThresholdW ?? 10, config.charging.powerKw, clock,
+      slots,
+      session.driver,
+      publisher,
+      state.replanController.signal,
+      session.wattsSource,
+      state.chargedKwh,
+      config.mqtt?.powerThresholdW ?? 10,
+      config.charging.powerKw,
+      clock,
     );
     state = { ...state, chargedKwh: state.chargedKwh + newlyCharged };
 
@@ -80,7 +95,9 @@ async function runSession(
       publisher.resetTargetTime();
       break; // session complete
     }
-    log(`Target time changed — re-planning with ${(config.charging.targetKwh - state.chargedKwh).toFixed(2)} kWh remaining.`);
+    log(
+      `Target time changed — re-planning with ${(config.charging.targetKwh - state.chargedKwh).toFixed(2)} kWh remaining.`,
+    );
   }
 
   publisher.setStatus(STATUS.idle);
@@ -120,7 +137,7 @@ export async function runMainLoop(
       const msg = err instanceof Error ? err.message : String(err);
       log(`ERROR: ${msg}`);
       publisher.setError(errorStatus(err));
-      log("Retrying in 60s...");
+      log('Retrying in 60s...');
       await clock.sleep(60_000);
     }
   }

@@ -1,23 +1,28 @@
-import type { Config } from "./config.ts";
-import { readCache, writeCache } from "./cache.ts";
-import { log, localDateString, localDateTimeString } from "./utils.ts";
-import { fetchSolarForecastOpenMeteo } from "./solar-openmeteo.ts";
+import type { Config } from './config.ts';
+import { readCache, writeCache } from './cache.ts';
+import { log, localDateString, localDateTimeString } from './utils.ts';
+import { fetchSolarForecastOpenMeteo } from './solar-openmeteo.ts';
 
-const CACHE_DIR = process.env.CACHE_DIR ?? ".";
+const CACHE_DIR = process.env.CACHE_DIR ?? '.';
 
 interface ForecastSolarResult {
   watts: Record<string, number>;
   watt_hours_period: Record<string, number>;
 }
 
-export async function fetchSolarForecast(dates: string[], solarConfig: Config['solar']): Promise<Map<number, number>> {
-  const missingDates = dates.filter((d) => readCache(`${CACHE_DIR}/.solar-cache-${d}.json`) === null);
+export async function fetchSolarForecast(
+  dates: string[],
+  solarConfig: Config['solar'],
+): Promise<Map<number, number>> {
+  const missingDates = dates.filter(
+    (d) => readCache(`${CACHE_DIR}/.solar-cache-${d}.json`) === null,
+  );
 
   if (missingDates.length > 0) {
-    log(`Fetching solar forecast... (missing: ${missingDates.join(", ")})`);
+    log(`Fetching solar forecast... (missing: ${missingDates.join(', ')})`);
     const { lat, lon, declination, azimuth, kwp } = solarConfig;
     const url = `https://api.forecast.solar/estimate/${lat}/${lon}/${declination}/${azimuth}/${kwp}`;
-    log("Fetching solar forecast from " + url);
+    log('Fetching solar forecast from ' + url);
     const res = await fetch(url);
     if (!res.ok) {
       log(`  forecast.solar HTTP ${res.status} — falling back to Open-Meteo`);
@@ -26,7 +31,7 @@ export async function fetchSolarForecast(dates: string[], solarConfig: Config['s
     const json = (await res.json()) as { result: ForecastSolarResult };
     const map = new Map<number, number>();
     for (const [tsStr, w] of Object.entries(json.result.watts)) {
-      map.set(new Date(tsStr.replace(" ", "T")).getTime(), w);
+      map.set(new Date(tsStr.replace(' ', 'T')).getTime(), w);
     }
     log(`  Got ${map.size} solar forecast slots`);
     return map;
@@ -34,7 +39,9 @@ export async function fetchSolarForecast(dates: string[], solarConfig: Config['s
 
   const map = new Map<number, number>();
   for (const date of dates) {
-    const cached = readCache<Record<string, number>>(`${CACHE_DIR}/.solar-cache-${date}.json`)!;
+    const cached = readCache<Record<string, number>>(
+      `${CACHE_DIR}/.solar-cache-${date}.json`,
+    )!;
     for (const [k, v] of Object.entries(cached)) {
       map.set(new Date(k).getTime(), v);
     }

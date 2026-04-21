@@ -1,5 +1,5 @@
-import type { Config } from "./config.ts";
-import { log } from "./utils.ts";
+import type { Config } from './config.ts';
+import { log } from './utils.ts';
 
 // Uses Open-Meteo shortwave radiation (horizontal plane) as a PV proxy.
 // Less accurate than forecast.solar (no tilt/azimuth correction) but
@@ -12,10 +12,12 @@ interface OpenMeteoResponse {
   };
 }
 
-export async function fetchSolarForecastOpenMeteo(solarConfig: Config['solar']): Promise<Map<number, number>> {
+export async function fetchSolarForecastOpenMeteo(
+  solarConfig: Config['solar'],
+): Promise<Map<number, number>> {
   const { lat, lon, kwp } = solarConfig;
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&forecast_days=2&timezone=auto`;
-  log("Fetching solar forecast from " + url);
+  log('Fetching solar forecast from ' + url);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`open-meteo HTTP ${res.status}`);
   const json = (await res.json()) as OpenMeteoResponse;

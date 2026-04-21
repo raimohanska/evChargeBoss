@@ -1,7 +1,7 @@
-import { readCache, writeCache } from "./cache.ts";
-import { log, localDateString, localDateTimeString } from "./utils.ts";
+import { readCache, writeCache } from './cache.ts';
+import { log, localDateString, localDateTimeString } from './utils.ts';
 
-const CACHE_DIR = process.env.CACHE_DIR ?? ".";
+const CACHE_DIR = process.env.CACHE_DIR ?? '.';
 
 interface SpotHintaEntry {
   Rank: number;
@@ -10,12 +10,18 @@ interface SpotHintaEntry {
   PriceWithTax: number; // €/kWh incl. VAT
 }
 
-export async function fetchSpotPrices(dates: string[]): Promise<Map<number, number>> {
-  const missingDates = dates.filter((d) => readCache(`${CACHE_DIR}/.spot-cache-${d}.json`) === null);
+export async function fetchSpotPrices(
+  dates: string[],
+): Promise<Map<number, number>> {
+  const missingDates = dates.filter(
+    (d) => readCache(`${CACHE_DIR}/.spot-cache-${d}.json`) === null,
+  );
 
   if (missingDates.length > 0) {
-    log(`Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(", ")})`);
-    const res = await fetch("https://api.spot-hinta.fi/TodayAndDayForward");
+    log(
+      `Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(', ')})`,
+    );
+    const res = await fetch('https://api.spot-hinta.fi/TodayAndDayForward');
     if (!res.ok) throw new Error(`spot-hinta.fi HTTP ${res.status}`);
     const data = (await res.json()) as SpotHintaEntry[];
     const map = new Map<number, number>();
@@ -28,7 +34,9 @@ export async function fetchSpotPrices(dates: string[]): Promise<Map<number, numb
 
   const map = new Map<number, number>();
   for (const date of dates) {
-    const cached = readCache<Record<string, number>>(`${CACHE_DIR}/.spot-cache-${date}.json`)!;
+    const cached = readCache<Record<string, number>>(
+      `${CACHE_DIR}/.spot-cache-${date}.json`,
+    )!;
     for (const [k, v] of Object.entries(cached)) {
       map.set(new Date(k).getTime(), v);
     }

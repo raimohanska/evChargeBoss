@@ -1,22 +1,24 @@
-import { readFileSync, existsSync } from "fs";
-import { z } from "zod";
+import { readFileSync, existsSync } from 'fs';
+import { z } from 'zod';
 
-const ModeSchema = z.enum(["charge", "plan", "simulate"]);
+const ModeSchema = z.enum(['charge', 'plan', 'simulate']);
 
 const ConfigSchema = z.strictObject({
   mode: ModeSchema,
-  mqtt: z.strictObject({
-    brokerUrl: z.string(),
-    username: z.string(),
-    password: z.string(),
-    powerTopic: z.string(),
-    powerField: z.string(),
-    powerThresholdW: z.number(),
-    energyField: z.string().optional(),
-    chargerTopic: z.string(),
-    onPayload: z.string(),
-    offPayload: z.string(),
-  }).optional(),
+  mqtt: z
+    .strictObject({
+      brokerUrl: z.string(),
+      username: z.string(),
+      password: z.string(),
+      powerTopic: z.string(),
+      powerField: z.string(),
+      powerThresholdW: z.number(),
+      energyField: z.string().optional(),
+      chargerTopic: z.string(),
+      onPayload: z.string(),
+      offPayload: z.string(),
+    })
+    .optional(),
   charging: z.strictObject({
     targetKwh: z.number().positive(),
     powerKw: z.number().positive(),
@@ -28,18 +30,22 @@ const ConfigSchema = z.strictObject({
     declination: z.number(),
     azimuth: z.number(),
     kwp: z.number().positive(),
-    treeShadingSchedule: z.array(z.strictObject({
-      time: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
-      outputFraction: z.number().min(0).max(1),
-    })),
+    treeShadingSchedule: z.array(
+      z.strictObject({
+        time: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
+        outputFraction: z.number().min(0).max(1),
+      }),
+    ),
   }),
   electricity: z.strictObject({
     transportCostEurKwh: z.number().nonnegative(),
   }),
-  test: z.object({
-    timeSpeedupFactor: z.number().positive().optional(),
-    justOnce: z.boolean().optional(),
-  }).optional(),
+  test: z
+    .object({
+      timeSpeedupFactor: z.number().positive().optional(),
+      justOnce: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 export type Mode = z.infer<typeof ModeSchema>;
@@ -49,24 +55,24 @@ export type TestConfig = NonNullable<Config['test']>;
 
 function getConfigPath(): string {
   if (process.env.CONFIG_FILE) return process.env.CONFIG_FILE;
-  const idx = process.argv.indexOf("--config");
+  const idx = process.argv.indexOf('--config');
   if (idx !== -1 && process.argv[idx + 1]) return process.argv[idx + 1];
-  if (existsSync("config.json")) return "config.json";
+  if (existsSync('config.json')) return 'config.json';
   const tty = process.stdout.isTTY === true;
   console.warn(
-    `\n${tty ? "\u26a0\ufe0f  WARNING:" : "WARNING:"} config.json not found` +
-    ` ${tty ? "\u2014" : "-"} falling back to config-example.json.` +
-    "\n   This uses placeholder values. Copy config-example.json to config.json" +
-    "\n   and edit it to configure your system before running for real.\n"
+    `\n${tty ? '\u26a0\ufe0f  WARNING:' : 'WARNING:'} config.json not found` +
+      ` ${tty ? '\u2014' : '-'} falling back to config-example.json.` +
+      '\n   This uses placeholder values. Copy config-example.json to config.json' +
+      '\n   and edit it to configure your system before running for real.\n',
   );
-  return "config-example.json";
+  return 'config-example.json';
 }
 
 export function loadConfig(): Config {
   const path = getConfigPath();
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
+    raw = JSON.parse(readFileSync(path, 'utf8'));
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`ERROR: Failed to read config file "${path}": ${msg}`);
@@ -78,10 +84,9 @@ export function loadConfig(): Config {
 
   console.error(`ERROR: Invalid config file "${path}":\n`);
   for (const issue of result.error.issues) {
-    const field = issue.path.join(".");
-    console.error(`  ${field ? field + ": " : ""}${issue.message}`);
+    const field = issue.path.join('.');
+    console.error(`  ${field ? field + ': ' : ''}${issue.message}`);
   }
   console.error();
   process.exit(1);
 }
-

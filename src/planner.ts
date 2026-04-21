@@ -1,9 +1,9 @@
-import type { Config } from "./config.ts";
-import type { Slot } from "./types.ts";
-import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
-import { fetchSolarForecast, persistSolarCache } from "./solar.ts";
-import { log, assertNotNull, localDateString } from "./utils.ts";
-import { IncompleteDataError } from "./errors.ts";
+import type { Config } from './config.ts';
+import type { Slot } from './types.ts';
+import { fetchSpotPrices, persistSpotCache } from './spot.ts';
+import { fetchSolarForecast, persistSolarCache } from './solar.ts';
+import { log, assertNotNull, localDateString } from './utils.ts';
+import { IncompleteDataError } from './errors.ts';
 
 function datesInRange(from: Date, to: Date): string[] {
   const dates: string[] = [];
@@ -30,18 +30,23 @@ function slotsBetween(from: Date, to: Date): Date[] {
   return slots;
 }
 
-function treeShadingFactor(date: Date, schedule: Config['solar']['treeShadingSchedule']): number {
+function treeShadingFactor(
+  date: Date,
+  schedule: Config['solar']['treeShadingSchedule'],
+): number {
   const minutesOfDay = date.getHours() * 60 + date.getMinutes();
   const points = schedule.map(({ time, outputFraction }) => {
-    const [h, m] = time.split(":").map(Number);
+    const [h, m] = time.split(':').map(Number);
     return { minutes: h * 60 + m, outputFraction };
   });
 
   if (minutesOfDay <= points[0].minutes) return 1.0;
-  if (minutesOfDay >= points[points.length - 1].minutes) return points[points.length - 1].outputFraction;
+  if (minutesOfDay >= points[points.length - 1].minutes)
+    return points[points.length - 1].outputFraction;
 
   for (let i = 0; i < points.length - 1; i++) {
-    const a = points[i], b = points[i + 1];
+    const a = points[i],
+      b = points[i + 1];
     if (minutesOfDay >= a.minutes && minutesOfDay < b.minutes) {
       const t = (minutesOfDay - a.minutes) / (b.minutes - a.minutes);
       return a.outputFraction + t * (b.outputFraction - a.outputFraction);
@@ -49,7 +54,6 @@ function treeShadingFactor(date: Date, schedule: Config['solar']['treeShadingSch
   }
   return 1.0;
 }
-
 
 export async function plan(
   from: Date,
@@ -61,7 +65,9 @@ export async function plan(
   const target = targetTime;
   const slotStarts = slotsBetween(now, target);
 
-  log(`Planning ${slotStarts.length} slots from ${now.toLocaleTimeString()} to ${target.toLocaleString()}`);
+  log(
+    `Planning ${slotStarts.length} slots from ${now.toLocaleTimeString()} to ${target.toLocaleString()}`,
+  );
 
   const dates = datesInRange(now, target);
   const [spotMap, solarMap] = await Promise.all([
@@ -81,8 +87,13 @@ export async function plan(
   // Build a sorted list of solar epochs for nearest-preceding lookup
   const solarEpochs = [...solarMap.keys()].sort((a, b) => a - b);
 
-  const missingSolar = slotStarts.filter((s) => !solarMap.has(s.getTime())).length;
-  if (missingSolar > 0) log(`  ${missingSolar} solar slots without exact match — using nearest preceding value`);
+  const missingSolar = slotStarts.filter(
+    (s) => !solarMap.has(s.getTime()),
+  ).length;
+  if (missingSolar > 0)
+    log(
+      `  ${missingSolar} solar slots without exact match — using nearest preceding value`,
+    );
   persistSolarCache(solarMap);
 
   const { powerKw } = config.charging;
@@ -90,11 +101,16 @@ export async function plan(
     const end = new Date(start.getTime() + 15 * 60 * 1000);
     const epoch = start.getTime();
 
-    const spotPriceEurPerKwh = assertNotNull(spotMap.get(epoch), `spot price @ ${start.toISOString()}`);
-    const rawSolarW = solarMap.get(epoch)
-      ?? solarMap.get([...solarEpochs].reverse().find((k) => k <= epoch) ?? -1)
-      ?? 0;
-    const solarForecastW = rawSolarW * treeShadingFactor(start, config.solar.treeShadingSchedule);
+    const spotPriceEurPerKwh = assertNotNull(
+      spotMap.get(epoch),
+      `spot price @ ${start.toISOString()}`,
+    );
+    const rawSolarW =
+      solarMap.get(epoch) ??
+      solarMap.get([...solarEpochs].reverse().find((k) => k <= epoch) ?? -1) ??
+      0;
+    const solarForecastW =
+      rawSolarW * treeShadingFactor(start, config.solar.treeShadingSchedule);
     const transportCostEurPerKwh = config.electricity.transportCostEurKwh;
 
     // Fraction of charger power not covered by solar (clamped to [0, 1])
@@ -106,7 +122,11 @@ export async function plan(
       spotPriceEurPerKwh,
       transportCostEurPerKwh,
       solarForecastW,
-      effectiveCostEur: gridFraction * (spotPriceEurPerKwh + transportCostEurPerKwh) * powerKw * 0.25,
+      effectiveCostEur:
+        gridFraction *
+        (spotPriceEurPerKwh + transportCostEurPerKwh) *
+        powerKw *
+        0.25,
       charge: false,
     };
   });
@@ -115,10 +135,14 @@ export async function plan(
   const slotsNeeded = Math.ceil(targetKwh / (powerKw * 0.25)); // 0.25h per slot
   log(`Need ${slotsNeeded} slots to deliver ${targetKwh} kWh at ${powerKw} kW`);
 
-  const sorted = [...slots].sort((a, b) =>
-    a.effectiveCostEur - b.effectiveCostEur || a.start.getTime() - b.start.getTime()
+  const sorted = [...slots].sort(
+    (a, b) =>
+      a.effectiveCostEur - b.effectiveCostEur ||
+      a.start.getTime() - b.start.getTime(),
   );
-  const selected = new Set(sorted.slice(0, slotsNeeded).map((s) => s.start.getTime()));
+  const selected = new Set(
+    sorted.slice(0, slotsNeeded).map((s) => s.start.getTime()),
+  );
   slots.forEach((s) => (s.charge = selected.has(s.start.getTime())));
 
   return slots;
