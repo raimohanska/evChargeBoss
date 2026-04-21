@@ -1,12 +1,13 @@
-import type { Config } from './config.ts';
-import { plan } from './planner.ts';
-import { printPlan } from './printer.ts';
-import { runCharging } from './charger.ts';
-import { STATUS } from './mqtt-status.ts';
-import type { Publisher } from './mqtt-status.ts';
-import { Canceller, localTimeShort, log, realClock } from './utils.ts';
-import type { Clock } from './utils.ts';
-import type { ChargingSession } from './charger.ts';
+import type { Config } from "./config.ts";
+import type { Slot } from "./types.ts";
+import { plan } from "./planner.ts";
+import { printPlan } from "./printer.ts";
+import { runSlot } from "./charger.ts";
+import { STATUS } from "./mqtt-status.ts";
+import type { Publisher } from "./mqtt-status.ts";
+import { Canceller, localTimeShort, log, realClock } from "./utils.ts";
+import type { Clock } from "./utils.ts";
+import type { ChargingSession } from "./charger.ts";
 
 export interface SessionState {
   readonly chargedKwh: number;
@@ -15,7 +16,7 @@ export interface SessionState {
 }
 
 export function parseTargetTime(timeStr: string, from: Date): Date {
-  const [h, m] = timeStr.split(':').map(Number);
+  const [h, m] = timeStr.split(":").map(Number);
   const today = new Date(from);
   today.setHours(h, m, 0, 0);
   if (today > from) return today;
@@ -23,6 +24,24 @@ export function parseTargetTime(timeStr: string, from: Date): Date {
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setHours(h, m, 0, 0);
   return tomorrow;
+}
+
+/** Returns true when the set of charge-slot start times differs between two plans. */
+function chargeSlotsChanged(prev: Slot[], next: Slot[]): boolean {
+  const times = (slots: Slot[]) => slots.filter((s) => s.charge).map((s) => s.start.getTime());
+  const a = times(prev);
+  const b = times(next);
+  return a.length !== b.length || a.some((t, i) => t !== b[i]);
+}
+
+/** Returns the end of the consecutive charge run that startSlot belongs to. */
+function findChargeRunEnd(slots: Slot[], startSlot: Slot): Date {
+  const idx = slots.indexOf(startSlot);
+  let end = startSlot.end;
+  for (let i = idx + 1; i < slots.length && slots[i].charge; i++) {
+    end = slots[i].end;
+  }
+  return end;
 }
 
 async function runSession(
@@ -35,51 +54,71 @@ async function runSession(
   publisher.setStatus(STATUS.waitingForCar);
   await session.waitForStart();
 
-  // Extract planFrom before clearing it; reset session counters
   let planFrom: Date | undefined = state.planFrom;
   state = { ...state, chargedKwh: 0, planFrom: undefined };
+  let prevSlots: Slot[] | undefined;
 
-  // Inner loop: re-plan whenever the target time changes mid-session.
   while (true) {
-    const remainingKwh = Math.max(
-      0,
-      config.charging.targetKwh - state.chargedKwh,
-    );
+    const remainingKwh = Math.max(0, config.charging.targetKwh - state.chargedKwh);
     if (remainingKwh === 0) {
-      log('Target kWh already reached.');
+      log("Target kWh reached.");
+      publisher.resetTargetTime();
       break;
     }
 
     publisher.setStatus(STATUS.fetchingData);
     state = { ...state, replanController: new Canceller() };
-    // Keep the callback pointed at the current replanController; runMainLoop's
-    // closure over its own `state` would still reference the pre-session object.
     publisher.setReplanCallback(() => state.replanController.abort());
 
-    const targetTimeStr =
-      publisher.getTargetTimeOverride() ?? config.charging.targetTime;
-    const planFrom_ = planFrom ?? clock.now();
-    const targetDate = parseTargetTime(targetTimeStr, planFrom_);
-
-    const slots = await plan(planFrom_, targetDate, remainingKwh, config);
+    const targetTimeStr = publisher.getTargetTimeOverride() ?? config.charging.targetTime;
+    const now = planFrom ?? clock.now();
+    const targetDate = parseTargetTime(targetTimeStr, now);
     planFrom = undefined;
 
+    const slots = await plan(now, targetDate, remainingKwh, config);
+
     if (state.replanController.signal.aborted) {
-      log('Target time changed during planning — re-planning.');
+      log("Target time changed during planning — re-planning.");
       continue;
     }
 
-    publisher.setPlan(slots);
-    printPlan(slots);
-    const firstCharge = slots.find((s) => s.charge);
-    publisher.setStatus(
-      firstCharge
-        ? STATUS.plannedChargeStart(localTimeShort(firstCharge.start))
-        : STATUS.idle,
-    );
+    // Print the plan only when it changes (or on the very first plan).
+    if (prevSlots === undefined || chargeSlotsChanged(prevSlots, slots)) {
+      if (prevSlots !== undefined) log("Plan changed:");
+      publisher.setPlan(slots);
+      printPlan(slots);
+    }
+    prevSlots = slots;
 
-    const newlyCharged = await runCharging(
-      slots,
+    // Find the next charge slot that has not yet ended.
+    const nextCharge = slots.find((s) => s.charge && s.end > clock.now());
+    if (!nextCharge) {
+      log("No charge slots remaining in window.");
+      publisher.resetTargetTime();
+      break;
+    }
+
+    publisher.setStatus(STATUS.plannedChargeStart(localTimeShort(nextCharge.start)));
+
+    // Sleep until the next charge slot starts (relay OFF during the gap).
+    const msUntilSlot = nextCharge.start.getTime() - clock.now().getTime();
+    if (msUntilSlot > 0) {
+      await session.driver.send(false);
+      log(
+        `Charging starts at ${localTimeShort(nextCharge.start)} (in ${Math.round(msUntilSlot / 1000)}s)`,
+      );
+      await clock.sleep(msUntilSlot, state.replanController.signal);
+    }
+    if (state.replanController.signal.aborted) {
+      log("Target time changed — re-planning.");
+      continue;
+    }
+
+    // Run the single slot.
+    const chargeRunEnd = findChargeRunEnd(slots, nextCharge);
+    const kwh = await runSlot(
+      nextCharge,
+      chargeRunEnd,
       session.driver,
       publisher,
       state.replanController.signal,
@@ -89,15 +128,18 @@ async function runSession(
       config.charging.powerKw,
       clock,
     );
-    state = { ...state, chargedKwh: state.chargedKwh + newlyCharged };
+    state = { ...state, chargedKwh: state.chargedKwh + kwh };
 
+    // Ensure relay is OFF between slots; runSlot already sends OFF on abort.
     if (!state.replanController.signal.aborted) {
-      publisher.resetTargetTime();
-      break; // session complete
+      await session.driver.send(false);
+      log("Charging session complete.");
+    } else {
+      log(
+        `Target time changed — re-planning with ${(config.charging.targetKwh - state.chargedKwh).toFixed(2)} kWh remaining.`,
+      );
     }
-    log(
-      `Target time changed — re-planning with ${(config.charging.targetKwh - state.chargedKwh).toFixed(2)} kWh remaining.`,
-    );
+    // Always loop back to re-plan for the next slot.
   }
 
   publisher.setStatus(STATUS.idle);
@@ -137,7 +179,7 @@ export async function runMainLoop(
       const msg = err instanceof Error ? err.message : String(err);
       log(`ERROR: ${msg}`);
       publisher.setError(errorStatus(err));
-      log('Retrying in 60s...');
+      log("Retrying in 60s...");
       await clock.sleep(60_000);
     }
   }

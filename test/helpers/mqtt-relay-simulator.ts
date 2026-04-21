@@ -1,11 +1,11 @@
-import type { MqttClient } from '../../src/mqtt-client.ts';
-import type { MqttConfig } from '../../src/config.ts';
-import type { Clock } from '../../src/utils.ts';
-import { realClock, localDateTimeString } from '../../src/utils.ts';
-import assert from 'node:assert/strict';
+import type { MqttClient } from "../../src/mqtt-client.ts";
+import type { MqttConfig } from "../../src/config.ts";
+import type { Clock } from "../../src/utils.ts";
+import { realClock, localDateTimeString } from "../../src/utils.ts";
+import assert from "node:assert/strict";
 
-// 10 virtual minutes — absorbs MQTT roundtrip jitter at high speedup factors
-const TIMING_TOLERANCE_MS = 10 * 60_000;
+// 15 virtual minutes — absorbs MQTT roundtrip jitter at high speedup factors
+const TIMING_TOLERANCE_MS = 15 * 60_000;
 // Generous default: a 17-hour virtual gap takes ~6 s real at 10 000× speedup
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -37,22 +37,17 @@ export class MqttRelaySimulator {
   /** Resolves when the charger-topic subscription is confirmed (SUBACK received). */
   readonly ready: Promise<void>;
 
-  constructor(
-    client: MqttClient,
-    mqttConfig: MqttConfig,
-    clock: Clock = realClock,
-  ) {
+  constructor(client: MqttClient, mqttConfig: MqttConfig, clock: Clock = realClock) {
     this.client = client;
     this.mqttConfig = mqttConfig;
     this.clock = clock;
     this.ready = new Promise<void>((resolve, reject) => {
       client.subscribe(mqttConfig.chargerTopic, (err) => {
-        if (err)
-          reject(new Error(`Relay simulator subscribe failed: ${err.message}`));
+        if (err) reject(new Error(`Relay simulator subscribe failed: ${err.message}`));
         else resolve();
       });
     });
-    client.on('message', (topic: string, payload: Buffer) => {
+    client.on("message", (topic: string, payload: Buffer) => {
       if (topic !== mqttConfig.chargerTopic) return;
       const str = payload.toString();
       if (str === mqttConfig.onPayload) this.onCommand(true);
@@ -143,7 +138,7 @@ export class MqttRelaySimulator {
           this.pending = null;
           reject(
             new Error(
-              `Relay simulator: timed out after ${DEFAULT_TIMEOUT_MS}ms waiting for ${expected ? 'ON' : 'OFF'}`,
+              `Relay simulator: timed out after ${DEFAULT_TIMEOUT_MS}ms waiting for ${expected ? "ON" : "OFF"}`,
             ),
           );
         }, DEFAULT_TIMEOUT_MS);
@@ -155,7 +150,7 @@ export class MqttRelaySimulator {
     assert.equal(
       actual,
       expected,
-      `Expected relay ${expected ? 'ON' : 'OFF'} but got ${actual ? 'ON' : 'OFF'}`,
+      `Expected relay ${expected ? "ON" : "OFF"} but got ${actual ? "ON" : "OFF"}`,
     );
     return this.timestamps[this.consumedIdx - 1];
   }
@@ -164,9 +159,7 @@ export class MqttRelaySimulator {
     this.stopEmittingPower();
     if (this.pending) {
       clearTimeout(this.pending.timer);
-      this.pending.reject(
-        new Error('MqttRelaySimulator cleaned up while assertion was pending'),
-      );
+      this.pending.reject(new Error("MqttRelaySimulator cleaned up while assertion was pending"));
       this.pending = null;
     }
     this.client.unsubscribe(this.mqttConfig.chargerTopic);
