@@ -96,4 +96,55 @@ test("Changing target time earlier triggers replan and charges tonight instead o
   }
 });
 
+// ---------- mid-slot abort scenarios ----------
+//
+// Both tests wait for charging to actually start at the solar window (10:00 next day),
+// then call publishTargetTime() while the charge slot is running.  The slot is
+// aborted (relay sees OFF before the slot's natural end at 10:15) and the session
+// replans with the new target.
+//
+// Using the 17-hour sleep gap (FROM=17:00 → charge at 10:00) keeps the assertion
+// windows reliable: at SPEEDUP=10000 a single MQTT roundtrip advances virtual
+// time by ~70 s, so a 15-minute slot window is comfortably large enough.
+
+test("Mid-slot abort with earlier target: session replans and charges again immediately", async () => {
+  // publishTargetTime("10:45") shrinks the remaining window; the 10:00–10:45 solar
+  // slots are all 0 € so charging restarts immediately after the abort.
+  const { loopPromise, relay, publishTargetTime, teardown } = await startMqttSession(FROM, SPEEDUP);
+  try {
+    await relay.assertOn("2026-04-18T17:00");
+    await relay.assertOff("2026-04-19T10:00");
+    await relay.assertOn("2026-04-19T10:00");   // 10:00 solar-free slot begins
+
+    publishTargetTime("10:45");                 // tighten deadline while the slot is running
+
+    // Current slot is aborted well before its 10:15 end; replan starts immediately.
+    await relay.assertOff("2026-04-19T10:15");
+
+    await loopPromise;
+  } finally {
+    teardown();
+  }
+});
+
+test("Mid-slot abort with later target: session replans and continues charging", async () => {
+  // publishTargetTime("14:00") extends the window; the plan still picks the same
+  // solar-free slots but the ongoing charge slot is first aborted and re-queued.
+  const { loopPromise, relay, publishTargetTime, teardown } = await startMqttSession(FROM, SPEEDUP);
+  try {
+    await relay.assertOn("2026-04-18T17:00");
+    await relay.assertOff("2026-04-19T10:00");
+    await relay.assertOn("2026-04-19T10:00");   // 10:00 solar-free slot begins
+
+    publishTargetTime("14:00");                 // extend deadline while the slot is running
+
+    // Current slot is aborted well before its 10:15 end; replan schedules new slots.
+    await relay.assertOff("2026-04-19T10:15");
+
+    await loopPromise;
+  } finally {
+    teardown();
+  }
+});
+
 }); // describe "main-loop MQTT integration"

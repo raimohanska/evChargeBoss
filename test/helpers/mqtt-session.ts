@@ -4,6 +4,7 @@ import { createPublisher, STATUS } from "../../src/mqtt-status.ts";
 import { makeClock } from "../../src/utils.ts";
 import { runMainLoop } from "../../src/main-loop.ts";
 import { IncompleteDataError } from "../../src/errors.ts";
+import type { Config } from "../../src/config.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
 import { makeTestConfig } from "./config.ts";
 
@@ -20,8 +21,12 @@ export interface MqttTestSession {
   teardown(): void;
 }
 
-export async function startMqttSession(from: Date, speedup: number): Promise<MqttTestSession> {
-  const config = makeTestConfig();
+export async function startMqttSession(
+  from: Date,
+  speedup: number,
+  chargingOverrides: Partial<Config["charging"]> = {},
+): Promise<MqttTestSession> {
+  const config = makeTestConfig(chargingOverrides);
   const [sessionClient, relayClient] = await Promise.all([
     connectMqtt(config.mqtt!),
     connectMqtt(config.mqtt!),

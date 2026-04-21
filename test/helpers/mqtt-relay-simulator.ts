@@ -74,13 +74,18 @@ export class MqttRelaySimulator {
   }
 
   private startEmittingPower(): void {
-    if (this.powerTimer) return; // already stopped (OFF came in during delay)
-    this.powerTimer = setInterval(() => {
-      this.client.publish(
-        this.mqttConfig.powerTopic,
-        JSON.stringify({ [this.mqttConfig.powerField]: 3000 }),
-      );
-    }, 100);  
+    if (this.powerTimer) return; // already running
+    const publish = () => this.client.publish(
+      this.mqttConfig.powerTopic,
+      JSON.stringify({ [this.mqttConfig.powerField]: 3000 }),
+    );
+    // Set timer first so the guard in stopEmittingPower can clear it before
+    // the repeated publish fires.  Publish once immediately so waitForPlugIn
+    // resolves within a single MQTT roundtrip instead of waiting for the first
+    // setInterval tick (which at 10 000× speedup would advance virtual time by
+    // ~16 virtual minutes before charging begins).
+    this.powerTimer = setInterval(publish, 100);
+    publish();
   }
 
   private stopEmittingPower(): void {
