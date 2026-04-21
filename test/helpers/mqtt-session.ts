@@ -1,10 +1,9 @@
-import type { Config } from "../../src/config.ts";
 import { connectMqtt, makeMqttSession } from "../../src/mqtt-client.ts";
-import { createPublisher } from "../../src/mqtt-status.ts";
+import type { Publisher } from "../../src/mqtt-status.ts";
+import { createPublisher, STATUS } from "../../src/mqtt-status.ts";
 import { makeClock } from "../../src/utils.ts";
 import { runMainLoop } from "../../src/main-loop.ts";
 import { IncompleteDataError } from "../../src/errors.ts";
-import { STATUS } from "../../src/mqtt-status.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
 import { makeTestConfig } from "./config.ts";
 
@@ -16,30 +15,58 @@ function errorStatus(err: unknown): string {
 export interface MqttTestSession {
   loopPromise: Promise<void>;
   relay: MqttRelaySimulator;
+  /** Simulate a target-time change (HH:MM), triggering an immediate replan. */
+  publishTargetTime(time: string): void;
   teardown(): void;
 }
 
 export async function startMqttSession(from: Date, speedup: number): Promise<MqttTestSession> {
-  const config = makeTestConfig() 
+  const config = makeTestConfig();
   const [sessionClient, relayClient] = await Promise.all([
     connectMqtt(config.mqtt!),
     connectMqtt(config.mqtt!),
   ]);
 
-  const publisher = createPublisher(config);
+  // Wrap LoggingPublisher to intercept target-time override and replan callback.
+  // publishTargetTime() can then trigger a replan directly without an extra MQTT
+  // connection — the full MQTT target-time path is exercised by StatusPublisher
+  // in production; here we test the replan logic itself.
+  let targetTimeOverride: string | null = null;
+  let replanCb: (() => void) | null = null;
+  const base = createPublisher(config);
+  const publisher: Publisher = {
+    setReplanCallback: (cb) => { replanCb = cb; },
+    getTargetTimeOverride: () => targetTimeOverride,
+    resetTargetTime: () => { targetTimeOverride = null; base.resetTargetTime(); },
+    setStatus:        (s) => base.setStatus(s),
+    setError:         (m) => base.setError(m),
+    setPlan:          (s) => base.setPlan(s),
+    setChargedEnergy: (k) => base.setChargedEnergy(k),
+  };
+
   const session = makeMqttSession(sessionClient, config.mqtt!, publisher);
   const clock = makeClock(speedup, from);
   const relay = new MqttRelaySimulator(relayClient, config.mqtt!, clock);
+
+  // Wait for the relay's charger-topic subscription to be confirmed (SUBACK) before
+  // starting the main loop.  Without this, waitForStart() can publish ON before the
+  // relay has subscribed, causing the relay to miss the command permanently.
+  await relay.ready;
 
   const loopPromise = runMainLoop(session, publisher, config, from, errorStatus, clock);
 
   return {
     loopPromise,
     relay,
+    publishTargetTime(time: string) {
+      targetTimeOverride = time;
+      replanCb?.();
+    },
     teardown() {
       relay.cleanup();
-      sessionClient.end();
-      relayClient.end();
+      // Force-close so the TCP socket is gone before the next test creates new connections.
+      sessionClient.end(true);
+      relayClient.end(true);
     },
   };
 }

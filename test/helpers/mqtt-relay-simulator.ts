@@ -34,6 +34,9 @@ export class MqttRelaySimulator {
   private readonly mqttConfig: MqttConfig
   private readonly clock: Clock
 
+  /** Resolves when the charger-topic subscription is confirmed (SUBACK received). */
+  readonly ready: Promise<void>;
+
   constructor(
     client: MqttClient,
     mqttConfig: MqttConfig,
@@ -42,8 +45,11 @@ export class MqttRelaySimulator {
     this.client = client
     this.mqttConfig = mqttConfig
     this.clock = clock
-    client.subscribe(mqttConfig.chargerTopic, (err) => {
-      if (err) throw new Error(`Relay simulator subscribe failed: ${err.message}`);
+    this.ready = new Promise<void>((resolve, reject) => {
+      client.subscribe(mqttConfig.chargerTopic, (err) => {
+        if (err) reject(new Error(`Relay simulator subscribe failed: ${err.message}`));
+        else resolve();
+      });
     });
     client.on("message", (topic: string, payload: Buffer) => {
       if (topic !== mqttConfig.chargerTopic) return;
@@ -106,6 +112,16 @@ export class MqttRelaySimulator {
     assert.ok(
       t < before,
       `Expected relay OFF before ${beforeDateTime}, arrived at ${localDateTimeString(t)}`,
+    );
+  }
+
+  /** Wait for next relay command, assert it is ON, assert it arrived strictly before beforeDateTime ("YYYY-MM-DDTHH:MM"). */
+  async assertOnBefore(beforeDateTime: string): Promise<void> {
+    const t = await this.nextCommand(true);
+    const before = new Date(`${beforeDateTime}:00`);
+    assert.ok(
+      t < before,
+      `Expected relay ON before ${beforeDateTime}, arrived at ${localDateTimeString(t)}`,
     );
   }
 

@@ -46,6 +46,9 @@ async function runSession(
 
     publisher.setStatus(STATUS.fetchingData);
     state = { ...state, replanController: new Canceller() };
+    // Keep the callback pointed at the current replanController; runMainLoop's
+    // closure over its own `state` would still reference the pre-session object.
+    publisher.setReplanCallback(() => state.replanController.abort());
 
     const targetTimeStr = publisher.getTargetTimeOverride() ?? config.charging.targetTime;
     const planFrom_ = planFrom ?? clock.now();

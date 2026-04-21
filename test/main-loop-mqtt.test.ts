@@ -14,11 +14,15 @@
  *   OFF ← runCharging sleeps through the 17:00–10:00 gap with charger off
  *   ON  ← 10:00 (next day) charge slot starts
  *
+ * A second test changes the target time to "21:00" mid-session.  The replan
+ * finds the 7 cheapest evening slots (all starting tonight), so charging
+ * restarts before midnight rather than waiting until next day.
+ *
  * The MqttRelaySimulator sits on the charger topic, records every command, and
  * starts emitting power readings when it sees ON so waitForPlugIn resolves.
  */
 
-import { test } from "node:test";
+import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { parseTargetTime } from "../src/main-loop.ts";
@@ -28,6 +32,10 @@ import { startMqttSession } from "./helpers/mqtt-session.ts";
 
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
+
+// Tests run sequentially: each MQTT session subscribes to the same topics, so
+// concurrent execution would cause relay simulators to receive each other's commands.
+describe("main-loop MQTT integration", { concurrency: false }, () => {
 
 test("Plan for the 17:00 session: 7 solar-free charge slots 10:00–11:45 next day", async () => {
   const config = makeTestConfig();
@@ -58,3 +66,34 @@ test("Main loop with MQTT. Relay sees ON → OFF → ON during a single charge s
     teardown();
   }
 });
+
+test("Plan for target=21:00 tonight: 7 charge slots all starting this evening", async () => {
+  const config = makeTestConfig();
+  const targetDate = parseTargetTime("21:00", FROM);
+  const slots = await plan(FROM, targetDate, config.charging.targetKwh, config);
+
+  const chargeSlots = slots.filter(s => s.charge);
+  assert.equal(chargeSlots.length, 7, "7 charge slots for 5 kWh at 3 kW");
+  assert.ok(chargeSlots.every(s => s.start.toISOString().slice(0, 10) === "2026-04-18"), "all slots tonight");
+  assert.equal(chargeSlots[0].start.getHours(), 17, "earliest slot starts at 17:00 (session start)");
+});
+
+test("Changing target time earlier triggers replan and charges tonight instead of next day", async () => {
+  const { loopPromise, relay, publishTargetTime, teardown } = await startMqttSession(FROM, SPEEDUP);
+  try {
+    await relay.assertOn("2026-04-18T17:00");   // session start
+    await relay.assertOff("2026-04-19T10:00");  // initial plan: sleep until next day
+
+    publishTargetTime("21:00");                 // trigger replan — deadline moves to tonight
+
+    // Replan finds evening slots starting at 17:00 (already past), so charging
+    // restarts immediately — well before the original next-day slot.
+    await relay.assertOnBefore("2026-04-19T00:00");
+
+    await loopPromise;
+  } finally {
+    teardown();
+  }
+});
+
+}); // describe "main-loop MQTT integration"
