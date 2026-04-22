@@ -1,5 +1,5 @@
 import mqtt from "mqtt";
-import type { MqttConfig } from "../config.ts";
+import type { MqttConfig } from "./config.ts";
 import type { ChargingSession, WattsSource, WattsUpdate } from "./charger.ts";
 import type { Publisher } from "./mqtt-status.ts";
 import { log } from "../utils.ts";

@@ -1,21 +1,21 @@
 {
   "evCharging": {
     "mode": "charge",
-    "mqtt": {
-      "brokerUrl": "mqtt://homeassistant.local:1883",
-      "username": "",
-      "password": "",
-      "powerTopic": "zigbee2mqtt/ev-relay",
-      "powerField": "power",
-      "powerThresholdW": 10,
-      "chargerTopic": "zigbee2mqtt/ev-relay/set",
-      "onPayload": "{\"state\":\"ON\"}",
-      "offPayload": "{\"state\":\"OFF\"}"
-    },
     "charging": {
       "targetKwh": 7,
       "powerKw": 3,
-      "targetTime": "12:00"
+      "targetTime": "12:00",
+      "mqtt": {
+        "brokerUrl": "mqtt://homeassistant.local:1883",
+        "username": "",
+        "password": "",
+        "powerTopic": "zigbee2mqtt/ev-relay",
+        "powerField": "power",
+        "powerThresholdW": 10,
+        "chargerTopic": "zigbee2mqtt/ev-relay/set",
+        "onPayload": "{\"state\":\"ON\"}",
+        "offPayload": "{\"state\":\"OFF\"}"
+      }
     },
     "solar": {
       "lat": 61.5,

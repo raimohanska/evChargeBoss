@@ -1,4 +1,4 @@
-import type { EvChargingConfig } from "../config.ts";
+import type { EvChargingConfig } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
@@ -116,7 +116,7 @@ export async function runSession(
       signal: replanController.signal,
       wattsSource: session.wattsSource,
       prevChargedKwh: chargedKwh,
-      powerThresholdW: config.mqtt?.powerThresholdW ?? 10,
+      powerThresholdW: config.charging.mqtt?.powerThresholdW ?? 10,
       powerKw: config.charging.powerKw,
       clock,
     });

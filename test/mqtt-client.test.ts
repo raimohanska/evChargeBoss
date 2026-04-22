@@ -27,7 +27,7 @@ process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import
  */
 test("wattsSource delivers updates after waitForStart() resolves", async () => {
   const config = makeTestConfig();
-  const mqtt = config.evCharging.mqtt!;
+  const mqtt = config.evCharging.charging.mqtt!;
 
   const [sessionClient, helperClient] = await Promise.all([connectMqtt(mqtt), connectMqtt(mqtt)]);
 

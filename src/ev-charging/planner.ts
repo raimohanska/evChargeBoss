@@ -1,4 +1,4 @@
-import type { EvChargingConfig } from "../config.ts";
+import type { EvChargingConfig } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { fetchSlots } from "../slot-provider/index.ts";
 import { log, localTimeShort, localDateTimeString } from "../utils.ts";

@@ -1,5 +1,5 @@
 import type { MqttClient } from "./mqtt-client.ts";
-import type { EvChargingConfig } from "../config.ts";
+import type { EvChargingConfig } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { log } from "../utils.ts";
 

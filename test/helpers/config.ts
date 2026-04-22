@@ -14,8 +14,16 @@ export function makeTestConfig(
     evCharging: {
       ...base.evCharging,
       mode: "charge" as const,
-      mqtt: { ...base.evCharging.mqtt!, brokerUrl: "mqtt://localhost:1883", ...mqttOverrides },
-      charging: { ...base.evCharging.charging, targetKwh: 5, ...chargingOverrides },
+      charging: {
+        ...base.evCharging.charging,
+        targetKwh: 5,
+        ...chargingOverrides,
+        mqtt: {
+          ...base.evCharging.charging.mqtt!,
+          brokerUrl: "mqtt://localhost:1883",
+          ...mqttOverrides,
+        },
+      },
       test: { timeSpeedupFactor: SPEEDUP },
     },
   };
