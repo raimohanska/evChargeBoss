@@ -16,21 +16,21 @@
         "onPayload": "{\"state\":\"ON\"}",
         "offPayload": "{\"state\":\"OFF\"}"
       }
-    },
-    "solar": {
-      "lat": 61.5,
-      "lon": 24.7,
-      "declination": 35,
-      "azimuth": 0,
-      "kwp": 7.5,
-      "treeShadingSchedule": [
-        { "time": "13:00", "outputFraction": 1.0 },
-        { "time": "14:30", "outputFraction": 0.5 },
-        { "time": "16:30", "outputFraction": 0.1 }
-      ]
-    },
-    "electricity": {
-      "transportCostEurKwh": 0.045
     }
+  },
+  "solar": {
+    "lat": 61.5,
+    "lon": 24.7,
+    "declination": 35,
+    "azimuth": 0,
+    "kwp": 7.5,
+    "treeShadingSchedule": [
+      { "time": "13:00", "outputFraction": 1.0 },
+      { "time": "14:30", "outputFraction": 0.5 },
+      { "time": "16:30", "outputFraction": 0.1 }
+    ]
+  },
+  "electricity": {
+    "transportCostEurKwh": 0.045
   }
 }

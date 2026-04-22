@@ -24,7 +24,9 @@ export function makeTestConfig(
           ...mqttOverrides,
         },
       },
-      test: { timeSpeedupFactor: SPEEDUP },
     },
+    solar: base.solar,
+    electricity: base.electricity,
+    test: { timeSpeedupFactor: SPEEDUP },
   };
 }

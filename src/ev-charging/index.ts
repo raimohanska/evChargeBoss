@@ -1,4 +1,4 @@
-import type { EvChargingConfig } from "./config.ts";
+import type { Config } from "../config.ts";
 import { IncompleteDataError } from "../errors.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
@@ -22,29 +22,29 @@ function errorStatus(err: unknown): string {
   return STATUS.error(msg);
 }
 
-export async function runEvCharging(config: EvChargingConfig): Promise<void> {
-  const { mode, from: initialFrom } = parseArgs(config.mode);
+export async function runEvCharging(config: Config): Promise<void> {
+  const { mode, from: initialFrom } = parseArgs(config.evCharging.mode);
 
   const modeLabel = mode === "charge" ? "charging" : mode;
   log(`=== EV Charger Planner [${modeLabel}] ===`);
 
   if (mode === "plan") {
-    const targetTimeStr = config.charging.targetTime;
+    const targetTimeStr = config.evCharging.charging.targetTime;
     const now = initialFrom ?? new Date();
     const targetDate = parseTargetTime(targetTimeStr, now);
-    const slots = await plan(now, targetDate, config.charging.targetKwh, config);
+    const slots = await plan(now, targetDate, config.evCharging.charging.targetKwh, config);
     printPlan(slots);
     return;
   }
 
-  if (!config.charging.mqtt) {
+  if (!config.evCharging.charging.mqtt) {
     console.error("ERROR: charge mode requires mqtt to be configured in config.json");
     process.exit(1);
   }
 
-  const mqttClient = await connectMqtt(config.charging.mqtt);
-  const publisher = createPublisher(config, mqttClient);
-  const session = makeMqttSession(mqttClient, config.charging.mqtt, publisher);
+  const mqttClient = await connectMqtt(config.evCharging.charging.mqtt);
+  const publisher = createPublisher(config.evCharging, mqttClient);
+  const session = makeMqttSession(mqttClient, config.evCharging.charging.mqtt, publisher);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
 
   // Charge loop: run sessions indefinitely, retrying on error.

@@ -64,7 +64,7 @@ export async function startMqttSession(
   // relay has subscribed, causing the relay to miss the command permanently.
   await relay.ready;
 
-  const loopPromise = runSession(session, publisher, config.evCharging, from, clock);
+  const loopPromise = runSession(session, publisher, config, from, clock);
 
   return {
     loopPromise,

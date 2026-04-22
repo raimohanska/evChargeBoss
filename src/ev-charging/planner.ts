@@ -1,4 +1,4 @@
-import type { EvChargingConfig } from "./config.ts";
+import type { Config } from "../config.ts";
 import type { Slot } from "./types.ts";
 import { fetchSlots } from "../slot-provider/index.ts";
 import { log, localTimeShort, localDateTimeString } from "../utils.ts";
@@ -7,9 +7,9 @@ export async function plan(
   from: Date,
   targetTime: Date,
   targetKwh: number,
-  config: EvChargingConfig,
+  config: Config,
 ): Promise<Slot[]> {
-  const { powerKw } = config.charging;
+  const { powerKw } = config.evCharging.charging;
 
   const pricedSlots = await fetchSlots(from, targetTime, {
     solar: config.solar,

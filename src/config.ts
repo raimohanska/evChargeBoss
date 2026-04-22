@@ -1,11 +1,26 @@
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
-import { EvChargingConfigSchema } from "./ev-charging/config.ts";
+import {
+  EvChargingConfigSchema,
+  SolarConfigSchema,
+  ElectricityConfigSchema,
+  TestConfigSchema,
+} from "./ev-charging/config.ts";
 
-export type { Mode, EvChargingConfig, MqttConfig, ChargingConfig } from "./ev-charging/config.ts";
+export type {
+  Mode,
+  EvChargingConfig,
+  MqttConfig,
+  ChargingConfig,
+  SolarConfig,
+  ElectricityConfig,
+} from "./ev-charging/config.ts";
 
 const ConfigSchema = z.strictObject({
   evCharging: EvChargingConfigSchema,
+  solar: SolarConfigSchema,
+  electricity: ElectricityConfigSchema,
+  test: TestConfigSchema,
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

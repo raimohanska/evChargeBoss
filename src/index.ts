@@ -72,7 +72,7 @@ import { loadConfig } from "./config.ts";
 import { runEvCharging } from "./ev-charging/index.ts";
 
 const config = loadConfig();
-runEvCharging(config.evCharging).catch((err) => {
+runEvCharging(config).catch((err) => {
   const msg = err instanceof Error ? err.message : String(err);
   console.error(`[${new Date().toISOString()}] Fatal: ${msg}`);
   process.exit(1);

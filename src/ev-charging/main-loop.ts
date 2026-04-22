@@ -1,4 +1,4 @@
-import type { EvChargingConfig } from "./config.ts";
+import type { Config } from "../config.ts";
 import type { Slot } from "./types.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
@@ -30,7 +30,7 @@ export function parseTargetTime(timeStr: string, from: Date): Date {
 export async function runSession(
   session: ChargingSession,
   publisher: Publisher,
-  config: EvChargingConfig,
+  config: Config,
   from: Date | undefined,
   clock: Clock,
 ): Promise<void> {
@@ -47,7 +47,7 @@ export async function runSession(
   updateReplanCallback();
 
   while (true) {
-    const remainingKwh = Math.max(0, config.charging.targetKwh - chargedKwh);
+    const remainingKwh = Math.max(0, config.evCharging.charging.targetKwh - chargedKwh);
     if (remainingKwh === 0) {
       log("Target kWh reached.");
       publisher.resetTargetTime();
@@ -60,7 +60,8 @@ export async function runSession(
     replanController = new Canceller();
     updateReplanCallback();
 
-    const targetTimeStr = publisher.getTargetTimeOverride() ?? config.charging.targetTime;
+    const targetTimeStr =
+      publisher.getTargetTimeOverride() ?? config.evCharging.charging.targetTime;
     const now = planFrom ?? clock.now();
     const targetDate = parseTargetTime(targetTimeStr, now);
     planFrom = undefined;
@@ -116,15 +117,15 @@ export async function runSession(
       signal: replanController.signal,
       wattsSource: session.wattsSource,
       prevChargedKwh: chargedKwh,
-      powerThresholdW: config.charging.mqtt?.powerThresholdW ?? 10,
-      powerKw: config.charging.powerKw,
+      powerThresholdW: config.evCharging.charging.mqtt?.powerThresholdW ?? 10,
+      powerKw: config.evCharging.charging.powerKw,
       clock,
     });
     chargedKwh += kwh;
 
     if (replanController.signal.aborted) {
       log(
-        `Target time changed — re-planning with ${(config.charging.targetKwh - chargedKwh).toFixed(2)} kWh remaining.`,
+        `Target time changed — re-planning with ${(config.evCharging.charging.targetKwh - chargedKwh).toFixed(2)} kWh remaining.`,
       );
     }
     // Relay stays ON after a normal slot. The next iteration will send OFF
