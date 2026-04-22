@@ -1,7 +1,7 @@
 import type { Config } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { plan } from "./planner.ts";
-import { printPlan } from "./printer.ts";
+import { printPlan } from "./print-plan.ts";
 import { runSlot } from "./charger.ts";
 import { STATUS } from "./mqtt-status.ts";
 import type { Publisher } from "./mqtt-status.ts";
@@ -69,7 +69,8 @@ export async function runSession(
     if (remainingKwh === 0) {
       log("Target kWh reached.");
       publisher.resetTargetTime();
-      break;
+      publisher.setStatus(STATUS.idle);
+      return;
     }
 
     publisher.setStatus(STATUS.fetchingData);
@@ -101,7 +102,8 @@ export async function runSession(
     if (!nextCharge) {
       log("No charge slots remaining in window.");
       publisher.resetTargetTime();
-      break;
+      publisher.setStatus(STATUS.idle);
+      return;
     }
 
     publisher.setStatus(STATUS.plannedChargeStart(localTimeShort(nextCharge.start)));
@@ -147,6 +149,4 @@ export async function runSession(
     }
     // Always loop back to re-plan for the next slot.
   }
-
-  publisher.setStatus(STATUS.idle);
 }

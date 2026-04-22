@@ -132,7 +132,7 @@ src/
   config.ts         Config type definition, JSON loader
   types.ts          Slot interface
   planner.ts        core planning logic (slot selection)
-  printer.ts        terminal plan output (ANSI colours)
+  print-plan.ts     terminal plan output (ANSI colours)
   charger.ts        ChargingSession / ChargerDriver interfaces, runCharging loop
   mqtt-client.ts    MQTT connect, plug-in detection, makeMqttSession()
   spot.ts           spot price fetching + per-day file cache

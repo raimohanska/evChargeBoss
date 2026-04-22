@@ -71,11 +71,11 @@
 import { loadConfig } from "./config.ts";
 import { IncompleteDataError } from "./errors.ts";
 import { plan } from "./planner.ts";
-import { printPlan } from "./printer.ts";
+import { printPlan } from "./print-plan.ts";
 import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
 import { STATUS, createPublisher } from "./mqtt-status.ts";
 import { log, makeClock } from "./utils.ts";
-import { parseArgs } from "./parseArgs.ts";
+import { parseArgs } from "./parse-args.ts";
 import { runSession, parseTargetTime } from "./main-loop.ts";
 
 function errorStatus(err: unknown): string {
