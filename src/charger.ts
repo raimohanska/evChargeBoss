@@ -28,6 +28,28 @@ export interface ChargingSession {
 }
 
 /**
+ * Parameters for {@link runSlot}.
+ *
+ * chargeRunEnd: end of the consecutive charging run this slot belongs to,
+ *   used only for "Charging until …" status display.  Pass null for
+ *   non-charge slots or when the look-ahead value is unavailable.
+ * prevChargedKwh: energy already delivered earlier in this session, used
+ *   for the cumulative display via publisher.setChargedEnergy.
+ */
+export interface RunSlotParams {
+  slot: Slot;
+  chargeRunEnd: Date | null;
+  driver: ChargerDriver;
+  publisher: Publisher | undefined;
+  signal: CancelSignal | undefined;
+  wattsSource: WattsSource | undefined;
+  prevChargedKwh: number;
+  powerThresholdW: number;
+  powerKw: number;
+  clock: Clock;
+}
+
+/**
  * Executes a single slot in the charging schedule.
  *
  * The caller is responsible for sleeping to the slot start time before
@@ -35,28 +57,22 @@ export interface ChargingSession {
  * driver, waits for the slot to finish (or signal abort), and returns the
  * energy delivered.
  *
- * chargeRunEnd: end of the consecutive charging run this slot belongs to,
- *   used only for "Charging until …" status display.  Pass null for
- *   non-charge slots or when the look-ahead value is unavailable.
- * prevChargedKwh: energy already delivered earlier in this session, used
- *   for the cumulative display via publisher.setChargedEnergy.
- *
  * Returns kWh delivered:
  *   - relay energy delta when the relay reports cumulative energy, otherwise
  *   - powerKw × 0.25 h when the slot completed normally, 0 when aborted.
  */
-export async function runSlot(
-  slot: Slot,
-  chargeRunEnd: Date | null,
-  driver: ChargerDriver,
-  publisher: Publisher | undefined,
-  signal: CancelSignal | undefined,
-  wattsSource: WattsSource | undefined,
-  prevChargedKwh: number,
-  powerThresholdW: number,
-  powerKw: number,
-  clock: Clock,
-): Promise<number> {
+export async function runSlot({
+  slot,
+  chargeRunEnd,
+  driver,
+  publisher,
+  signal,
+  wattsSource,
+  prevChargedKwh,
+  powerThresholdW,
+  powerKw,
+  clock,
+}: RunSlotParams): Promise<number> {
   const label = slot.charge
     ? slot.effectiveCostEur === 0
       ? "solar-free"

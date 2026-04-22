@@ -20,24 +20,6 @@ export function parseTargetTime(timeStr: string, from: Date): Date {
   return tomorrow;
 }
 
-/** Returns true when the set of charge-slot start times differs between two plans. */
-function chargeSlotsChanged(prev: Slot[], next: Slot[]): boolean {
-  const times = (slots: Slot[]) => slots.filter((s) => s.charge).map((s) => s.start.getTime());
-  const a = times(prev);
-  const b = times(next);
-  return a.length !== b.length || a.some((t, i) => t !== b[i]);
-}
-
-/** Returns the end of the consecutive charge run that startSlot belongs to. */
-function findChargeRunEnd(slots: Slot[], startSlot: Slot): Date {
-  const idx = slots.indexOf(startSlot);
-  let end = startSlot.end;
-  for (let i = idx + 1; i < slots.length && slots[i].charge; i++) {
-    end = slots[i].end;
-  }
-  return end;
-}
-
 /**
  * Runs one complete charging session: waits for plug-in, plans, charges one
  * slot at a time until the target kWh is reached or no slots remain.
@@ -124,18 +106,18 @@ export async function runSession(
 
     // Run the single slot.
     const chargeRunEnd = findChargeRunEnd(slots, nextCharge);
-    const kwh = await runSlot(
-      nextCharge,
+    const kwh = await runSlot({
+      slot: nextCharge,
       chargeRunEnd,
-      session.driver,
+      driver: session.driver,
       publisher,
-      replanController.signal,
-      session.wattsSource,
-      chargedKwh,
-      config.mqtt?.powerThresholdW ?? 10,
-      config.charging.powerKw,
+      signal: replanController.signal,
+      wattsSource: session.wattsSource,
+      prevChargedKwh: chargedKwh,
+      powerThresholdW: config.mqtt?.powerThresholdW ?? 10,
+      powerKw: config.charging.powerKw,
       clock,
-    );
+    });
     chargedKwh += kwh;
 
     // Ensure relay is OFF between slots; runSlot already sends OFF on abort.
@@ -149,4 +131,22 @@ export async function runSession(
     }
     // Always loop back to re-plan for the next slot.
   }
+}
+
+/** Returns true when the set of charge-slot start times differs between two plans. */
+function chargeSlotsChanged(prev: Slot[], next: Slot[]): boolean {
+  const times = (slots: Slot[]) => slots.filter((s) => s.charge).map((s) => s.start.getTime());
+  const a = times(prev);
+  const b = times(next);
+  return a.length !== b.length || a.some((t, i) => t !== b[i]);
+}
+
+/** Returns the end of the consecutive charge run that startSlot belongs to. */
+function findChargeRunEnd(slots: Slot[], startSlot: Slot): Date {
+  const idx = slots.indexOf(startSlot);
+  let end = startSlot.end;
+  for (let i = idx + 1; i < slots.length && slots[i].charge; i++) {
+    end = slots[i].end;
+  }
+  return end;
 }
