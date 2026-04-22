@@ -76,7 +76,7 @@ import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
 import { STATUS, createPublisher } from "./mqtt-status.ts";
 import { log, makeClock } from "./utils.ts";
 import { parseArgs } from "./parseArgs.ts";
-import { runMainLoop, parseTargetTime } from "./main-loop.ts";
+import { runSession, parseTargetTime } from "./main-loop.ts";
 
 function errorStatus(err: unknown): string {
   if (err instanceof IncompleteDataError) {
@@ -119,7 +119,22 @@ async function main() {
   const session = makeMqttSession(mqttClient, config.mqtt, publisher);
 
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
-  await runMainLoop(session, publisher, config, initialFrom, errorStatus, clock);
+
+  // Charge loop: run sessions indefinitely, retrying on error.
+  let from: Date | undefined = initialFrom;
+  while (true) {
+    if (from) log(`Planning from ${from.toISOString()}`);
+    try {
+      await runSession(session, publisher, config, from, clock);
+      from = undefined;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`ERROR: ${msg}`);
+      publisher.setError(errorStatus(err));
+      log("Retrying in 60s...");
+      await clock.sleep(60_000);
+    }
+  }
 }
 
 main().catch((err) => {

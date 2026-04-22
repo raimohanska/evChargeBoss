@@ -1,17 +1,11 @@
-import { connectMqtt, makeMqttSession } from '../../src/mqtt-client.ts';
-import type { Publisher } from '../../src/mqtt-status.ts';
-import { createPublisher, STATUS } from '../../src/mqtt-status.ts';
-import { makeClock } from '../../src/utils.ts';
-import { runMainLoop } from '../../src/main-loop.ts';
-import { IncompleteDataError } from '../../src/errors.ts';
-import type { Config } from '../../src/config.ts';
-import { MqttRelaySimulator } from './mqtt-relay-simulator.ts';
-import { makeTestConfig } from './config.ts';
-
-function errorStatus(err: unknown): string {
-  if (err instanceof IncompleteDataError) return STATUS.waitingForSpot;
-  return STATUS.error(err instanceof Error ? err.message : String(err));
-}
+import { connectMqtt, makeMqttSession } from "../../src/mqtt-client.ts";
+import type { Publisher } from "../../src/mqtt-status.ts";
+import { createPublisher } from "../../src/mqtt-status.ts";
+import { makeClock } from "../../src/utils.ts";
+import { runSession } from "../../src/main-loop.ts";
+import type { Config } from "../../src/config.ts";
+import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
+import { makeTestConfig } from "./config.ts";
 
 export interface MqttTestSession {
   loopPromise: Promise<void>;
@@ -24,7 +18,7 @@ export interface MqttTestSession {
 export async function startMqttSession(
   from: Date,
   speedup: number,
-  chargingOverrides: Partial<Config['charging']> = {},
+  chargingOverrides: Partial<Config["charging"]> = {},
 ): Promise<MqttTestSession> {
   const config = makeTestConfig(chargingOverrides);
   const [sessionClient, relayClient] = await Promise.all([
@@ -63,14 +57,7 @@ export async function startMqttSession(
   // relay has subscribed, causing the relay to miss the command permanently.
   await relay.ready;
 
-  const loopPromise = runMainLoop(
-    session,
-    publisher,
-    config,
-    from,
-    errorStatus,
-    clock,
-  );
+  const loopPromise = runSession(session, publisher, config, from, clock);
 
   return {
     loopPromise,
