@@ -47,7 +47,7 @@ export async function runSession(
   updateReplanCallback();
 
   while (true) {
-    const remainingKwh = Math.max(0, config.evCharging.charging.targetKwh - chargedKwh);
+    const remainingKwh = Math.max(0, config.evCharging.targetKwh - chargedKwh);
     if (remainingKwh === 0) {
       log("Target kWh reached.");
       publisher.resetTargetTime();
@@ -60,8 +60,7 @@ export async function runSession(
     replanController = new Canceller();
     updateReplanCallback();
 
-    const targetTimeStr =
-      publisher.getTargetTimeOverride() ?? config.evCharging.charging.targetTime;
+    const targetTimeStr = publisher.getTargetTimeOverride() ?? config.evCharging.targetTime;
     const now = planFrom ?? clock.now();
     const targetDate = parseTargetTime(targetTimeStr, now);
     planFrom = undefined;
@@ -117,15 +116,15 @@ export async function runSession(
       signal: replanController.signal,
       wattsSource: session.wattsSource,
       prevChargedKwh: chargedKwh,
-      powerThresholdW: config.evCharging.charging.mqtt?.powerThresholdW ?? 10,
-      powerKw: config.evCharging.charging.powerKw,
+      powerThresholdW: config.evCharging.mqtt?.powerThresholdW ?? 10,
+      powerKw: config.evCharging.powerKw,
       clock,
     });
     chargedKwh += kwh;
 
     if (replanController.signal.aborted) {
       log(
-        `Target time changed — re-planning with ${(config.evCharging.charging.targetKwh - chargedKwh).toFixed(2)} kWh remaining.`,
+        `Target time changed — re-planning with ${(config.evCharging.targetKwh - chargedKwh).toFixed(2)} kWh remaining.`,
       );
     }
     // Relay stays ON after a normal slot. The next iteration will send OFF

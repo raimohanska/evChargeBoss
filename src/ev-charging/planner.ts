@@ -9,7 +9,7 @@ export async function plan(
   targetKwh: number,
   config: Config,
 ): Promise<Slot[]> {
-  const { powerKw } = config.evCharging.charging;
+  const { powerKw } = config.evCharging;
 
   const pricedSlots = await fetchSlots(from, targetTime, {
     solar: config.solar,

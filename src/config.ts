@@ -2,7 +2,15 @@ import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
 import { EvChargingConfigSchema } from "./ev-charging/config.ts";
 
-export type { Mode, EvChargingConfig, MqttConfig, ChargingConfig } from "./ev-charging/config.ts";
+export type { Mode, EvChargingConfig, MqttConfig } from "./ev-charging/config.ts";
+
+const BrokerConfigSchema = z.strictObject({
+  brokerUrl: z.string(),
+  username: z.string(),
+  password: z.string(),
+});
+
+export type BrokerConfig = z.infer<typeof BrokerConfigSchema>;
 
 const SolarConfigSchema = z.strictObject({
   lat: z.number().min(-90).max(90),
@@ -32,6 +40,7 @@ export type SolarConfig = z.infer<typeof SolarConfigSchema>;
 export type ElectricityConfig = z.infer<typeof ElectricityConfigSchema>;
 
 const ConfigSchema = z.strictObject({
+  mqtt: BrokerConfigSchema.optional(),
   evCharging: EvChargingConfigSchema,
   solar: SolarConfigSchema,
   electricity: ElectricityConfigSchema,

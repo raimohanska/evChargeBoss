@@ -20,13 +20,13 @@ export interface MqttTestSession {
 export async function startMqttSession(
   from: Date,
   speedup: number,
-  chargingOverrides: Partial<Config["evCharging"]["charging"]> = {},
+  chargingOverrides: Partial<Omit<Config["evCharging"], "mode" | "mqtt">> = {},
   mqttOverrides: Partial<MqttConfig> = {},
 ): Promise<MqttTestSession> {
   const config = makeTestConfig(chargingOverrides, mqttOverrides);
   const [sessionClient, relayClient] = await Promise.all([
-    connectMqtt(config.evCharging.charging.mqtt!),
-    connectMqtt(config.evCharging.charging.mqtt!),
+    connectMqtt(config.mqtt!),
+    connectMqtt(config.mqtt!),
   ]);
 
   // Wrap LoggingPublisher to intercept target-time override and replan callback.
@@ -55,9 +55,9 @@ export async function startMqttSession(
     },
   };
 
-  const session = makeMqttSession(sessionClient, config.evCharging.charging.mqtt!, publisher);
+  const session = makeMqttSession(sessionClient, config.evCharging.mqtt!, publisher);
   const clock = makeClock(speedup, from);
-  const relay = new MqttRelaySimulator(relayClient, config.evCharging.charging.mqtt!, clock);
+  const relay = new MqttRelaySimulator(relayClient, config.evCharging.mqtt!, clock);
 
   // Wait for the relay's charger-topic subscription to be confirmed (SUBACK) before
   // starting the main loop.  Without this, waitForStart() can publish ON before the

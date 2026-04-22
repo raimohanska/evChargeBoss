@@ -14,8 +14,8 @@ process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 const FROM = new Date("2026-04-18T14:00:00");
 const CONFIG = loadConfig();
 
-const TARGET_TIME = parseTargetTime(CONFIG.evCharging.charging.targetTime, FROM);
-const TARGET_KWH = CONFIG.evCharging.charging.targetKwh;
+const TARGET_TIME = parseTargetTime(CONFIG.evCharging.targetTime, FROM);
+const TARGET_KWH = CONFIG.evCharging.targetKwh;
 
 test("correct number of total and charge slots", async () => {
   const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, CONFIG);
@@ -74,7 +74,7 @@ test("every slot has spot price and solar forecast populated", async () => {
 const FROM_EVENING = new Date("2026-04-18T17:00:00");
 const CONFIG_5KWH = {
   ...CONFIG,
-  evCharging: { ...CONFIG.evCharging, charging: { ...CONFIG.evCharging.charging, targetKwh: 5 } },
+  evCharging: { ...CONFIG.evCharging, targetKwh: 5 },
 };
 
 test("17:00 session → 7 solar-free charge slots on Apr 19 at 10:00–11:45", async () => {

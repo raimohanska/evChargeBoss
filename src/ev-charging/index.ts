@@ -29,22 +29,27 @@ export async function runEvCharging(config: Config): Promise<void> {
   log(`=== EV Charger Planner [${modeLabel}] ===`);
 
   if (mode === "plan") {
-    const targetTimeStr = config.evCharging.charging.targetTime;
+    const targetTimeStr = config.evCharging.targetTime;
     const now = initialFrom ?? new Date();
     const targetDate = parseTargetTime(targetTimeStr, now);
-    const slots = await plan(now, targetDate, config.evCharging.charging.targetKwh, config);
+    const slots = await plan(now, targetDate, config.evCharging.targetKwh, config);
     printPlan(slots);
     return;
   }
 
-  if (!config.evCharging.charging.mqtt) {
-    console.error("ERROR: charge mode requires mqtt to be configured in config.json");
+  if (!config.mqtt) {
+    console.error("ERROR: charge mode requires mqtt (broker) to be configured in config.json");
     process.exit(1);
   }
 
-  const mqttClient = await connectMqtt(config.evCharging.charging.mqtt);
+  if (!config.evCharging.mqtt) {
+    console.error("ERROR: charge mode requires evCharging.mqtt to be configured in config.json");
+    process.exit(1);
+  }
+
+  const mqttClient = await connectMqtt(config.mqtt);
   const publisher = createPublisher(config.evCharging, mqttClient);
-  const session = makeMqttSession(mqttClient, config.evCharging.charging.mqtt, publisher);
+  const session = makeMqttSession(mqttClient, config.evCharging.mqtt, publisher);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
 
   // Charge loop: run sessions indefinitely, retrying on error.

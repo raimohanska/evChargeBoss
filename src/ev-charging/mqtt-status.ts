@@ -93,7 +93,7 @@ export class StatusPublisher implements Publisher {
 
   resetTargetTime(): void {
     this.targetTimeOverride = null;
-    this.pub(`${BASE}/target_time/state`, this.config.charging.targetTime);
+    this.pub(`${BASE}/target_time/state`, this.config.targetTime);
   }
 
   private state: Record<string, string> = {
@@ -139,7 +139,7 @@ export class StatusPublisher implements Publisher {
     // Remove any previously-retained `time` discovery (old entity type, now replaced by `text`)
     this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time/config`, "", true);
     this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
-    this.pub(timeStateTopic, this.targetTimeOverride ?? this.config.charging.targetTime);
+    this.pub(timeStateTopic, this.targetTimeOverride ?? this.config.targetTime);
 
     this.client.subscribe(timeCmdTopic, (err) => {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
@@ -177,7 +177,7 @@ export class StatusPublisher implements Publisher {
     const charge = slots.filter((s) => s.charge);
     const cost = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
     const totalSolarFraction = charge.reduce(
-      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / this.config.charging.powerKw),
+      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / this.config.powerKw),
       0,
     );
     const pct = charge.length > 0 ? Math.round((totalSolarFraction / charge.length) * 100) : 0;
@@ -221,7 +221,7 @@ export class LoggingPublisher implements Publisher {
 
   resetTargetTime(): void {
     this.targetTimeOverride = null;
-    log(`[Publisher] Target time reset to ${this.config.charging.targetTime}`);
+    log(`[Publisher] Target time reset to ${this.config.targetTime}`);
   }
 
   setStatus(status: string): void {
@@ -236,7 +236,7 @@ export class LoggingPublisher implements Publisher {
     const charge = slots.filter((s) => s.charge);
     const cost = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
     const totalSolarFraction = charge.reduce(
-      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / this.config.charging.powerKw),
+      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / this.config.powerKw),
       0,
     );
     const pct = charge.length > 0 ? Math.round((totalSolarFraction / charge.length) * 100) : 0;

@@ -1,13 +1,14 @@
 import mqtt from "mqtt";
 import type { MqttConfig } from "./config.ts";
+import type { BrokerConfig } from "../config.ts";
 import type { ChargingSession, WattsSource, WattsUpdate } from "./charger.ts";
 import type { Publisher } from "./mqtt-status.ts";
 import { log } from "../utils.ts";
 
 export type MqttClient = mqtt.MqttClient;
 
-export async function connectMqtt(mqttConfig: MqttConfig): Promise<MqttClient> {
-  const { brokerUrl, username, password } = mqttConfig;
+export async function connectMqtt(brokerConfig: BrokerConfig): Promise<MqttClient> {
+  const { brokerUrl, username, password } = brokerConfig;
   return new Promise((resolve, reject) => {
     const opts: mqtt.IClientOptions = {};
     if (username) opts.username = username;
