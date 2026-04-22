@@ -1,8 +1,8 @@
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from "fs";
 
 export function readCache<T>(file: string): T | null {
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) as T;
+    return JSON.parse(readFileSync(file, "utf8")) as T;
   } catch {
     return null;
   }
