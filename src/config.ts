@@ -1,20 +1,35 @@
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
-import {
-  EvChargingConfigSchema,
-  SolarConfigSchema,
-  ElectricityConfigSchema,
-  TestConfigSchema,
-} from "./ev-charging/config.ts";
+import { EvChargingConfigSchema } from "./ev-charging/config.ts";
 
-export type {
-  Mode,
-  EvChargingConfig,
-  MqttConfig,
-  ChargingConfig,
-  SolarConfig,
-  ElectricityConfig,
-} from "./ev-charging/config.ts";
+export type { Mode, EvChargingConfig, MqttConfig, ChargingConfig } from "./ev-charging/config.ts";
+
+const SolarConfigSchema = z.strictObject({
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
+  declination: z.number(),
+  azimuth: z.number(),
+  kwp: z.number().positive(),
+  treeShadingSchedule: z.array(
+    z.strictObject({
+      time: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
+      outputFraction: z.number().min(0).max(1),
+    }),
+  ),
+});
+
+const ElectricityConfigSchema = z.strictObject({
+  transportCostEurKwh: z.number().nonnegative(),
+});
+
+const TestConfigSchema = z
+  .object({
+    timeSpeedupFactor: z.number().positive().optional(),
+  })
+  .optional();
+
+export type SolarConfig = z.infer<typeof SolarConfigSchema>;
+export type ElectricityConfig = z.infer<typeof ElectricityConfigSchema>;
 
 const ConfigSchema = z.strictObject({
   evCharging: EvChargingConfigSchema,
