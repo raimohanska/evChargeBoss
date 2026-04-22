@@ -4,6 +4,8 @@
 
 Every completed task ends with a `git commit`. Do not batch multiple tasks into one commit unless the user explicitly asks. The user expects a commit after each change.
 
+Run `npx prettier --write` on changed files before committing.
+
 ## Running the code
 
 ```sh
@@ -14,6 +16,8 @@ npm test                                               # run unit tests
 
 Tests use `TZ=Europe/Helsinki` and `CONFIG_FILE=test/fixtures/config.json`. Always run tests before committing a change that touches planning logic.
 
+Test files are listed explicitly in `package.json` — add new test files there.
+
 ## Project layout
 
 All TypeScript source lives under `src/`. Tests live under `test/`. Do not put `.ts` files in the project root.
@@ -21,6 +25,7 @@ All TypeScript source lives under `src/`. Tests live under `test/`. Do not put `
 ```
 src/          TypeScript sources
 test/         tests + fixtures
+  helpers/    shared test helpers (mqtt-session.ts, mqtt-relay-simulator.ts, config.ts)
   fixtures/   frozen cache files and config — never modify these unless updating expected test values
 config-example.json   committed template; users copy this to config.json
 config.json   gitignored user config (may not exist in checkout)
@@ -45,7 +50,7 @@ config.json   gitignored user config (may not exist in checkout)
 
 Add new modes (timer, webhook, etc.) by implementing `ChargingSession`. The main loop in `src/index.ts` does not need to change.
 
-**`ChargerDriver`** (`src/charger.ts`) — single method `send(on: boolean)`. `simulateSession` uses a console-only driver; MQTT mode uses `makeMqttSession()` from `src/mqtt-client.ts`.
+**`ChargerDriver`** (`src/charger.ts`) — single method `send(on: boolean)`. MQTT mode uses `makeMqttSession()` from `src/mqtt-client.ts`.
 
 **`Config`** (`src/config.ts`) — loaded from JSON at startup. Resolution order:
 1. `CONFIG_FILE` env var
@@ -80,6 +85,16 @@ The main charge/simulate loop **never exits** on errors. All exceptions are caug
 - Config fixture in `test/fixtures/config.json` — frozen copy of `config-example.json`.
 - Tests never hit the network. If a change would require new fixture data, update the fixtures and the expected values together.
 - `CACHE_DIR` env var points tests at `test/fixtures/` so they never read or write the working cache.
+
+## MQTT integration test conventions
+
+- MQTT integration tests require a Mosquitto broker: `docker compose up -d`.
+- Tests run sequentially (`concurrency: false`) — concurrent MQTT sessions on the same topics would interfere.
+- `MqttRelaySimulator` (`test/helpers/mqtt-relay-simulator.ts`) simulates the physical relay: subscribes to the charger command topic, publishes power/energy readings on the power topic when ON, and tracks every relay command with timestamps.
+- `startMqttSession()` (`test/helpers/mqtt-session.ts`) wires up the full stack. It accepts `chargingOverrides` and `mqttOverrides` to customise a test without touching the shared fixture config.
+- **Never add `energyField` (or other opt-in settings) to `test/fixtures/config.json`** — that fixture is shared by all integration tests. Use `mqttOverrides` in `startMqttSession()` to enable them per-test.
+- The `CACHE_DIR` constant in `spot.ts` / `solar.ts` is captured at module-load time (ES module top-level). Setting `process.env.CACHE_DIR` in the test file body **after** imports is too late. Tests that need the env var must set it before any imports (use `process.env` assignment at the top of the file, before imports).
+- Each MQTT test session uses two clients: `sessionClient` (drives the main loop) and `relayClient` (simulates the relay). Both must be closed in `teardown()` with `client.end(true)` (force-close) so TCP sockets are freed before the next test.
 
 ## Build
 
