@@ -60,3 +60,42 @@ export function persistSolarCache(map: Map<number, number>): void {
   }
   log(`  Solar forecast cached (${byDate.size} day file(s)).`);
 }
+
+/**
+ * Return the watt value for `epoch` from the solar map, falling back to the
+ * nearest preceding epoch when there is no exact match.
+ * `solarEpochsDesc` must be the map's keys sorted descending (pre-built by
+ * the caller to avoid re-allocating it for every slot).
+ */
+export function lookupSolarW(
+  epoch: number,
+  solarMap: Map<number, number>,
+  solarEpochsDesc: number[],
+): number {
+  return solarMap.get(epoch) ?? solarMap.get(solarEpochsDesc.find((k) => k <= epoch) ?? -1) ?? 0;
+}
+
+export function treeShadingFactor(
+  date: Date,
+  schedule: SolarConfig["treeShadingSchedule"],
+): number {
+  const minutesOfDay = date.getHours() * 60 + date.getMinutes();
+  const points = schedule.map(({ time, outputFraction }) => {
+    const [h, m] = time.split(":").map(Number);
+    return { minutes: h * 60 + m, outputFraction };
+  });
+
+  if (minutesOfDay <= points[0].minutes) return 1.0;
+  if (minutesOfDay >= points[points.length - 1].minutes)
+    return points[points.length - 1].outputFraction;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i],
+      b = points[i + 1];
+    if (minutesOfDay >= a.minutes && minutesOfDay < b.minutes) {
+      const t = (minutesOfDay - a.minutes) / (b.minutes - a.minutes);
+      return a.outputFraction + t * (b.outputFraction - a.outputFraction);
+    }
+  }
+  return 1.0;
+}
