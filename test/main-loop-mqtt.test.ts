@@ -41,7 +41,21 @@ describe("main-loop MQTT integration", { concurrency: false }, () => {
     const { loopPromise, relay, teardown } = await startMqttSession(FROM, SPEEDUP);
     try {
       await advanceToSolarWindow(relay);
-      await loopPromise; // 7 × 15-min slots complete (~630 ms real), loop exits via justOnce
+
+      // Slots 2–7 are consecutive (10:15–11:45). Each re-plan sends driver.send(true)
+      // again, but there must be NO OFF between them.  assertOnBefore() fails
+      // immediately if it sees an OFF instead — that is the key assertion here.
+      for (let i = 0; i < 6; i++) {
+        await relay.assertOnBefore("2026-04-19T11:46"); // all slots start before window end
+      }
+
+      // Final OFF is sent when the target kWh is reached.  Waiting for it
+      // explicitly avoids a race where loopPromise resolves (PUBACK) before the
+      // relay client's message handler fires.
+      await relay.assertOff("2026-04-19T12:00");
+      assert.equal(relay.offCount, 2, "relay must not toggle between consecutive charge slots");
+
+      await loopPromise;
     } finally {
       teardown();
     }

@@ -117,6 +117,11 @@ export class MqttRelaySimulator {
     );
   }
 
+  /** Number of OFF commands received since construction. */
+  get offCount(): number {
+    return this.states.filter((s) => !s).length;
+  }
+
   /** Wait for next relay command, assert it is ON, assert it arrived ~at expectedDateTime ("YYYY-MM-DDTHH:MM"). */
   async assertOn(expectedDateTime: string): Promise<void> {
     const t = await this.nextCommand(true);

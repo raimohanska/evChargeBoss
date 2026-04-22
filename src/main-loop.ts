@@ -51,6 +51,7 @@ export async function runSession(
     if (remainingKwh === 0) {
       log("Target kWh reached.");
       publisher.resetTargetTime();
+      await session.driver.send(false);
       publisher.setStatus(STATUS.idle);
       return;
     }
@@ -84,6 +85,7 @@ export async function runSession(
     if (!nextCharge) {
       log("No charge slots remaining in window.");
       publisher.resetTargetTime();
+      await session.driver.send(false);
       publisher.setStatus(STATUS.idle);
       return;
     }
@@ -120,15 +122,14 @@ export async function runSession(
     });
     chargedKwh += kwh;
 
-    // Ensure relay is OFF between slots; runSlot already sends OFF on abort.
-    if (!replanController.signal.aborted) {
-      await session.driver.send(false);
-      log("Charging session complete.");
-    } else {
+    if (replanController.signal.aborted) {
       log(
         `Target time changed — re-planning with ${(config.charging.targetKwh - chargedKwh).toFixed(2)} kWh remaining.`,
       );
     }
+    // Relay stays ON after a normal slot. The next iteration will send OFF
+    // before sleeping if there is a gap, keeping the relay on for back-to-back
+    // charge slots without an OFF→ON toggle.
     // Always loop back to re-plan for the next slot.
   }
 }
