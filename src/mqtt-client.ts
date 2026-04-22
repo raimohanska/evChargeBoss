@@ -1,8 +1,8 @@
-import mqtt from 'mqtt';
-import type { MqttConfig } from './config.ts';
-import type { ChargingSession, WattsSource, WattsUpdate } from './charger.ts';
-import type { Publisher } from './mqtt-status.ts';
-import { log } from './utils.ts';
+import mqtt from "mqtt";
+import type { MqttConfig } from "./config.ts";
+import type { ChargingSession, WattsSource, WattsUpdate } from "./charger.ts";
+import type { Publisher } from "./mqtt-status.ts";
+import { log } from "./utils.ts";
 
 export type MqttClient = mqtt.MqttClient;
 
@@ -16,25 +16,20 @@ export async function connectMqtt(mqttConfig: MqttConfig): Promise<MqttClient> {
     log(`Connecting to MQTT broker at ${brokerUrl}...`);
     const client = mqtt.connect(brokerUrl, opts);
 
-    client.once('connect', () => {
-      log('MQTT connected.');
+    client.once("connect", () => {
+      log("MQTT connected.");
       resolve(client);
     });
-    client.once('error', (err) => {
+    client.once("error", (err) => {
       client.end();
       reject(err);
     });
   });
 }
 
-async function waitForPlugIn(
-  client: MqttClient,
-  mqttConfig: MqttConfig,
-): Promise<void> {
+async function waitForPlugIn(client: MqttClient, mqttConfig: MqttConfig): Promise<void> {
   const { powerTopic, powerField, powerThresholdW } = mqttConfig;
-  log(
-    `Waiting for car plug-in (${powerTopic}.${powerField} > ${powerThresholdW} W)...`,
-  );
+  log(`Waiting for car plug-in (${powerTopic}.${powerField} > ${powerThresholdW} W)...`);
 
   return new Promise((resolve, reject) => {
     function onMessage(topic: string, message: Buffer) {
@@ -42,10 +37,10 @@ async function waitForPlugIn(
       try {
         const data = JSON.parse(message.toString()) as Record<string, unknown>;
         const watts = data[powerField];
-        if (typeof watts === 'number' && watts > powerThresholdW) {
+        if (typeof watts === "number" && watts > powerThresholdW) {
           log(`Car detected: ${watts} W on ${topic} — starting plan`);
-          client.off('message', onMessage);
-          client.off('error', onError);
+          client.off("message", onMessage);
+          client.off("error", onError);
           resolve();
         }
       } catch (err) {
@@ -54,12 +49,12 @@ async function waitForPlugIn(
     }
 
     function onError(err: Error) {
-      client.off('message', onMessage);
+      client.off("message", onMessage);
       reject(err);
     }
 
-    client.on('message', onMessage);
-    client.once('error', onError);
+    client.on("message", onMessage);
+    client.once("error", onError);
     client.subscribe(powerTopic, (err) => {
       if (err) reject(err);
     });
@@ -73,14 +68,7 @@ export function makeMqttSession(
   mqttConfig: MqttConfig,
   _publisher: Publisher,
 ): ChargingSession {
-  const {
-    chargerTopic,
-    onPayload,
-    offPayload,
-    powerTopic,
-    powerField,
-    energyField,
-  } = mqttConfig;
+  const { chargerTopic, onPayload, offPayload, powerTopic, powerField, energyField } = mqttConfig;
 
   // Persistent watts listeners — kept alive for the whole session
   const wattsListeners: Array<(u: WattsUpdate) => void> = [];
@@ -95,13 +83,30 @@ export function makeMqttSession(
     },
   };
 
+  // Persistent MQTT handler — routes powerTopic messages to wattsListeners for
+  // the lifetime of the session.  Registered here so it survives waitForStart().
+  const msgHandler = (topic: string, message: Buffer) => {
+    if (topic !== powerTopic) return;
+    try {
+      const data = JSON.parse(message.toString()) as Record<string, unknown>;
+      const w = data[powerField];
+      if (typeof w !== "number") return;
+      const e = energyField ? data[energyField] : undefined;
+      for (const l of wattsListeners)
+        l({ watts: w, ...(typeof e === "number" && { energyKwh: e }) });
+    } catch {
+      // ignore malformed JSON
+    }
+  };
+  client.on("message", msgHandler);
+
   const driver = {
     async send(on: boolean): Promise<void> {
       const payload = on ? onPayload : offPayload;
       return new Promise((resolve, reject) => {
         client.publish(chargerTopic, payload, (err) => {
           if (err) return reject(err);
-          log(`[MQTT] → ${on ? 'ON ' : 'OFF'} published to ${chargerTopic}`);
+          log(`[MQTT] → ${on ? "ON " : "OFF"} published to ${chargerTopic}`);
           resolve();
         });
       });
@@ -110,37 +115,16 @@ export function makeMqttSession(
 
   return {
     end() {
+      client.off("message", msgHandler);
       client.end();
     },
     async waitForStart() {
-      const msgHandler = (topic: string, message: Buffer) => {
-        if (topic !== powerTopic) return;
-        try {
-          const data = JSON.parse(message.toString()) as Record<
-            string,
-            unknown
-          >;
-          const w = data[powerField];
-          if (typeof w !== 'number') return;
-          const e = energyField ? data[energyField] : undefined;
-          for (const l of wattsListeners)
-            l({
-              watts: w,
-              ...(typeof e === 'number' && { energyKwh: e }),
-            });
-        } catch {
-          // ignore malformed JSON
-        }
-      };
-      client.on('message', msgHandler);
       try {
         await driver.send(true);
         await waitForPlugIn(client, mqttConfig);
       } catch (err) {
         client.end();
         throw err;
-      } finally {
-        client.off('message', msgHandler);
       }
     },
     driver,
