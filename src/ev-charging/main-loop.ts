@@ -1,12 +1,12 @@
-import type { Config } from "./config.ts";
+import type { EvChargingConfig } from "../config.ts";
 import type { Slot } from "./types.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
 import { runSlot } from "./charger.ts";
 import { STATUS } from "./mqtt-status.ts";
 import type { Publisher } from "./mqtt-status.ts";
-import { Canceller, localTimeShort, log } from "./utils.ts";
-import type { Clock } from "./utils.ts";
+import { Canceller, localTimeShort, log } from "../utils.ts";
+import type { Clock } from "../utils.ts";
 import type { ChargingSession } from "./charger.ts";
 
 export function parseTargetTime(timeStr: string, from: Date): Date {
@@ -30,7 +30,7 @@ export function parseTargetTime(timeStr: string, from: Date): Date {
 export async function runSession(
   session: ChargingSession,
   publisher: Publisher,
-  config: Config,
+  config: EvChargingConfig,
   from: Date | undefined,
   clock: Clock,
 ): Promise<void> {

@@ -8,9 +8,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { connectMqtt, makeMqttSession } from "../src/mqtt-client.ts";
-import { createPublisher } from "../src/mqtt-status.ts";
-import type { WattsUpdate } from "../src/charger.ts";
+import { connectMqtt, makeMqttSession } from "../src/ev-charging/mqtt-client.ts";
+import { createPublisher } from "../src/ev-charging/mqtt-status.ts";
+import type { WattsUpdate } from "../src/ev-charging/charger.ts";
 import { makeTestConfig } from "./helpers/config.ts";
 
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
@@ -27,11 +27,11 @@ process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import
  */
 test("wattsSource delivers updates after waitForStart() resolves", async () => {
   const config = makeTestConfig();
-  const mqtt = config.mqtt!;
+  const mqtt = config.evCharging.mqtt!;
 
   const [sessionClient, helperClient] = await Promise.all([connectMqtt(mqtt), connectMqtt(mqtt)]);
 
-  const publisher = createPublisher(config);
+  const publisher = createPublisher(config.evCharging);
   const session = makeMqttSession(sessionClient, mqtt, publisher);
 
   // Helper client subscribes to the charger command topic so the ON publish

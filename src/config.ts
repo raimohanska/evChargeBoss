@@ -3,7 +3,7 @@ import { z } from "zod";
 
 const ModeSchema = z.enum(["charge", "plan"]);
 
-const ConfigSchema = z.strictObject({
+const EvChargingConfigSchema = z.strictObject({
   mode: ModeSchema,
   mqtt: z
     .strictObject({
@@ -47,9 +47,14 @@ const ConfigSchema = z.strictObject({
     .optional(),
 });
 
+const ConfigSchema = z.strictObject({
+  evCharging: EvChargingConfigSchema,
+});
+
 export type Mode = z.infer<typeof ModeSchema>;
+export type EvChargingConfig = z.infer<typeof EvChargingConfigSchema>;
 export type Config = z.infer<typeof ConfigSchema>;
-export type MqttConfig = NonNullable<Config["mqtt"]>;
+export type MqttConfig = NonNullable<EvChargingConfig["mqtt"]>;
 
 function getConfigPath(): string {
   if (process.env.CONFIG_FILE) return process.env.CONFIG_FILE;

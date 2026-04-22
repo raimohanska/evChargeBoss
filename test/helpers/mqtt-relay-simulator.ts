@@ -1,4 +1,4 @@
-import type { MqttClient } from "../../src/mqtt-client.ts";
+import type { MqttClient } from "../../src/ev-charging/mqtt-client.ts";
 import type { MqttConfig } from "../../src/config.ts";
 import type { Clock } from "../../src/utils.ts";
 import { realClock, localDateTimeString } from "../../src/utils.ts";

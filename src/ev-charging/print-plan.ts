@@ -1,5 +1,5 @@
 import type { Slot } from "./types.ts";
-import { log, IS_TTY, localTimeShort } from "./utils.ts";
+import { log, IS_TTY, localTimeShort } from "../utils.ts";
 
 export function printPlan(slots: Slot[]): void {
   const chargeSlots = slots.filter((s) => s.charge);

@@ -1,8 +1,8 @@
-import { connectMqtt, makeMqttSession } from "../../src/mqtt-client.ts";
-import type { Publisher } from "../../src/mqtt-status.ts";
-import { createPublisher } from "../../src/mqtt-status.ts";
+import { connectMqtt, makeMqttSession } from "../../src/ev-charging/mqtt-client.ts";
+import type { Publisher } from "../../src/ev-charging/mqtt-status.ts";
+import { createPublisher } from "../../src/ev-charging/mqtt-status.ts";
 import { makeClock } from "../../src/utils.ts";
-import { runSession } from "../../src/main-loop.ts";
+import { runSession } from "../../src/ev-charging/main-loop.ts";
 import type { Config, MqttConfig } from "../../src/config.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
 import { makeTestConfig } from "./config.ts";
@@ -20,13 +20,13 @@ export interface MqttTestSession {
 export async function startMqttSession(
   from: Date,
   speedup: number,
-  chargingOverrides: Partial<Config["charging"]> = {},
+  chargingOverrides: Partial<Config["evCharging"]["charging"]> = {},
   mqttOverrides: Partial<MqttConfig> = {},
 ): Promise<MqttTestSession> {
   const config = makeTestConfig(chargingOverrides, mqttOverrides);
   const [sessionClient, relayClient] = await Promise.all([
-    connectMqtt(config.mqtt!),
-    connectMqtt(config.mqtt!),
+    connectMqtt(config.evCharging.mqtt!),
+    connectMqtt(config.evCharging.mqtt!),
   ]);
 
   // Wrap LoggingPublisher to intercept target-time override and replan callback.
@@ -36,7 +36,7 @@ export async function startMqttSession(
   let targetTimeOverride: string | null = null;
   let replanCb: (() => void) | null = null;
   let lastChargedEnergy = 0;
-  const base = createPublisher(config);
+  const base = createPublisher(config.evCharging);
   const publisher: Publisher = {
     setReplanCallback: (cb) => {
       replanCb = cb;
@@ -55,16 +55,16 @@ export async function startMqttSession(
     },
   };
 
-  const session = makeMqttSession(sessionClient, config.mqtt!, publisher);
+  const session = makeMqttSession(sessionClient, config.evCharging.mqtt!, publisher);
   const clock = makeClock(speedup, from);
-  const relay = new MqttRelaySimulator(relayClient, config.mqtt!, clock);
+  const relay = new MqttRelaySimulator(relayClient, config.evCharging.mqtt!, clock);
 
   // Wait for the relay's charger-topic subscription to be confirmed (SUBACK) before
   // starting the main loop.  Without this, waitForStart() can publish ON before the
   // relay has subscribed, causing the relay to miss the command permanently.
   await relay.ready;
 
-  const loopPromise = runSession(session, publisher, config, from, clock);
+  const loopPromise = runSession(session, publisher, config.evCharging, from, clock);
 
   return {
     loopPromise,

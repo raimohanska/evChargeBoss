@@ -69,75 +69,10 @@
 // need to change.
 
 import { loadConfig } from "./config.ts";
-import { IncompleteDataError } from "./errors.ts";
-import { plan } from "./planner.ts";
-import { printPlan } from "./print-plan.ts";
-import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
-import { STATUS, createPublisher } from "./mqtt-status.ts";
-import { log, makeClock } from "./utils.ts";
-import { parseArgs } from "./parse-args.ts";
-import { runSession, parseTargetTime } from "./main-loop.ts";
+import { runEvCharging } from "./ev-charging/index.ts";
 
-function errorStatus(err: unknown): string {
-  if (err instanceof IncompleteDataError) {
-    const m = err.message;
-    if (m.includes("spot price")) return STATUS.waitingForSpot;
-    if (m.includes("solar")) return STATUS.waitingForSolar;
-  }
-  const msg = err instanceof Error ? err.message : String(err);
-  if (msg.includes("spot-hinta")) return STATUS.waitingForSpot;
-  if (msg.includes("solar") || msg.includes("open-meteo") || msg.includes("forecast.solar"))
-    return STATUS.waitingForSolar;
-  if (msg.toLowerCase().includes("mqtt")) return STATUS.mqttError;
-  return STATUS.error(msg);
-}
-
-async function main() {
-  const config = loadConfig();
-  const { mode, from: initialFrom } = parseArgs(config.mode);
-
-  const modeLabel = mode === "charge" ? "charging" : mode;
-  log(`=== EV Charger Planner [${modeLabel}] ===`);
-
-  if (mode === "plan") {
-    const targetTimeStr = config.charging.targetTime;
-    const now = initialFrom ?? new Date();
-    const targetDate = parseTargetTime(targetTimeStr, now);
-    const slots = await plan(now, targetDate, config.charging.targetKwh, config);
-    printPlan(slots);
-    return;
-  }
-
-  if (!config.mqtt) {
-    console.error("ERROR: charge mode requires mqtt to be configured in config.json");
-    process.exit(1);
-  }
-
-  // Connect to MQTT broker
-  const mqttClient = await connectMqtt(config.mqtt);
-  const publisher = createPublisher(config, mqttClient);
-  const session = makeMqttSession(mqttClient, config.mqtt, publisher);
-
-  const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
-
-  // Charge loop: run sessions indefinitely, retrying on error.
-  let from: Date | undefined = initialFrom;
-  while (true) {
-    if (from) log(`Planning from ${from.toISOString()}`);
-    try {
-      await runSession(session, publisher, config, from, clock);
-      from = undefined;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log(`ERROR: ${msg}`);
-      publisher.setError(errorStatus(err));
-      log("Retrying in 60s...");
-      await clock.sleep(60_000);
-    }
-  }
-}
-
-main().catch((err) => {
+const config = loadConfig();
+runEvCharging(config.evCharging).catch((err) => {
   const msg = err instanceof Error ? err.message : String(err);
   console.error(`[${new Date().toISOString()}] Fatal: ${msg}`);
   process.exit(1);

@@ -1,13 +1,13 @@
-import type { Config } from "./config.ts";
+import type { EvChargingConfig } from "../config.ts";
 import type { Slot } from "./types.ts";
-import { fetchSlots } from "./slot-provider/index.ts";
-import { log, localTimeShort, localDateTimeString } from "./utils.ts";
+import { fetchSlots } from "../slot-provider/index.ts";
+import { log, localTimeShort, localDateTimeString } from "../utils.ts";
 
 export async function plan(
   from: Date,
   targetTime: Date,
   targetKwh: number,
-  config: Config,
+  config: EvChargingConfig,
 ): Promise<Slot[]> {
   const { powerKw } = config.charging;
 
