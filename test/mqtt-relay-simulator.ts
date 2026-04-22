@@ -1,12 +1,11 @@
-import type { MqttClient } from "../../src/ev-charging/mqtt-client.ts";
-import type { MqttConfig } from "../../src/config.ts";
-import type { Clock } from "../../src/utils/timing-utils.ts";
-import { localDateTimeString } from "../../src/utils/date-time-format.ts";
-import { realClock } from "../../src/utils/timing-utils.ts";
+import type { MqttClient } from "../src/ev-charging/mqtt-client.ts";
+import type { MqttConfig } from "../src/config.ts";
+import { Clock, realClock } from "../src/utils/timing-utils.ts";
+import { localDateTimeString } from "../src/utils/date-time-format.ts";
 import assert from "node:assert/strict";
 
-// 15 virtual minutes — absorbs MQTT roundtrip jitter at high speedup factors
-const TIMING_TOLERANCE_MS = 15 * 60_000;
+// 10 virtual minutes — absorbs MQTT roundtrip jitter at high speedup factors
+const TIMING_TOLERANCE_MS = 10 * 60_000;
 // Generous default: a 17-hour virtual gap takes ~6 s real at 10 000× speedup
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -31,34 +30,20 @@ export class MqttRelaySimulator {
   } | null = null;
   private powerTimer: ReturnType<typeof setInterval> | null = null;
 
-  // Cumulative energy tracking (virtual-time based, grows at powerKw while relay is ON).
-  private readonly powerKw = 3; // must match test config charging.powerKw
-  private baseEnergyKwh = 0;
-  private relayOnSince: Date | null = null;
+  private readonly client: MqttClient
+  private readonly mqttConfig: MqttConfig
+  private readonly clock: Clock
 
-  /** Current cumulative relay energy reading in kWh. */
-  get totalEnergyKwh(): number {
-    if (this.relayOnSince === null) return this.baseEnergyKwh;
-    const ms = this.clock.now().getTime() - this.relayOnSince.getTime();
-    return this.baseEnergyKwh + (this.powerKw * ms) / 3_600_000;
-  }
-
-  private readonly client: MqttClient;
-  private readonly mqttConfig: MqttConfig;
-  private readonly clock: Clock;
-
-  /** Resolves when the charger-topic subscription is confirmed (SUBACK received). */
-  readonly ready: Promise<void>;
-
-  constructor(client: MqttClient, mqttConfig: MqttConfig, clock: Clock = realClock) {
-    this.client = client;
-    this.mqttConfig = mqttConfig;
-    this.clock = clock;
-    this.ready = new Promise<void>((resolve, reject) => {
-      client.subscribe(mqttConfig.chargerTopic, (err) => {
-        if (err) reject(new Error(`Relay simulator subscribe failed: ${err.message}`));
-        else resolve();
-      });
+  constructor(
+    client: MqttClient,
+    mqttConfig: MqttConfig,
+    clock: Clock = realClock,
+  ) {
+    this.client = client
+    this.mqttConfig = mqttConfig
+    this.clock = clock
+    client.subscribe(mqttConfig.chargerTopic, (err) => {
+      if (err) throw new Error(`Relay simulator subscribe failed: ${err.message}`);
     });
     client.on("message", (topic: string, payload: Buffer) => {
       if (topic !== mqttConfig.chargerTopic) return;
@@ -72,7 +57,7 @@ export class MqttRelaySimulator {
     this.states.push(on);
     this.timestamps.push(this.clock.now());
     if (on) this.startEmittingPower();
-    else this.stopEmittingPower();
+    else    this.stopEmittingPower();
 
     const p = this.pending;
     if (p) {
@@ -83,44 +68,25 @@ export class MqttRelaySimulator {
   }
 
   private startEmittingPower(): void {
-    if (this.powerTimer) return; // already running
-    this.relayOnSince = this.clock.now();
-    const { powerTopic, powerField, energyField } = this.mqttConfig;
-    const publish = () => {
-      const payload: Record<string, number> = { [powerField]: 3000 };
-      if (energyField) payload[energyField] = this.totalEnergyKwh;
-      this.client.publish(powerTopic, JSON.stringify(payload));
-    };
-    // Set timer first so the guard in stopEmittingPower can clear it before
-    // the repeated publish fires.  Publish once immediately so waitForPlugIn
-    // resolves within a single MQTT roundtrip instead of waiting for the first
-    // setInterval tick (which at 10 000× speedup would advance virtual time by
-    // ~16 virtual minutes before charging begins).
-    this.powerTimer = setInterval(publish, 20);
-    publish();
+    if (this.powerTimer) return; // already stopped (OFF came in during delay)
+    this.powerTimer = setInterval(() => {
+      this.client.publish(
+        this.mqttConfig.powerTopic,
+        JSON.stringify({ [this.mqttConfig.powerField]: 3000 }),
+      );
+    }, 100);  
   }
 
   private stopEmittingPower(): void {
     if (this.powerTimer) {
       clearInterval(this.powerTimer);
       this.powerTimer = null;
-    }
-    // Accumulate energy for the completed ON period.
-    if (this.relayOnSince !== null) {
-      const ms = this.clock.now().getTime() - this.relayOnSince.getTime();
-      this.baseEnergyKwh += (this.powerKw * ms) / 3_600_000;
-      this.relayOnSince = null;
-    }
+    }    
     // Emit zero watts so any active watt-listener sees the charger is off.
     this.client.publish(
       this.mqttConfig.powerTopic,
       JSON.stringify({ [this.mqttConfig.powerField]: 0 }),
     );
-  }
-
-  /** Number of OFF commands received since construction. */
-  get offCount(): number {
-    return this.states.filter((s) => !s).length;
   }
 
   /** Wait for next relay command, assert it is ON, assert it arrived ~at expectedDateTime ("YYYY-MM-DDTHH:MM"). */
@@ -143,16 +109,6 @@ export class MqttRelaySimulator {
     );
   }
 
-  /** Wait for next relay command, assert it is ON, assert it arrived strictly before beforeDateTime ("YYYY-MM-DDTHH:MM"). */
-  async assertOnBefore(beforeDateTime: string): Promise<void> {
-    const t = await this.nextCommand(true);
-    const before = new Date(`${beforeDateTime}:00`);
-    assert.ok(
-      t < before,
-      `Expected relay ON before ${beforeDateTime}, arrived at ${localDateTimeString(t)}`,
-    );
-  }
-
   private async nextCommand(expected: boolean): Promise<Date> {
     let actual: boolean;
 
@@ -160,22 +116,22 @@ export class MqttRelaySimulator {
       actual = this.states[this.consumedIdx++];
     } else {
       actual = await new Promise<boolean>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          this.pending = null;
-          reject(
-            new Error(
+        const timer = setTimeout(
+          () => {
+            this.pending = null;
+            reject(new Error(
               `Relay simulator: timed out after ${DEFAULT_TIMEOUT_MS}ms waiting for ${expected ? "ON" : "OFF"}`,
-            ),
-          );
-        }, DEFAULT_TIMEOUT_MS);
+            ));
+          },
+          DEFAULT_TIMEOUT_MS,
+        );
         this.pending = { resolve, reject, timer };
       });
       this.consumedIdx++;
     }
 
     assert.equal(
-      actual,
-      expected,
+      actual, expected,
       `Expected relay ${expected ? "ON" : "OFF"} but got ${actual ? "ON" : "OFF"}`,
     );
     return this.timestamps[this.consumedIdx - 1];

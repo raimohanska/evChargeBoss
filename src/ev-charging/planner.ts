@@ -1,7 +1,8 @@
 import type { Config } from "../config.ts";
 import type { Slot } from "./types.ts";
-import { fetchSlots } from "../slot-provider/index.ts";
-import { log, localTimeShort, localDateTimeString } from "../utils.ts";
+import { fetchSlots } from "../electricity/index.ts";
+import { localTimeShort, localDateTimeString } from "../utils/date-time-format.ts";
+import { log } from "../utils/log.ts";
 
 export async function plan(
   from: Date,
@@ -11,10 +12,7 @@ export async function plan(
 ): Promise<Slot[]> {
   const { powerKw } = config.evCharging;
 
-  const pricedSlots = await fetchSlots(from, targetTime, {
-    solar: config.solar,
-    transportCostEurKwh: config.electricity.transportCostEurKwh,
-  });
+  const pricedSlots = await fetchSlots(from, targetTime, config.electricity, config.solar);
 
   log(
     `Planning ${pricedSlots.length} slots from ${localTimeShort(from)} to ${localDateTimeString(targetTime)}`,

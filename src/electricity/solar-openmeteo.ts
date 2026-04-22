@@ -1,5 +1,5 @@
-import type { SolarConfig } from "./types.ts";
-import { log } from "../utils.ts";
+import type { SolarConfig } from "./config.ts";
+import { log } from "../utils/log.ts";
 
 // Uses Open-Meteo shortwave radiation (horizontal plane) as a PV proxy.
 // Less accurate than forecast.solar (no tilt/azimuth correction) but

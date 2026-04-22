@@ -1,9 +1,9 @@
 import mqtt from "mqtt";
-import type { MqttConfig } from "./config.ts";
+import type { EvChargingMqttConfig } from "./config.ts";
 import type { BrokerConfig } from "../config.ts";
 import type { ChargingSession, WattsSource, WattsUpdate } from "./charger.ts";
 import type { Publisher } from "./mqtt-status.ts";
-import { log } from "../utils.ts";
+import { log } from "../utils/log.ts";
 
 export type MqttClient = mqtt.MqttClient;
 
@@ -28,7 +28,7 @@ export async function connectMqtt(brokerConfig: BrokerConfig): Promise<MqttClien
   });
 }
 
-async function waitForPlugIn(client: MqttClient, mqttConfig: MqttConfig): Promise<void> {
+async function waitForPlugIn(client: MqttClient, mqttConfig: EvChargingMqttConfig): Promise<void> {
   const { powerTopic, powerField, powerThresholdW } = mqttConfig;
   log(`Waiting for car plug-in (${powerTopic}.${powerField} > ${powerThresholdW} W)...`);
 
@@ -66,7 +66,7 @@ async function waitForPlugIn(client: MqttClient, mqttConfig: MqttConfig): Promis
 // and listens to power readings on the power topic.
 export function makeMqttSession(
   client: MqttClient,
-  mqttConfig: MqttConfig,
+  mqttConfig: EvChargingMqttConfig,
   _publisher: Publisher,
 ): ChargingSession {
   const { chargerTopic, onPayload, offPayload, powerTopic, powerField, energyField } = mqttConfig;

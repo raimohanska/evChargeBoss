@@ -1,10 +1,11 @@
 import type { Config } from "../config.ts";
-import { IncompleteDataError } from "../errors.ts";
+import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
 import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
 import { STATUS, createPublisher } from "./mqtt-status.ts";
-import { log, makeClock } from "../utils.ts";
+import { log } from "../utils/log.ts";
+import { makeClock } from "../utils/timing-utils.ts";
 import { parseArgs } from "./parse-args.ts";
 import { runSession, parseTargetTime } from "./main-loop.ts";
 

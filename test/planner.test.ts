@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { plan } from "../src/ev-charging/planner.ts";
-import { localDateTimeString } from "../src/utils.ts";
+import { localDateTimeString } from "../src/utils/date-time-format.ts";
 import { loadConfig } from "../src/config.ts";
 import { parseTargetTime } from "../src/ev-charging/main-loop.ts";
 

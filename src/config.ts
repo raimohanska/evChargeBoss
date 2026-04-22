@@ -1,53 +1,33 @@
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
-import { EvChargingConfigSchema } from "./ev-charging/config.ts";
+import { EvChargingConfig } from "./ev-charging/config.ts";
+import { ElectricityConfig, SolarConfig } from "./electricity/config.ts";
 
-export type { Mode, EvChargingConfig, MqttConfig } from "./ev-charging/config.ts";
+export type { Mode, EvChargingConfig, EvChargingMqttConfig as MqttConfig } from "./ev-charging/config.ts";
 
-const BrokerConfigSchema = z.strictObject({
+const BrokerConfig = z.strictObject({
   brokerUrl: z.string(),
   username: z.string(),
   password: z.string(),
 });
 
-export type BrokerConfig = z.infer<typeof BrokerConfigSchema>;
+export type BrokerConfig = z.infer<typeof BrokerConfig>;
 
-const SolarConfigSchema = z.strictObject({
-  lat: z.number().min(-90).max(90),
-  lon: z.number().min(-180).max(180),
-  declination: z.number(),
-  azimuth: z.number(),
-  kwp: z.number().positive(),
-  treeShadingSchedule: z.array(
-    z.strictObject({
-      time: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
-      outputFraction: z.number().min(0).max(1),
-    }),
-  ),
-});
-
-const ElectricityConfigSchema = z.strictObject({
-  transportCostEurKwh: z.number().nonnegative(),
-});
-
-const TestConfigSchema = z
+const TestConfig = z
   .object({
     timeSpeedupFactor: z.number().positive().optional(),
   })
   .optional();
 
-export type SolarConfig = z.infer<typeof SolarConfigSchema>;
-export type ElectricityConfig = z.infer<typeof ElectricityConfigSchema>;
-
-const ConfigSchema = z.strictObject({
-  mqtt: BrokerConfigSchema.optional(),
-  evCharging: EvChargingConfigSchema,
-  solar: SolarConfigSchema,
-  electricity: ElectricityConfigSchema,
-  test: TestConfigSchema,
+const Config = z.strictObject({
+  mqtt: BrokerConfig.optional(),
+  evCharging: EvChargingConfig,
+  solar: SolarConfig,
+  electricity: ElectricityConfig,
+  test: TestConfig,
 });
 
-export type Config = z.infer<typeof ConfigSchema>;
+export type Config = z.infer<typeof Config>;
 
 function getConfigPath(): string {
   if (process.env.CONFIG_FILE) return process.env.CONFIG_FILE;
@@ -75,7 +55,7 @@ export function loadConfig(): Config {
     process.exit(1);
   }
 
-  const result = ConfigSchema.safeParse(raw);
+  const result = Config.safeParse(raw);
   if (result.success) return result.data;
 
   console.error(`ERROR: Invalid config file "${path}":\n`);

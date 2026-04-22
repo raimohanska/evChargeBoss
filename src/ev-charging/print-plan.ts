@@ -1,5 +1,6 @@
 import type { Slot } from "./types.ts";
-import { log, IS_TTY, localTimeShort } from "../utils.ts";
+import { localTimeShort } from "../utils/date-time-format.ts";
+import { log } from "../utils/log.ts";
 
 export function printPlan(slots: Slot[]): void {
   const chargeSlots = slots.filter((s) => s.charge);
@@ -39,4 +40,5 @@ export function printPlan(slots: Slot[]): void {
   log(
     `${hr.repeat(3)} Total: ${chargeSlots.length} slots, ~${totalCost.toFixed(3)} EUR charging cost, ${freeSlots} solar-free slots`,
   );
-}
+}export const IS_TTY = process.stdout.isTTY === true;
+

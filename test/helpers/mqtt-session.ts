@@ -1,7 +1,7 @@
 import { connectMqtt, makeMqttSession } from "../../src/ev-charging/mqtt-client.ts";
 import type { Publisher } from "../../src/ev-charging/mqtt-status.ts";
 import { createPublisher } from "../../src/ev-charging/mqtt-status.ts";
-import { makeClock } from "../../src/utils.ts";
+import { makeClock } from "../../src/utils/timing-utils.ts";
 import { runSession } from "../../src/ev-charging/main-loop.ts";
 import type { Config, MqttConfig } from "../../src/config.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";

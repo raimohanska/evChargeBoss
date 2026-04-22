@@ -1,0 +1,60 @@
+export function sleep(ms: number, signal?: CancelSignal): Promise<void> {
+  if (ms <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(t);
+      resolve();
+    });
+  });
+}/** Minimal AbortController-like that works on Node 12. */
+export class Canceller {
+  private _listeners: Array<() => void> = [];
+  readonly signal: CancelSignal = {
+    aborted: false,
+    addEventListener: (_ev: string, cb: () => void) => {
+      if (this.signal.aborted) {
+        cb();
+        return;
+      }
+      this._listeners.push(cb);
+    },
+  };
+
+  abort(): void {
+    if (this.signal.aborted) return;
+    this.signal.aborted = true;
+    const ls = this._listeners.splice(0);
+    for (const cb of ls) cb();
+  }
+}
+export interface CancelSignal {
+  aborted: boolean;
+  addEventListener(ev: string, cb: () => void): void;
+}
+/**
+ * A clock that can run faster than real time for testing.
+ * now() returns a virtual timestamp; sleep/sleepAbortable durations are divided
+ * by speedupFactor so a 15-minute slot can pass in milliseconds under test.
+ */
+
+export interface Clock {
+  now(): Date;
+  sleep(ms: number, signal?: CancelSignal): Promise<void>;
+}
+/**
+ * Build a clock optionally anchored to a fixed start time and running at
+ * speedupFactor × real speed. speedupFactor=1 and no startTime gives real-time behaviour.
+ */
+
+export function makeClock(speedupFactor = 1, startTime?: Date): Clock {
+  const realStart = Date.now();
+  const virtualStart = startTime?.getTime() ?? Date.now();
+  return {
+    now: () => new Date(virtualStart + (Date.now() - realStart) * speedupFactor),
+    sleep: (ms, signal) => sleep(Math.ceil(ms / speedupFactor), signal),
+  };
+}
+
+export const realClock: Clock = makeClock(1);
+

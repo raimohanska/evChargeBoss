@@ -1,4 +1,4 @@
-import { localDateString } from "../utils.ts";
+import { localDateString } from "../utils/date-time-format.ts";
 
 export function datesInRange(from: Date, to: Date): string[] {
   const dates: string[] = [];

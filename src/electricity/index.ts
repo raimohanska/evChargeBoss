@@ -1,11 +1,13 @@
-import type { FetchSlotsConfig, PricedSlot } from "./types.ts";
+import type { PricedSlot } from "./types.ts";
 import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
 import { fetchSolarForecast, persistSolarCache, lookupSolarW, treeShadingFactor } from "./solar.ts";
 import { datesInRange, slotsBetween } from "./dates.ts";
-import { log, assertNotNull } from "../utils.ts";
-import { IncompleteDataError } from "../errors.ts";
+import { log } from "../utils/log.ts";
+import { assertNotNull } from "../utils/assertNotNull.ts";
+import { IncompleteDataError } from "./IncompleteDataError.ts";
+import { type ElectricityConfig, type SolarConfig } from "./config.ts";
 
-export type { FetchSlotsConfig, PricedSlot, SolarConfig } from "./types.ts";
+export type { PricedSlot } from "./types.ts";
 
 /**
  * Fetch spot prices and solar forecast for every 15-minute slot between
@@ -17,14 +19,15 @@ export type { FetchSlotsConfig, PricedSlot, SolarConfig } from "./types.ts";
 export async function fetchSlots(
   from: Date,
   to: Date,
-  config: FetchSlotsConfig,
+  electicity: ElectricityConfig,
+  solar: SolarConfig,
 ): Promise<PricedSlot[]> {
   const slotStarts = slotsBetween(from, to);
   const dates = datesInRange(from, to);
 
   const [spotMap, solarMap] = await Promise.all([
     fetchSpotPrices(dates),
-    fetchSolarForecast(dates, config.solar),
+    fetchSolarForecast(dates, solar),
   ]);
 
   const missingSpot = slotStarts.filter((s) => !spotMap.has(s.getTime()));
@@ -49,12 +52,12 @@ export async function fetchSlots(
       `spot price @ ${start.toISOString()}`,
     );
     const rawSolarW = lookupSolarW(epoch, solarMap, solarEpochsDesc);
-    const solarForecastW = rawSolarW * treeShadingFactor(start, config.solar.treeShadingSchedule);
+    const solarForecastW = rawSolarW * treeShadingFactor(start, solar.treeShadingSchedule);
     return {
       start,
       end: new Date(epoch + 15 * 60 * 1000),
       spotPriceEurPerKwh,
-      transportCostEurPerKwh: config.transportCostEurKwh,
+      transportCostEurPerKwh: electicity.transportCostEurKwh,
       solarForecastW,
     };
   });

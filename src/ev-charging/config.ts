@@ -1,8 +1,9 @@
 import { z } from "zod";
 
-export const ModeSchema = z.enum(["charge", "plan"]);
+export const Mode = z.enum(["charge", "plan"]);
+export type Mode = z.infer<typeof Mode>;
 
-export const MqttConfigSchema = z.strictObject({
+export const EvChargingMqttConfig = z.strictObject({
   powerTopic: z.string(),
   powerField: z.string(),
   powerThresholdW: z.number(),
@@ -11,15 +12,14 @@ export const MqttConfigSchema = z.strictObject({
   onPayload: z.string(),
   offPayload: z.string(),
 });
+export type EvChargingMqttConfig = z.infer<typeof EvChargingMqttConfig>;
 
-export const EvChargingConfigSchema = z.strictObject({
-  mode: ModeSchema,
+export const EvChargingConfig = z.strictObject({
+  mode: Mode,
   targetKwh: z.number().positive(),
   powerKw: z.number().positive(),
   targetTime: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
-  mqtt: MqttConfigSchema.optional(),
+  mqtt: EvChargingMqttConfig.optional(),
 });
+export type EvChargingConfig = z.infer<typeof EvChargingConfig>;
 
-export type Mode = z.infer<typeof ModeSchema>;
-export type MqttConfig = z.infer<typeof MqttConfigSchema>;
-export type EvChargingConfig = z.infer<typeof EvChargingConfigSchema>;

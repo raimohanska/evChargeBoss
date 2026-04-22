@@ -37,7 +37,7 @@ config.json   gitignored user config (may not exist in checkout)
 - No `tsconfig.json`. Type-only imports must use `import type`.
 - File extensions in imports must be `.ts`, not `.js`.
 - The build target is Node 12 (via esbuild). Do not use APIs introduced after Node 12 without a polyfill:
-  - `fetch` — polyfilled via `node-fetch@2` injected by esbuild (`src/polyfill.ts`)
+  - `fetch` — polyfilled via `node-fetch@2` injected by esbuild (`src/utils/polyfill.ts`)
   - `Array.prototype.findLast` — not available; use `[...arr].reverse().find(...)`
   - `Array.prototype.at` — not available; use index arithmetic
 - Do not rely on `Intl` / locale-dependent date formatting — Node 12 ships with limited ICU data. Use `localDateString()` and `localDateTimeString()` from `src/utils.ts` instead of `toLocaleDateString` / `toLocaleString`.
@@ -100,7 +100,6 @@ The main charge/simulate loop **never exits** on errors. All exceptions are caug
 
 ```sh
 npm run build
-# esbuild src/index.ts --bundle --platform=node --target=node12 --outfile=dist/bundle.cjs --inject:src/polyfill.ts
 ```
 
 Output is `dist/bundle.cjs` — single file, all deps inlined, no `node_modules` needed at runtime.
