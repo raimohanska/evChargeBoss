@@ -3,7 +3,7 @@ import type { Publisher } from "../../src/mqtt-status.ts";
 import { createPublisher } from "../../src/mqtt-status.ts";
 import { makeClock } from "../../src/utils.ts";
 import { runSession } from "../../src/main-loop.ts";
-import type { Config } from "../../src/config.ts";
+import type { Config, MqttConfig } from "../../src/config.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
 import { makeTestConfig } from "./config.ts";
 
@@ -12,6 +12,8 @@ export interface MqttTestSession {
   relay: MqttRelaySimulator;
   /** Simulate a target-time change (HH:MM), triggering an immediate replan. */
   publishTargetTime(time: string): void;
+  /** Last value passed to publisher.setChargedEnergy() — 0 if never called. */
+  chargedEnergy(): number;
   teardown(): void;
 }
 
@@ -19,8 +21,9 @@ export async function startMqttSession(
   from: Date,
   speedup: number,
   chargingOverrides: Partial<Config["charging"]> = {},
+  mqttOverrides: Partial<MqttConfig> = {},
 ): Promise<MqttTestSession> {
-  const config = makeTestConfig(chargingOverrides);
+  const config = makeTestConfig(chargingOverrides, mqttOverrides);
   const [sessionClient, relayClient] = await Promise.all([
     connectMqtt(config.mqtt!),
     connectMqtt(config.mqtt!),
@@ -32,6 +35,7 @@ export async function startMqttSession(
   // in production; here we test the replan logic itself.
   let targetTimeOverride: string | null = null;
   let replanCb: (() => void) | null = null;
+  let lastChargedEnergy = 0;
   const base = createPublisher(config);
   const publisher: Publisher = {
     setReplanCallback: (cb) => {
@@ -45,7 +49,10 @@ export async function startMqttSession(
     setStatus: (s) => base.setStatus(s),
     setError: (m) => base.setError(m),
     setPlan: (s) => base.setPlan(s),
-    setChargedEnergy: (k) => base.setChargedEnergy(k),
+    setChargedEnergy: (k) => {
+      lastChargedEnergy = k;
+      base.setChargedEnergy(k);
+    },
   };
 
   const session = makeMqttSession(sessionClient, config.mqtt!, publisher);
@@ -66,6 +73,7 @@ export async function startMqttSession(
       targetTimeOverride = time;
       replanCb?.();
     },
+    chargedEnergy: () => lastChargedEnergy,
     teardown() {
       relay.cleanup();
       // Force-close so the TCP socket is gone before the next test creates new connections.

@@ -3,7 +3,7 @@
   "scripts": {
     "typecheck": "tsc",
     "build": "tsc && esbuild src/index.ts --bundle --platform=node --target=node12 --outfile=dist/bundle.cjs --inject:src/polyfill.ts",
-    "test": "TZ=Europe/Helsinki CONFIG_FILE=test/fixtures/config.json node --experimental-strip-types --test --test-concurrency=1 test/planner.test.ts test/main-loop-mqtt.test.ts",
+    "test": "TZ=Europe/Helsinki CONFIG_FILE=test/fixtures/config.json node --experimental-strip-types --test --test-concurrency=1 test/planner.test.ts test/mqtt-client.test.ts test/main-loop-mqtt.test.ts",
     "test:integration": "TZ=Europe/Helsinki CONFIG_FILE=test/fixtures/config.json node --experimental-strip-types --test test/main-loop-mqtt.test.ts",
     "lint": "eslint src/ test/ --max-warnings=0",
     "format": "prettier --write src/ test/"

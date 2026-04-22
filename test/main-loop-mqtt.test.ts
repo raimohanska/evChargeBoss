@@ -18,6 +18,7 @@
  */
 
 import { describe, test } from "node:test";
+import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import type { MqttRelaySimulator } from "./helpers/mqtt-relay-simulator.ts";
 import { FROM, SPEEDUP } from "./helpers/config.ts";
@@ -113,3 +114,30 @@ describe("main-loop MQTT integration", { concurrency: false }, () => {
     }
   });
 }); // describe "main-loop MQTT integration"
+
+describe("main-loop MQTT integration — energy field", { concurrency: false }, () => {
+  /**
+   * Verifies that publisher.setChargedEnergy() is called with a positive value
+   * while the relay is ON and the energyField is configured.
+   *
+   * Uses targetKwh=0.5 so only one slot is needed.  The relay simulator
+   * publishes cumulative energy at 20 ms intervals; one 90 ms slot yields
+   * 4 ticks at 20/40/60/80 ms, giving lastEnergy − startEnergy ≈ 0.667 kWh
+   * (3 kW × 80 000 virtual ms / 3 600 000 > 0.5 kWh target).
+   */
+  test("Charged energy field is published during charging", async () => {
+    const { loopPromise, relay, chargedEnergy, teardown } = await startMqttSession(
+      FROM,
+      SPEEDUP,
+      { targetKwh: 0.5 },
+      { energyField: "energy" },
+    );
+    try {
+      await advanceToSolarWindow(relay);
+      await loopPromise; // single slot suffices: measured kWh > 0.5 kWh target
+      assert.ok(chargedEnergy() > 0, `Expected chargedEnergy > 0, got ${chargedEnergy()}`);
+    } finally {
+      teardown();
+    }
+  });
+});

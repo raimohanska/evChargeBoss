@@ -104,6 +104,12 @@ export async function runSlot({
       })
     : undefined;
 
+  // Set initial status before sending the relay command.  A retained MQTT
+  // message on powerTopic is not required: the persistent msgHandler in
+  // makeMqttSession() ensures live updates reach wattsListeners without
+  // relying on broker retain.  Between consecutive charge slots the relay is
+  // always sent OFF first, so the retained reading (if any) will already be
+  // 0 W and the status correctly starts as waitingForChargingToStart.
   if (slot.charge && publisher) {
     publisher.setStatus(
       wattsSource

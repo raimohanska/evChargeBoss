@@ -30,6 +30,18 @@ export class MqttRelaySimulator {
   } | null = null;
   private powerTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Cumulative energy tracking (virtual-time based, grows at powerKw while relay is ON).
+  private readonly powerKw = 3; // must match test config charging.powerKw
+  private baseEnergyKwh = 0;
+  private relayOnSince: Date | null = null;
+
+  /** Current cumulative relay energy reading in kWh. */
+  get totalEnergyKwh(): number {
+    if (this.relayOnSince === null) return this.baseEnergyKwh;
+    const ms = this.clock.now().getTime() - this.relayOnSince.getTime();
+    return this.baseEnergyKwh + (this.powerKw * ms) / 3_600_000;
+  }
+
   private readonly client: MqttClient;
   private readonly mqttConfig: MqttConfig;
   private readonly clock: Clock;
@@ -71,17 +83,19 @@ export class MqttRelaySimulator {
 
   private startEmittingPower(): void {
     if (this.powerTimer) return; // already running
-    const publish = () =>
-      this.client.publish(
-        this.mqttConfig.powerTopic,
-        JSON.stringify({ [this.mqttConfig.powerField]: 3000 }),
-      );
+    this.relayOnSince = this.clock.now();
+    const { powerTopic, powerField, energyField } = this.mqttConfig;
+    const publish = () => {
+      const payload: Record<string, number> = { [powerField]: 3000 };
+      if (energyField) payload[energyField] = this.totalEnergyKwh;
+      this.client.publish(powerTopic, JSON.stringify(payload));
+    };
     // Set timer first so the guard in stopEmittingPower can clear it before
     // the repeated publish fires.  Publish once immediately so waitForPlugIn
     // resolves within a single MQTT roundtrip instead of waiting for the first
     // setInterval tick (which at 10 000× speedup would advance virtual time by
     // ~16 virtual minutes before charging begins).
-    this.powerTimer = setInterval(publish, 100);
+    this.powerTimer = setInterval(publish, 20);
     publish();
   }
 
@@ -89,6 +103,12 @@ export class MqttRelaySimulator {
     if (this.powerTimer) {
       clearInterval(this.powerTimer);
       this.powerTimer = null;
+    }
+    // Accumulate energy for the completed ON period.
+    if (this.relayOnSince !== null) {
+      const ms = this.clock.now().getTime() - this.relayOnSince.getTime();
+      this.baseEnergyKwh += (this.powerKw * ms) / 3_600_000;
+      this.relayOnSince = null;
     }
     // Emit zero watts so any active watt-listener sees the charger is off.
     this.client.publish(
