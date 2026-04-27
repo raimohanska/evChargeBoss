@@ -44,3 +44,4 @@ Here's a sample piece of log
 - [x] Also don't repeat the finished message. In that, include total charged amount so far, as well as total accumulated cost (based on the price calculations in the plan). You may have to track the accumulated cost in the state
 - [x] In the charging finished message, also include the accumulated solar percentage. We're preparing to push these values to a database later. Just logging for now though.
 - [ ] In the log output after planning, include a summary of how much was the initial charge amount, how much has been charged so far (if any) and how much is left to be charged.
+- [ ] Add optional InfluxDB integration. I want to store the stats of each charge session after completion. I want charged kWh, total price, solar percentage.

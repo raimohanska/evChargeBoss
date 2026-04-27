@@ -82,6 +82,11 @@ export async function runSession(
       if (prevSlots !== undefined) log("Plan changed:");
       publisher.setPlan(slots);
       printPlan(slots);
+      log(
+        `[Plan] Target: ${config.evCharging.targetKwh.toFixed(2)} kWh` +
+          (chargedKwh > 0 ? ` | Charged so far: ${chargedKwh.toFixed(2)} kWh` : "") +
+          ` | Remaining: ${remainingKwh.toFixed(2)} kWh`,
+      );
     }
     prevSlots = slots;
 
