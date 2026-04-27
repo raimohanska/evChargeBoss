@@ -42,6 +42,8 @@ export async function runSession(
   let planFrom: Date | undefined = from;
   let chargedKwh = 0;
   let chargedCostEur = 0;
+  let solarFractionAccum = 0;
+  let chargeSlotsDone = 0;
   let prevSlots: Slot[] | undefined;
   let replanController = new Canceller();
 
@@ -126,9 +128,16 @@ export async function runSession(
     chargedKwh += kwh;
     if (kwh > 0) {
       chargedCostEur += nextCharge.effectiveCostEur;
+      solarFractionAccum += Math.min(
+        1,
+        nextCharge.solarForecastW / 1000 / config.evCharging.powerKw,
+      );
+      chargeSlotsDone++;
+      const solarPct = Math.round((solarFractionAccum / chargeSlotsDone) * 100);
       publisher.setAccumulatedCost(chargedCostEur);
+      publisher.setAccumulatedSolarPct(solarPct);
       log(
-        `[Status] Charging finished | ${chargedKwh.toFixed(2)} kWh charged, \u20ac${chargedCostEur.toFixed(3)} total cost`,
+        `[Status] Charging finished | ${chargedKwh.toFixed(2)} kWh charged, \u20ac${chargedCostEur.toFixed(3)} total cost, ${solarPct}% solar`,
       );
     }
 

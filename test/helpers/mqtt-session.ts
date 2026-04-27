@@ -14,6 +14,10 @@ export interface MqttTestSession {
   publishTargetTime(time: string): void;
   /** Last value passed to publisher.setChargedEnergy() — 0 if never called. */
   chargedEnergy(): number;
+  /** Last value passed to publisher.setAccumulatedCost() — 0 if never called. */
+  accumulatedCost(): number;
+  /** Last value passed to publisher.setAccumulatedSolarPct() — 0 if never called. */
+  accumulatedSolarPct(): number;
   teardown(): void;
 }
 
@@ -36,6 +40,8 @@ export async function startMqttSession(
   let targetTimeOverride: string | null = null;
   let replanCb: (() => void) | null = null;
   let lastChargedEnergy = 0;
+  let lastAccumulatedCost = 0;
+  let lastAccumulatedSolarPct = 0;
   const base = createPublisher(config.evCharging);
   const publisher: Publisher = {
     setReplanCallback: (cb) => {
@@ -53,7 +59,14 @@ export async function startMqttSession(
       lastChargedEnergy = k;
       base.setChargedEnergy(k);
     },
-    setAccumulatedCost: (e) => base.setAccumulatedCost(e),
+    setAccumulatedCost: (e) => {
+      lastAccumulatedCost = e;
+      base.setAccumulatedCost(e);
+    },
+    setAccumulatedSolarPct: (p) => {
+      lastAccumulatedSolarPct = p;
+      base.setAccumulatedSolarPct(p);
+    },
   };
 
   const session = makeMqttSession(sessionClient, config.evCharging.mqtt!, publisher);
@@ -75,6 +88,8 @@ export async function startMqttSession(
       replanCb?.();
     },
     chargedEnergy: () => lastChargedEnergy,
+    accumulatedCost: () => lastAccumulatedCost,
+    accumulatedSolarPct: () => lastAccumulatedSolarPct,
     teardown() {
       relay.cleanup();
       // Force-close so the TCP socket is gone before the next test creates new connections.

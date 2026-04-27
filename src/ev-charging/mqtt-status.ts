@@ -30,6 +30,7 @@ export interface Publisher {
   setPlan(slots: Slot[]): void;
   setChargedEnergy(kwh: number): void;
   setAccumulatedCost(eur: number): void;
+  setAccumulatedSolarPct(pct: number): void;
 }
 
 const DEVICE_ID = "evchargeboss";
@@ -186,6 +187,10 @@ export class StatusPublisher implements Publisher {
     this.accumulatedCostEur = eur;
   }
 
+  setAccumulatedSolarPct(_pct: number): void {
+    // stored by main-loop; no separate MQTT state needed beyond solar_pct from setPlan
+  }
+
   setError(message: string): void {
     log(`[Status] ${message}`);
     this.setState("status", STATUS.error(message));
@@ -261,6 +266,10 @@ export class LoggingPublisher implements Publisher {
 
   setAccumulatedCost(eur: number): void {
     this.accumulatedCostEur = eur;
+  }
+
+  setAccumulatedSolarPct(_pct: number): void {
+    // value is logged by main-loop directly
   }
 
   setError(message: string): void {

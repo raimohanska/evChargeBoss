@@ -154,4 +154,26 @@ describe("main-loop MQTT integration — energy field", { concurrency: false }, 
       teardown();
     }
   });
+
+  /**
+   * Full 7-slot solar session: verifies the final accumulated cost and solar
+   * percentage logged after the session completes.
+   *
+   * All 7 slots at 10:00–11:45 on Apr 19 are solar-free (effectiveCostEur=0)
+   * and the solar forecast exceeds the 3 kW charger power, so:
+   *   accumulatedCost   === 0   (all slots free)
+   *   accumulatedSolarPct === 100 (100% solar for every slot)
+   */
+  test("Session end: accumulated cost is 0 and solar% is 100 for all-solar session", async () => {
+    const { loopPromise, relay, accumulatedCost, accumulatedSolarPct, teardown } =
+      await startMqttSession(FROM, SPEEDUP);
+    try {
+      await advanceToSolarWindow(relay);
+      await loopPromise;
+      assert.equal(accumulatedCost(), 0, "all solar-free slots → zero cost");
+      assert.equal(accumulatedSolarPct(), 100, "solar forecast exceeds charger power → 100%");
+    } finally {
+      teardown();
+    }
+  });
 });
