@@ -51,8 +51,9 @@ export function formatLineProtocol(
 function writeLine(config: InfluxConfig, body: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const base = new URL(config.url);
+    const basePath = base.pathname.replace(/\/$/, "");
     const path =
-      `/api/v2/write` +
+      `${basePath}/api/v2/write` +
       `?org=${encodeURIComponent(config.org)}` +
       `&bucket=${encodeURIComponent(config.bucket)}` +
       `&precision=ms`;
@@ -93,13 +94,14 @@ function writeLine(config: InfluxConfig, body: string): Promise<void> {
 export async function checkInfluxHealth(config: InfluxConfig): Promise<void> {
   return new Promise((resolve) => {
     const base = new URL(config.url);
+    const basePath = base.pathname.replace(/\/$/, "");
     const isHttps = base.protocol === "https:";
     const reqFn = isHttps ? httpsRequest : httpRequest;
     const req = reqFn(
       {
         hostname: base.hostname,
         port: base.port || (isHttps ? 443 : 80),
-        path: "/health",
+        path: `${basePath}/health`,
         method: "GET",
       },
       (res) => {
@@ -160,7 +162,8 @@ export async function writeSessionSummary(
 export function queryInflux(config: InfluxConfig, flux: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const base = new URL(config.url);
-    const path = `/api/v2/query?org=${encodeURIComponent(config.org)}`;
+    const basePath = base.pathname.replace(/\/$/, "");
+    const path = `${basePath}/api/v2/query?org=${encodeURIComponent(config.org)}`;
     const isHttps = base.protocol === "https:";
     const reqFn = isHttps ? httpsRequest : httpRequest;
     const bodyBuf = Buffer.from(flux, "utf8");
