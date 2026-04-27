@@ -61,11 +61,24 @@ function getConfigPath(): string {
 export function loadConfig(): Config {
   const path = getConfigPath();
   let raw: unknown;
+  let source: string;
   try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
+    source = readFileSync(path, "utf8");
+    raw = JSON.parse(source);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`ERROR: Failed to read config file "${path}": ${msg}`);
+    // Enrich SyntaxErrors with line:col by extracting the position from the
+    // error message and counting newlines in the source up to that point.
+    const posMatch = msg.match(/position (\d+)/);
+    if (posMatch && source!) {
+      const pos = parseInt(posMatch[1], 10);
+      const before = source.slice(0, pos);
+      const line = before.split("\n").length;
+      const col = pos - before.lastIndexOf("\n");
+      console.error(`ERROR: Invalid JSON in "${path}" at line ${line}, column ${col}: ${msg}`);
+    } else {
+      console.error(`ERROR: Failed to read config file "${path}": ${msg}`);
+    }
     process.exit(1);
   }
 
