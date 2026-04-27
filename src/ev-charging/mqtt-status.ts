@@ -29,6 +29,7 @@ export interface Publisher {
   setError(message: string): void;
   setPlan(slots: Slot[]): void;
   setChargedEnergy(kwh: number): void;
+  setAccumulatedCost(eur: number): void;
 }
 
 const DEVICE_ID = "evchargeboss";
@@ -74,6 +75,8 @@ export class StatusPublisher implements Publisher {
   private client: MqttClient;
   private config: EvChargingConfig;
   private targetTimeOverride: string | null = null;
+  private lastLoggedStatus = "";
+  private accumulatedCostEur = 0;
 
   constructor(client: MqttClient, config: EvChargingConfig) {
     this.client = client;
@@ -159,13 +162,28 @@ export class StatusPublisher implements Publisher {
   }
 
   setStatus(status: string): void {
-    log(`[Status] ${status}`);
+    if (status !== this.lastLoggedStatus) {
+      if (status.startsWith("Charging until ")) {
+        const charged = parseFloat(this.state.charged_energy) || 0;
+        const remaining = Math.max(0, this.config.targetKwh - charged);
+        log(
+          `[Status] ${status} | ${charged.toFixed(2)} kWh charged, ${remaining.toFixed(2)} kWh remaining`,
+        );
+      } else if (status !== STATUS.chargingFinished) {
+        log(`[Status] ${status}`);
+      }
+      this.lastLoggedStatus = status;
+    }
     this.setState("status", status);
     if (status === STATUS.waitingForCar) {
       this.setState("plan_cost", "-");
       this.setState("solar_pct", "-");
       this.setState("charged_energy", "-");
     }
+  }
+
+  setAccumulatedCost(eur: number): void {
+    this.accumulatedCostEur = eur;
   }
 
   setError(message: string): void {
@@ -206,6 +224,9 @@ export class LoggingPublisher implements Publisher {
   private config: EvChargingConfig;
   private targetTimeOverride: string | null = null;
   private replanCallback: (() => void) | null = null;
+  private lastLoggedStatus = "";
+  private chargedEnergyKwh = 0;
+  private accumulatedCostEur = 0;
 
   constructor(config: EvChargingConfig) {
     this.config = config;
@@ -225,7 +246,21 @@ export class LoggingPublisher implements Publisher {
   }
 
   setStatus(status: string): void {
-    log(`[Status] ${status}`);
+    if (status !== this.lastLoggedStatus) {
+      if (status.startsWith("Charging until ")) {
+        const remaining = Math.max(0, this.config.targetKwh - this.chargedEnergyKwh);
+        log(
+          `[Status] ${status} | ${this.chargedEnergyKwh.toFixed(2)} kWh charged, ${remaining.toFixed(2)} kWh remaining`,
+        );
+      } else if (status !== STATUS.chargingFinished) {
+        log(`[Status] ${status}`);
+      }
+      this.lastLoggedStatus = status;
+    }
+  }
+
+  setAccumulatedCost(eur: number): void {
+    this.accumulatedCostEur = eur;
   }
 
   setError(message: string): void {
@@ -244,7 +279,7 @@ export class LoggingPublisher implements Publisher {
   }
 
   setChargedEnergy(kwh: number): void {
-    log(`[Charged] ${kwh.toFixed(2)} kWh`);
+    this.chargedEnergyKwh = kwh;
   }
 }
 

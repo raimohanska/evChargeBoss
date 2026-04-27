@@ -53,6 +53,7 @@ export async function startMqttSession(
       lastChargedEnergy = k;
       base.setChargedEnergy(k);
     },
+    setAccumulatedCost: (e) => base.setAccumulatedCost(e),
   };
 
   const session = makeMqttSession(sessionClient, config.evCharging.mqtt!, publisher);
