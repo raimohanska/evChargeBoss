@@ -1,5 +1,6 @@
 import type { Config } from "../config.ts";
 import type { Slot } from "./types.ts";
+import type { SessionSummary } from "../influx.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
 import { runSlot } from "./charger.ts";
@@ -35,6 +36,7 @@ export async function runSession(
   config: Config,
   from: Date | undefined,
   clock: Clock,
+  onSessionEnd?: (summary: SessionSummary) => Promise<void>,
 ): Promise<void> {
   publisher.setStatus(STATUS.waitingForCar);
   await session.waitForStart();
@@ -58,6 +60,9 @@ export async function runSession(
       publisher.resetTargetTime();
       await session.driver.send(false);
       publisher.setStatus(STATUS.idle);
+      const solarPct =
+        chargeSlotsDone > 0 ? Math.round((solarFractionAccum / chargeSlotsDone) * 100) : 0;
+      await onSessionEnd?.({ chargedKwh, totalCostEur: chargedCostEur, solarPct });
       return;
     }
 
@@ -97,6 +102,9 @@ export async function runSession(
       publisher.resetTargetTime();
       await session.driver.send(false);
       publisher.setStatus(STATUS.idle);
+      const solarPct =
+        chargeSlotsDone > 0 ? Math.round((solarFractionAccum / chargeSlotsDone) * 100) : 0;
+      await onSessionEnd?.({ chargedKwh, totalCostEur: chargedCostEur, solarPct });
       return;
     }
 

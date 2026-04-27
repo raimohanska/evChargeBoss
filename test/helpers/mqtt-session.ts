@@ -4,6 +4,7 @@ import { createPublisher } from "../../src/ev-charging/mqtt-status.ts";
 import { makeClock } from "../../src/utils/timing-utils.ts";
 import { runSession } from "../../src/ev-charging/main-loop.ts";
 import type { Config, MqttConfig } from "../../src/config.ts";
+import type { SessionSummary } from "../../src/influx.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
 import { makeTestConfig } from "./config.ts";
 
@@ -26,6 +27,7 @@ export async function startMqttSession(
   speedup: number,
   chargingOverrides: Partial<Omit<Config["evCharging"], "mode" | "mqtt">> = {},
   mqttOverrides: Partial<MqttConfig> = {},
+  onSessionEnd?: (summary: SessionSummary) => Promise<void>,
 ): Promise<MqttTestSession> {
   const config = makeTestConfig(chargingOverrides, mqttOverrides);
   const [sessionClient, relayClient] = await Promise.all([
@@ -78,7 +80,7 @@ export async function startMqttSession(
   // relay has subscribed, causing the relay to miss the command permanently.
   await relay.ready;
 
-  const loopPromise = runSession(session, publisher, config, from, clock);
+  const loopPromise = runSession(session, publisher, config, from, clock, onSessionEnd);
 
   return {
     loopPromise,

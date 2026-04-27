@@ -33,5 +33,15 @@
   },
   "electricity": {
     "transportCostEurKwh": 0.045
+  },
+  "influx": {
+    "url": "http://localhost:8086",
+    "token": "",
+    "org": "",
+    "bucket": "default",
+    "tags": {
+      "location": "garage",
+      "charger_type": "ICU Compact Mini"
+    }
   }
 }

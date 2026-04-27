@@ -3,7 +3,20 @@ import { z } from "zod";
 import { EvChargingConfig } from "./ev-charging/config.ts";
 import { ElectricityConfig, SolarConfig } from "./electricity/config.ts";
 
-export type { Mode, EvChargingConfig, EvChargingMqttConfig as MqttConfig } from "./ev-charging/config.ts";
+const InfluxConfig = z.strictObject({
+  url: z.string(),
+  token: z.string(),
+  org: z.string(),
+  bucket: z.string(),
+  tags: z.record(z.string(), z.string()).optional(),
+});
+export type InfluxConfig = z.infer<typeof InfluxConfig>;
+
+export type {
+  Mode,
+  EvChargingConfig,
+  EvChargingMqttConfig as MqttConfig,
+} from "./ev-charging/config.ts";
 
 const BrokerConfig = z.strictObject({
   brokerUrl: z.string(),
@@ -24,6 +37,7 @@ const Config = z.strictObject({
   evCharging: EvChargingConfig,
   solar: SolarConfig,
   electricity: ElectricityConfig,
+  influx: InfluxConfig.optional(),
   test: TestConfig,
 });
 
