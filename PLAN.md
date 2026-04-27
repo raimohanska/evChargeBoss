@@ -42,4 +42,5 @@ Here's a sample piece of log
 - [x] Get rid of the repeated "Charging until" messages. Not sure why so many are printed out in a single slot. I think just a single one would suffice.
 - [x] In these per-slot status log messages, include also "x kWh charged, y kWh remaining"
 - [x] Also don't repeat the finished message. In that, include total charged amount so far, as well as total accumulated cost (based on the price calculations in the plan). You may have to track the accumulated cost in the state
-- [ ] In the charging finished message, also include the accumulated solar percentage. We're preparing to push these values to a database later. Just logging for now though.
+- [x] In the charging finished message, also include the accumulated solar percentage. We're preparing to push these values to a database later. Just logging for now though.
+- [ ] In the log output after planning, include a summary of how much was the initial charge amount, how much has been charged so far (if any) and how much is left to be charged.
