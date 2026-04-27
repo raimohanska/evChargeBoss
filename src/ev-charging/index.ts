@@ -8,7 +8,7 @@ import { log } from "../utils/log.ts";
 import { makeClock } from "../utils/timing-utils.ts";
 import { parseArgs } from "./parse-args.ts";
 import { runSession, parseTargetTime } from "./main-loop.ts";
-import { writeSessionSummary } from "../influx.ts";
+import { writeSessionSummary, checkInfluxHealth } from "../influx.ts";
 
 function errorStatus(err: unknown): string {
   if (err instanceof IncompleteDataError) {
@@ -53,6 +53,9 @@ export async function runEvCharging(config: Config): Promise<void> {
   const publisher = createPublisher(config.evCharging, mqttClient);
   const session = makeMqttSession(mqttClient, config.evCharging.mqtt, publisher);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
+
+  if (config.influx) await checkInfluxHealth(config.influx);
+
   const onSessionEnd = config.influx
     ? (summary: Parameters<typeof writeSessionSummary>[1]) =>
         writeSessionSummary(config.influx!, summary)

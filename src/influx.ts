@@ -87,6 +87,55 @@ function writeLine(config: InfluxConfig, body: string): Promise<void> {
 }
 
 /**
+ * Check InfluxDB connectivity by hitting the unauthenticated /health endpoint.
+ * Logs success or failure. Does not throw — a DB issue must not prevent startup.
+ */
+export async function checkInfluxHealth(config: InfluxConfig): Promise<void> {
+  return new Promise((resolve) => {
+    const base = new URL(config.url);
+    const isHttps = base.protocol === "https:";
+    const reqFn = isHttps ? httpsRequest : httpRequest;
+    const req = reqFn(
+      {
+        hostname: base.hostname,
+        port: base.port || (isHttps ? 443 : 80),
+        path: "/health",
+        method: "GET",
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => (body += chunk));
+        res.on("end", () => {
+          try {
+            const json = JSON.parse(body) as { status?: string };
+            if (json.status === "pass") {
+              log(
+                `[Influx] Connected to ${config.url} (org: ${config.org}, bucket: ${config.bucket})`,
+              );
+            } else {
+              log(
+                `[Influx] WARNING: health check returned status "${json.status ?? "unknown"}" from ${config.url}`,
+              );
+            }
+          } catch {
+            log(
+              `[Influx] WARNING: unexpected health response from ${config.url}: ${body.slice(0, 80)}`,
+            );
+          }
+          resolve();
+        });
+      },
+    );
+    req.on("error", (err: Error) => {
+      log(`[Influx] WARNING: cannot reach ${config.url} — ${err.message}`);
+      resolve();
+    });
+    req.end();
+  });
+}
+
+/**
  * Write session summary metrics to InfluxDB.
  * Errors are logged and swallowed so a DB outage never aborts a charge session.
  */
