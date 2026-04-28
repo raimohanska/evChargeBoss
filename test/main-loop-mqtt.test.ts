@@ -177,3 +177,57 @@ describe("main-loop MQTT integration — energy field", { concurrency: false }, 
     }
   });
 });
+
+describe("main-loop MQTT integration — status history", { concurrency: false }, () => {
+  /**
+   * Verifies that the effective status sequence for a full 7-slot solar session
+   * contains no flicker entries:
+   *   - "Fetching data..." must never appear (removed from STATUS)
+   *   - "Waiting for charging to start" must not appear after charging begins
+   *   - "Planned charge start at …" must not appear after charging begins
+   *
+   * The expected clean sequence for FROM=17:00, targetTime=12:00, targetKwh=5:
+   *   1. Waiting for car to be plugged in
+   *   2. Planned charge start at 10:00   ← overnight gap, real wait
+   *   3. Waiting for charging to start   ← relay ON, first watts not yet seen
+   *   4. Charging until 11:45            ← all 7 consecutive slots hold this status
+   *   5. Idle                            ← target kWh reached
+   */
+  test("Status history is clean — no flicker between consecutive charge slots", async () => {
+    const { loopPromise, relay, statusHistory, teardown } = await startMqttSession(FROM, SPEEDUP);
+    try {
+      await advanceToSolarWindow(relay);
+      await loopPromise;
+
+      const history = statusHistory();
+
+      assert.ok(
+        !history.includes("Fetching data..."),
+        `"Fetching data..." must not appear in status history`,
+      );
+
+      const firstChargingIdx = history.findIndex((s) => s.startsWith("Charging until "));
+      assert.ok(firstChargingIdx !== -1, 'Expected "Charging until …" status in history');
+
+      const afterCharging = history.slice(firstChargingIdx + 1);
+      const flicker = afterCharging.filter(
+        (s) => s === "Waiting for charging to start" || s.startsWith("Planned charge start at "),
+      );
+      assert.deepEqual(
+        flicker,
+        [],
+        `Flicker statuses after charging started: ${JSON.stringify(flicker)}\nFull history: ${JSON.stringify(history)}`,
+      );
+
+      assert.deepEqual(history, [
+        "Waiting for car to be plugged in",
+        "Planned charge start at 10:00",
+        "Waiting for charging to start",
+        "Charging until 11:45",
+        "Idle",
+      ]);
+    } finally {
+      teardown();
+    }
+  });
+});

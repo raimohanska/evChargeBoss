@@ -74,6 +74,24 @@ function discoveryTopic(id: string) {
   return `${DISCOVERY}/sensor/${DEVICE_ID}_${id}/config`;
 }
 
+// Returns true when transitioning from `current` to `next` status would create
+// noisy/misleading history entries.  Extracted so tests can import it directly.
+export function shouldSuppressStatus(current: string, next: string): boolean {
+  // Keep "Charging until X" stable across re-plan cycles — suppress transient
+  // intermediate states that appear between back-to-back charge slots.
+  if (current.startsWith("Charging until ")) {
+    if (next === STATUS.waitingForChargingToStart || next.startsWith("Planned charge start at ")) {
+      return true;
+    }
+  }
+  // Suppress the brief "Planned charge start at X" that can appear just
+  // before "Waiting for charging to start" when the same plan is re-evaluated.
+  if (current.startsWith("Planned charge start at ") && next === current) {
+    return true;
+  }
+  return false;
+}
+
 export class StatusPublisher implements Publisher {
   private client: MqttClient;
   private config: EvChargingConfig;
@@ -166,21 +184,7 @@ export class StatusPublisher implements Publisher {
 
   setStatus(status: string): void {
     const current = this.state.status;
-    // Keep "Charging until X" stable across re-plan cycles — suppress transient
-    // intermediate states that appear between back-to-back charge slots.
-    if (current.startsWith("Charging until ")) {
-      if (
-        status === STATUS.waitingForChargingToStart ||
-        status.startsWith("Planned charge start at ")
-      ) {
-        return;
-      }
-    }
-    // Suppress the brief "Planned charge start at X" that can appear just
-    // before "Waiting for charging to start" when the same plan is re-evaluated.
-    if (current.startsWith("Planned charge start at ") && status === current) {
-      return;
-    }
+    if (shouldSuppressStatus(current, status)) return;
 
     if (status !== this.lastLoggedStatus) {
       if (status.startsWith("Charging until ")) {

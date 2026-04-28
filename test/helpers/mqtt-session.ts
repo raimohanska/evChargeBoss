@@ -1,6 +1,6 @@
 import { connectMqtt, makeMqttSession } from "../../src/ev-charging/mqtt-client.ts";
 import type { Publisher } from "../../src/ev-charging/mqtt-status.ts";
-import { createPublisher } from "../../src/ev-charging/mqtt-status.ts";
+import { createPublisher, shouldSuppressStatus } from "../../src/ev-charging/mqtt-status.ts";
 import { makeClock } from "../../src/utils/timing-utils.ts";
 import { runSession } from "../../src/ev-charging/main-loop.ts";
 import type { Config, MqttConfig } from "../../src/config.ts";
@@ -19,6 +19,11 @@ export interface MqttTestSession {
   accumulatedCost(): number;
   /** Last value passed to publisher.setAccumulatedSolarPct() — 0 if never called. */
   accumulatedSolarPct(): number;
+  /**
+   * Deduplicated sequence of status values that were actually published
+   * (suppressed flicker entries excluded, consecutive duplicates collapsed).
+   */
+  statusHistory(): readonly string[];
   teardown(): void;
 }
 
@@ -44,6 +49,9 @@ export async function startMqttSession(
   let lastChargedEnergy = 0;
   let lastAccumulatedCost = 0;
   let lastAccumulatedSolarPct = 0;
+  // Track the effective (post-suppression, deduplicated) status sequence.
+  const _statusHistory: string[] = [];
+  let _lastStatus = "";
   const base = createPublisher(config.evCharging);
   const publisher: Publisher = {
     setReplanCallback: (cb) => {
@@ -54,7 +62,15 @@ export async function startMqttSession(
       targetTimeOverride = null;
       base.resetTargetTime();
     },
-    setStatus: (s) => base.setStatus(s),
+    setStatus: (s) => {
+      if (!shouldSuppressStatus(_lastStatus, s)) {
+        _lastStatus = s;
+        if (_statusHistory.length === 0 || _statusHistory[_statusHistory.length - 1] !== s) {
+          _statusHistory.push(s);
+        }
+      }
+      base.setStatus(s);
+    },
     setError: (m) => base.setError(m),
     setPlan: (s) => base.setPlan(s),
     setChargedEnergy: (k) => {
@@ -92,6 +108,7 @@ export async function startMqttSession(
     chargedEnergy: () => lastChargedEnergy,
     accumulatedCost: () => lastAccumulatedCost,
     accumulatedSolarPct: () => lastAccumulatedSolarPct,
+    statusHistory: () => _statusHistory,
     teardown() {
       relay.cleanup();
       // Force-close so the TCP socket is gone before the next test creates new connections.
