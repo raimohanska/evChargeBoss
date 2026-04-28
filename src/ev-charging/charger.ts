@@ -86,13 +86,15 @@ export async function runSlot({
   let startEnergy: number | null = null;
   let lastEnergy: number | null = null;
   let chargeActive = false;
+  let lastSessionKwh: number | undefined = undefined;
 
   const unsubWatts = slot.charge
     ? wattsSource?.subscribe(({ watts, energyKwh }) => {
         if (energyKwh !== undefined) {
           if (startEnergy === null) startEnergy = energyKwh;
           lastEnergy = energyKwh;
-          publisher?.setChargedEnergy(prevChargedKwh + energyKwh - startEnergy);
+          lastSessionKwh = prevChargedKwh + energyKwh - startEnergy;
+          publisher?.setChargedEnergy(lastSessionKwh);
         }
         if (!publisher) return;
         const runEnd = chargeRunEnd ?? slot.end;
@@ -100,7 +102,7 @@ export async function runSlot({
           chargeActive = true;
           publisher.setStatus(STATUS.charging(localTimeShort(runEnd)));
         } else if (chargeActive) {
-          publisher.setStatus(STATUS.chargingFinished);
+          publisher.setStatus(STATUS.chargingFinished(lastSessionKwh));
         }
       })
     : undefined;

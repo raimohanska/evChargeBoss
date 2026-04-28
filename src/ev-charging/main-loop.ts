@@ -66,7 +66,6 @@ export async function runSession(
       return;
     }
 
-    publisher.setStatus(STATUS.fetchingData);
     replanController = new Canceller();
     updateReplanCallback();
 
@@ -108,10 +107,13 @@ export async function runSession(
       return;
     }
 
-    publisher.setStatus(STATUS.plannedChargeStart(localTimeShort(nextCharge.start)));
-
     // Sleep until the next charge slot starts (relay OFF during the gap).
     const msUntilSlot = nextCharge.start.getTime() - clock.now().getTime();
+    // Only show "Planned charge start" when there is a meaningful wait ahead;
+    // if the slot is already now, go straight to "Waiting for charging to start".
+    if (msUntilSlot > 0) {
+      publisher.setStatus(STATUS.plannedChargeStart(localTimeShort(nextCharge.start)));
+    }
     if (msUntilSlot > 0) {
       await session.driver.send(false);
       log(

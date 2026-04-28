@@ -7,7 +7,6 @@ import { log } from "../utils/log.ts";
 export const STATUS = {
   starting: "Starting...",
   waitingForCar: "Waiting for car to be plugged in",
-  fetchingData: "Fetching data...",
   waitingForSpot: "Waiting for spot prices",
   waitingForSolar: "Waiting for solar forecast",
   mqttError: "MQTT connection error",
@@ -15,7 +14,10 @@ export const STATUS = {
   plannedChargeStart: (time: string) => `Planned charge start at ${time}`,
   waitingForChargingToStart: "Waiting for charging to start",
   charging: (until: string) => `Charging until ${until}`,
-  chargingFinished: "Charging finished",
+  chargingFinished: (kwh?: number) =>
+    kwh !== undefined && kwh > 0
+      ? `Charging finished at ${kwh.toFixed(1)} kWh`
+      : "Charging finished",
   chargePaused: (next: string) => `Charge paused, next slot at ${next}`,
   error: (msg: string) => msg,
 } as const;
@@ -163,6 +165,23 @@ export class StatusPublisher implements Publisher {
   }
 
   setStatus(status: string): void {
+    const current = this.state.status;
+    // Keep "Charging until X" stable across re-plan cycles — suppress transient
+    // intermediate states that appear between back-to-back charge slots.
+    if (current.startsWith("Charging until ")) {
+      if (
+        status === STATUS.waitingForChargingToStart ||
+        status.startsWith("Planned charge start at ")
+      ) {
+        return;
+      }
+    }
+    // Suppress the brief "Planned charge start at X" that can appear just
+    // before "Waiting for charging to start" when the same plan is re-evaluated.
+    if (current.startsWith("Planned charge start at ") && status === current) {
+      return;
+    }
+
     if (status !== this.lastLoggedStatus) {
       if (status.startsWith("Charging until ")) {
         const charged = parseFloat(this.state.charged_energy) || 0;
@@ -170,7 +189,7 @@ export class StatusPublisher implements Publisher {
         log(
           `[Status] ${status} | ${charged.toFixed(2)} kWh charged, ${remaining.toFixed(2)} kWh remaining`,
         );
-      } else if (status !== STATUS.chargingFinished) {
+      } else {
         log(`[Status] ${status}`);
       }
       this.lastLoggedStatus = status;
@@ -257,7 +276,7 @@ export class LoggingPublisher implements Publisher {
         log(
           `[Status] ${status} | ${this.chargedEnergyKwh.toFixed(2)} kWh charged, ${remaining.toFixed(2)} kWh remaining`,
         );
-      } else if (status !== STATUS.chargingFinished) {
+      } else {
         log(`[Status] ${status}`);
       }
       this.lastLoggedStatus = status;
