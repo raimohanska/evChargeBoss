@@ -4,6 +4,7 @@
     "git add": true,
     "git commit": true,
     "docker compose": true,
-    "get_terminal_output": true
+    "get_terminal_output": true,
+    "true": true
   }
 }
