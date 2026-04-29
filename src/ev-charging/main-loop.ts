@@ -56,12 +56,14 @@ export async function runSession(
   while (true) {
     const remainingKwh = Math.max(0, config.evCharging.targetKwh - chargedKwh);
     if (remainingKwh === 0) {
-      log("Target kWh reached.");
+      const solarPct =
+        chargeSlotsDone > 0 ? Math.round((solarFractionAccum / chargeSlotsDone) * 100) : 0;
+      log(
+        `Charging finished | ${chargedKwh.toFixed(2)} kWh charged, \u20ac${chargedCostEur.toFixed(3)} total cost, ${solarPct}% solar`,
+      );
       publisher.resetTargetTime();
       await session.driver.send(false);
       publisher.setStatus(STATUS.idle);
-      const solarPct =
-        chargeSlotsDone > 0 ? Math.round((solarFractionAccum / chargeSlotsDone) * 100) : 0;
       await onSessionEnd?.({ chargedKwh, totalCostEur: chargedCostEur, solarPct });
       return;
     }
@@ -74,7 +76,7 @@ export async function runSession(
     const targetDate = parseTargetTime(targetTimeStr, now);
     planFrom = undefined;
 
-    const slots = await plan(now, targetDate, remainingKwh, config);
+    const slots = await plan(now, targetDate, remainingKwh, config, prevSlots === undefined);
 
     if (replanController.signal.aborted) {
       log("Target time changed during planning — re-planning.");
@@ -97,12 +99,17 @@ export async function runSession(
     // Find the next charge slot that has not yet ended.
     const nextCharge = slots.find((s) => s.charge && s.end > clock.now());
     if (!nextCharge) {
+      const solarPct =
+        chargeSlotsDone > 0 ? Math.round((solarFractionAccum / chargeSlotsDone) * 100) : 0;
+      if (chargedKwh > 0) {
+        log(
+          `Charging finished | ${chargedKwh.toFixed(2)} kWh charged, \u20ac${chargedCostEur.toFixed(3)} total cost, ${solarPct}% solar`,
+        );
+      }
       log("No charge slots remaining in window.");
       publisher.resetTargetTime();
       await session.driver.send(false);
       publisher.setStatus(STATUS.idle);
-      const solarPct =
-        chargeSlotsDone > 0 ? Math.round((solarFractionAccum / chargeSlotsDone) * 100) : 0;
       await onSessionEnd?.({ chargedKwh, totalCostEur: chargedCostEur, solarPct });
       return;
     }
@@ -151,9 +158,6 @@ export async function runSession(
       const solarPct = Math.round((solarFractionAccum / chargeSlotsDone) * 100);
       publisher.setAccumulatedCost(chargedCostEur);
       publisher.setAccumulatedSolarPct(solarPct);
-      log(
-        `[Status] Charging finished | ${chargedKwh.toFixed(2)} kWh charged, \u20ac${chargedCostEur.toFixed(3)} total cost, ${solarPct}% solar`,
-      );
     }
 
     if (replanController.signal.aborted) {
@@ -168,9 +172,15 @@ export async function runSession(
   }
 }
 
-/** Returns true when the set of charge-slot start times differs between two plans. */
+/**
+ * Returns true when the set of charge-slot start times differs between two plans,
+ * considering only slots that fall within the new plan's time window so that a
+ * naturally shrinking window (consumed slots dropping off) is not treated as a change.
+ */
 function chargeSlotsChanged(prev: Slot[], next: Slot[]): boolean {
-  const times = (slots: Slot[]) => slots.filter((s) => s.charge).map((s) => s.start.getTime());
+  const from = next[0]?.start.getTime() ?? 0;
+  const times = (slots: Slot[]) =>
+    slots.filter((s) => s.charge && s.start.getTime() >= from).map((s) => s.start.getTime());
   const a = times(prev);
   const b = times(next);
   return a.length !== b.length || a.some((t, i) => t !== b[i]);

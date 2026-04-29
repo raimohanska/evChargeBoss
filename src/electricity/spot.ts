@@ -11,13 +11,17 @@ interface SpotHintaEntry {
   PriceWithTax: number; // €/kWh incl. VAT
 }
 
-export async function fetchSpotPrices(dates: string[]): Promise<Map<number, number>> {
+export async function fetchSpotPrices(
+  dates: string[],
+  verbose?: boolean,
+): Promise<Map<number, number>> {
   const missingDates = dates.filter(
     (d) => readCache(`${CACHE_DIR}/.spot-cache-${d}.json`) === null,
   );
 
   if (missingDates.length > 0) {
-    log(`Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(", ")})`);
+    if (verbose !== false)
+      log(`Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(", ")})`);
     const res = await fetch("https://api.spot-hinta.fi/TodayAndDayForward");
     if (!res.ok) throw new Error(`spot-hinta.fi HTTP ${res.status}`);
     const data = (await res.json()) as SpotHintaEntry[];
@@ -25,7 +29,7 @@ export async function fetchSpotPrices(dates: string[]): Promise<Map<number, numb
     for (const entry of data) {
       map.set(new Date(entry.DateTime).getTime(), entry.PriceWithTax);
     }
-    log(`  Got ${map.size} quarter-hour price slots`);
+    if (verbose !== false) log(`  Got ${map.size} quarter-hour price slots`);
     return map;
   }
 
@@ -36,11 +40,11 @@ export async function fetchSpotPrices(dates: string[]): Promise<Map<number, numb
       map.set(new Date(k).getTime(), v);
     }
   }
-  log(`  Spot prices loaded from cache (${map.size} slots)`);
+  if (verbose !== false) log(`  Spot prices loaded from cache (${map.size} slots)`);
   return map;
 }
 
-export function persistSpotCache(map: Map<number, number>): void {
+export function persistSpotCache(map: Map<number, number>, verbose?: boolean): void {
   const byDate = new Map<string, Record<string, number>>();
   for (const [epoch, price] of map) {
     const date = localDateString(new Date(epoch));
@@ -50,5 +54,5 @@ export function persistSpotCache(map: Map<number, number>): void {
   for (const [date, data] of byDate) {
     writeCache(`${CACHE_DIR}/.spot-cache-${date}.json`, data);
   }
-  log(`  Spot prices cached (${byDate.size} day file(s)).`);
+  if (verbose !== false) log(`  Spot prices cached (${byDate.size} day file(s)).`);
 }

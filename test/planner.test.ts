@@ -77,19 +77,19 @@ const CONFIG_5KWH = {
   evCharging: { ...CONFIG.evCharging, targetKwh: 5 },
 };
 
-test("17:00 session → 7 solar-free charge slots on Apr 19 at 10:00–11:45", async () => {
+test("17:00 session → 8 solar-free charge slots on Apr 19 at 10:00–12:00", async () => {
   const targetDate = parseTargetTime("12:00", FROM_EVENING); // next day 12:00
   const slots = await plan(FROM_EVENING, targetDate, 5, CONFIG_5KWH);
   const chargeSlots = slots.filter((s) => s.charge);
-  assert.equal(chargeSlots.length, 7, "7 slots for 5 kWh at 3 kW");
+  assert.equal(chargeSlots.length, 8, "8 slots: 7 needed + 1 extra solar-free");
   assert.equal(
     chargeSlots[0].start.toISOString().slice(0, 10),
     "2026-04-19",
     "charge slots are next day",
   );
   assert.equal(chargeSlots[0].start.getHours(), 10, "first slot at 10:00");
-  assert.equal(chargeSlots[chargeSlots.length - 1].end.getHours(), 11, "last slot ends at 11:45");
-  assert.equal(chargeSlots[chargeSlots.length - 1].end.getMinutes(), 45);
+  assert.equal(chargeSlots[chargeSlots.length - 1].end.getHours(), 12, "last slot ends at 12:00");
+  assert.equal(chargeSlots[chargeSlots.length - 1].end.getMinutes(), 0);
   assert.ok(
     chargeSlots.every((s) => s.effectiveCostEur === 0),
     "all slots solar-free",

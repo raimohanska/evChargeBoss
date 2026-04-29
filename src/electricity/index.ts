@@ -21,13 +21,14 @@ export async function fetchSlots(
   to: Date,
   electicity: ElectricityConfig,
   solar: SolarConfig,
+  verbose?: boolean,
 ): Promise<PricedSlot[]> {
   const slotStarts = slotsBetween(from, to);
   const dates = datesInRange(from, to);
 
   const [spotMap, solarMap] = await Promise.all([
-    fetchSpotPrices(dates),
-    fetchSolarForecast(dates, solar),
+    fetchSpotPrices(dates, verbose),
+    fetchSolarForecast(dates, solar, verbose),
   ]);
 
   const missingSpot = slotStarts.filter((s) => !spotMap.has(s.getTime()));
@@ -37,13 +38,13 @@ export async function fetchSlots(
       missingSpot,
     );
   }
-  persistSpotCache(spotMap);
+  persistSpotCache(spotMap, verbose);
 
   const solarEpochsDesc = [...solarMap.keys()].sort((a, b) => b - a);
   const missingSolar = slotStarts.filter((s) => !solarMap.has(s.getTime())).length;
-  if (missingSolar > 0)
+  if (missingSolar > 0 && verbose !== false)
     log(`  ${missingSolar} solar slots without exact match — using nearest preceding value`);
-  persistSolarCache(solarMap);
+  persistSolarCache(solarMap, verbose);
 
   return slotStarts.map((start) => {
     const epoch = start.getTime();

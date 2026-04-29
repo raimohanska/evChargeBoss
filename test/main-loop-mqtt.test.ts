@@ -223,7 +223,7 @@ describe("main-loop MQTT integration — status history", { concurrency: false }
         "Waiting for car to be plugged in",
         "Planned charge start at 10:00",
         "Waiting for charging to start",
-        "Charging until 11:45",
+        "Charging until 12:00",
         "Idle",
       ]);
     } finally {
