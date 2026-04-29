@@ -39,7 +39,7 @@ export async function runSession(
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
 ): Promise<void> {
   publisher.setStatus(STATUS.waitingForCar);
-  await session.waitForStart();
+  const powerKw = await session.waitForStart();
 
   let planFrom: Date | undefined = from;
   let chargedKwh = 0;
@@ -76,7 +76,14 @@ export async function runSession(
     const targetDate = parseTargetTime(targetTimeStr, now);
     planFrom = undefined;
 
-    const slots = await plan(now, targetDate, remainingKwh, config, prevSlots === undefined);
+    const slots = await plan(
+      now,
+      targetDate,
+      remainingKwh,
+      powerKw,
+      config,
+      prevSlots === undefined,
+    );
 
     if (replanController.signal.aborted) {
       log("Target time changed during planning — re-planning.");
@@ -144,16 +151,13 @@ export async function runSession(
       wattsSource: session.wattsSource,
       prevChargedKwh: chargedKwh,
       powerThresholdW: config.evCharging.mqtt?.powerThresholdW ?? 10,
-      powerKw: config.evCharging.powerKw,
+      powerKw,
       clock,
     });
     chargedKwh += kwh;
     if (kwh > 0) {
       chargedCostEur += nextCharge.effectiveCostEur;
-      solarFractionAccum += Math.min(
-        1,
-        nextCharge.solarForecastW / 1000 / config.evCharging.powerKw,
-      );
+      solarFractionAccum += Math.min(1, nextCharge.solarForecastW / 1000 / powerKw);
       chargeSlotsDone++;
       const solarPct = Math.round((solarFractionAccum / chargeSlotsDone) * 100);
       publisher.setAccumulatedCost(chargedCostEur);

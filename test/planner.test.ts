@@ -16,9 +16,10 @@ const CONFIG = loadConfig();
 
 const TARGET_TIME = parseTargetTime(CONFIG.evCharging.targetTime, FROM);
 const TARGET_KWH = CONFIG.evCharging.targetKwh;
+const POWER_KW = CONFIG.evCharging.powerKw!;
 
 test("correct number of total and charge slots", async () => {
-  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, CONFIG);
+  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, POWER_KW, CONFIG);
   assert.equal(slots.length, 88, "total slots in window");
   assert.equal(
     slots.filter((s) => s.charge).length,
@@ -28,19 +29,19 @@ test("correct number of total and charge slots", async () => {
 });
 
 test("8 solar-free charge slots", async () => {
-  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, CONFIG);
+  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, POWER_KW, CONFIG);
   const freeCount = slots.filter((s) => s.charge && s.effectiveCostEur === 0).length;
   assert.equal(freeCount, 8);
 });
 
 test("total charging cost ~0.028 €", async () => {
-  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, CONFIG);
+  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, POWER_KW, CONFIG);
   const total = slots.filter((s) => s.charge).reduce((sum, s) => sum + s.effectiveCostEur, 0);
   assert.ok(Math.abs(total - 0.028) < 0.0005, `expected ~0.028 € but got ${total.toFixed(4)} €`);
 });
 
 test("selected charge slots are the cheapest 10 on 2026-04-19 morning", async () => {
-  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, CONFIG);
+  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, POWER_KW, CONFIG);
   const chargeTimes = slots.filter((s) => s.charge).map((s) => localDateTimeString(s.start));
 
   assert.deepEqual(chargeTimes, [
@@ -58,7 +59,7 @@ test("selected charge slots are the cheapest 10 on 2026-04-19 morning", async ()
 });
 
 test("every slot has spot price and solar forecast populated", async () => {
-  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, CONFIG);
+  const slots = await plan(FROM, TARGET_TIME, TARGET_KWH, POWER_KW, CONFIG);
   for (const s of slots) {
     assert.ok(s.spotPriceEurPerKwh >= 0, `negative spot price at ${s.start.toISOString()}`);
     assert.ok(s.solarForecastW >= 0, `negative solar at ${s.start.toISOString()}`);
@@ -79,7 +80,7 @@ const CONFIG_5KWH = {
 
 test("17:00 session → 8 solar-free charge slots on Apr 19 at 10:00–12:00", async () => {
   const targetDate = parseTargetTime("12:00", FROM_EVENING); // next day 12:00
-  const slots = await plan(FROM_EVENING, targetDate, 5, CONFIG_5KWH);
+  const slots = await plan(FROM_EVENING, targetDate, 5, POWER_KW, CONFIG_5KWH);
   const chargeSlots = slots.filter((s) => s.charge);
   assert.equal(chargeSlots.length, 8, "8 slots: 7 needed + 1 extra solar-free");
   assert.equal(
@@ -98,7 +99,7 @@ test("17:00 session → 8 solar-free charge slots on Apr 19 at 10:00–12:00", a
 
 test("17:00 session, target=21:00 tonight → 7 cheap evening slots starting at 17:00", async () => {
   const targetDate = parseTargetTime("21:00", FROM_EVENING); // same day 21:00
-  const slots = await plan(FROM_EVENING, targetDate, 5, CONFIG_5KWH);
+  const slots = await plan(FROM_EVENING, targetDate, 5, POWER_KW, CONFIG_5KWH);
   const chargeSlots = slots.filter((s) => s.charge);
   assert.equal(chargeSlots.length, 7, "7 slots for 5 kWh at 3 kW");
   assert.ok(

@@ -21,8 +21,9 @@ export interface WattsSource {
 
 // A session encapsulates how to wait for "ready to charge" and which driver to use.
 // waitForStart() resolves when it is time to plan and begin charging.
+// It returns the detected charging power in kW (measured from the relay during plug-in).
 export interface ChargingSession {
-  waitForStart(): Promise<void>;
+  waitForStart(): Promise<number>;
   driver: ChargerDriver;
   wattsSource?: WattsSource;
   end(): void;

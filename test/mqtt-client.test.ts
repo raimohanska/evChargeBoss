@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { connectMqtt, makeMqttSession } from "../src/ev-charging/mqtt-client.ts";
 import { createPublisher } from "../src/ev-charging/mqtt-status.ts";
 import type { WattsUpdate } from "../src/ev-charging/charger.ts";
+import { makeClock } from "../src/utils/timing-utils.ts";
 import { makeTestConfig } from "./helpers/config.ts";
 
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
@@ -35,7 +36,10 @@ test("wattsSource delivers updates after waitForStart() resolves", async () => {
   ]);
 
   const publisher = createPublisher(config.evCharging);
-  const session = makeMqttSession(sessionClient, mqtt, publisher);
+  // Use a high-speedup clock so the 15-second power-measurement window
+  // completes in ~1.5ms of real time.
+  const clock = makeClock(10_000);
+  const session = makeMqttSession(sessionClient, mqtt, publisher, clock);
 
   // Helper client subscribes to the charger command topic so the ON publish
   // inside waitForStart() doesn't fail due to no subscribers being present.

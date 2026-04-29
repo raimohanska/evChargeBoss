@@ -17,7 +17,7 @@ export type EvChargingMqttConfig = z.infer<typeof EvChargingMqttConfig>;
 export const EvChargingConfig = z.strictObject({
   mode: Mode,
   targetKwh: z.number().positive(),
-  powerKw: z.number().positive(),
+  powerKw: z.number().positive().optional(),
   targetTime: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
   chargeNowHours: z.number().positive().optional(),
   mqtt: EvChargingMqttConfig.optional(),

@@ -31,10 +31,17 @@ export async function runEvCharging(config: Config): Promise<void> {
   log(`=== EV Charger Planner [${modeLabel}] ===`);
 
   if (mode === "plan") {
+    const powerKw = config.evCharging.powerKw;
+    if (!powerKw) {
+      console.error(
+        "ERROR: plan mode requires evCharging.powerKw to be set in config (charge mode detects it automatically)",
+      );
+      process.exit(1);
+    }
     const targetTimeStr = config.evCharging.targetTime;
     const now = initialFrom ?? new Date();
     const targetDate = parseTargetTime(targetTimeStr, now);
-    const slots = await plan(now, targetDate, config.evCharging.targetKwh, config);
+    const slots = await plan(now, targetDate, config.evCharging.targetKwh, powerKw, config);
     printPlan(slots);
     return;
   }
@@ -51,8 +58,8 @@ export async function runEvCharging(config: Config): Promise<void> {
 
   const mqttClient = await connectMqtt(config.mqtt);
   const publisher = createPublisher(config.evCharging, mqttClient);
-  const session = makeMqttSession(mqttClient, config.evCharging.mqtt, publisher);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
+  const session = makeMqttSession(mqttClient, config.evCharging.mqtt, publisher, clock);
 
   if (config.influx) await checkInfluxHealth(config.influx);
 

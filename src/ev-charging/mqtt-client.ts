@@ -3,6 +3,7 @@ import type { EvChargingMqttConfig } from "./config.ts";
 import type { BrokerConfig } from "../config.ts";
 import type { ChargingSession, WattsSource, WattsUpdate } from "./charger.ts";
 import type { Publisher } from "./mqtt-status.ts";
+import type { Clock } from "../utils/timing-utils.ts";
 import { log } from "../utils/log.ts";
 
 export type MqttClient = mqtt.MqttClient;
@@ -28,7 +29,10 @@ export async function connectMqtt(brokerConfig: BrokerConfig): Promise<MqttClien
   });
 }
 
-async function waitForPlugIn(client: MqttClient, mqttConfig: EvChargingMqttConfig): Promise<void> {
+async function waitForPlugIn(
+  client: MqttClient,
+  mqttConfig: EvChargingMqttConfig,
+): Promise<number> {
   const { powerTopic, powerField, powerThresholdW } = mqttConfig;
   log(`Waiting for car plug-in (${powerTopic}.${powerField} > ${powerThresholdW} W)...`);
 
@@ -39,10 +43,10 @@ async function waitForPlugIn(client: MqttClient, mqttConfig: EvChargingMqttConfi
         const data = JSON.parse(message.toString()) as Record<string, unknown>;
         const watts = data[powerField];
         if (typeof watts === "number" && watts > powerThresholdW) {
-          log(`Car detected: ${watts} W on ${topic} — starting plan`);
+          log(`Car detected: ${watts} W on ${topic}`);
           client.off("message", onMessage);
           client.off("error", onError);
-          resolve();
+          resolve(watts);
         }
       } catch (err) {
         log(`MQTT parse error on ${topic}: ${err}`);
@@ -64,10 +68,12 @@ async function waitForPlugIn(client: MqttClient, mqttConfig: EvChargingMqttConfi
 
 // Returns a ChargingSession that uses the provided MQTT client for charger commands
 // and listens to power readings on the power topic.
+// clock is used to run the 15-second power-detection window at the correct speed.
 export function makeMqttSession(
   client: MqttClient,
   mqttConfig: EvChargingMqttConfig,
   _publisher: Publisher,
+  clock: Clock,
 ): ChargingSession {
   const { chargerTopic, onPayload, offPayload, powerTopic, powerField, energyField } = mqttConfig;
 
@@ -119,10 +125,22 @@ export function makeMqttSession(
       client.off("message", msgHandler);
       client.end();
     },
-    async waitForStart() {
+    async waitForStart(): Promise<number> {
       try {
         await driver.send(true);
-        await waitForPlugIn(client, mqttConfig);
+        const initialWatts = await waitForPlugIn(client, mqttConfig);
+        // Measure charging power for 15 virtual seconds to get a stable reading.
+        // The initial detection reading is always included as a seed.
+        const readings: number[] = [initialWatts];
+        const unsub = wattsSource.subscribe(({ watts }) => {
+          if (watts > 0) readings.push(watts);
+        });
+        await clock.sleep(15_000);
+        unsub();
+        const avg = readings.reduce((a, b) => a + b, 0) / readings.length;
+        const powerKw = avg / 1000;
+        log(`Detected charging power: ${powerKw.toFixed(2)} kW (${readings.length} samples)`);
+        return powerKw;
       } catch (err) {
         client.end();
         throw err;
