@@ -5,6 +5,12 @@
     "git commit": true,
     "docker compose": true,
     "get_terminal_output": true,
-    "true": true
+    "true": true,
+    "time": true,
+    "wait": true,
+    "/^node --experimental-strip-types --test test/influx\\.test\\.ts$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
   }
 }
