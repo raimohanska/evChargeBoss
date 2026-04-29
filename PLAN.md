@@ -3,7 +3,7 @@
 Each step needs careful planning and must result in a solid state where all tests pass, app can be built and run.
 
 - [x] See if it's possible to get the actual charging power of the charger by running it ON for 15 seconds when power is detected. This should allow us to remove the configuration setting for power.
-- [ ] Use maximum instead of average when determining the charge power
+- [x] Use maximum instead of average when determining the charge power
 - [ ] MQTT status messages are now missing after clean-up. Log below. You see that the relay was turned OFF, but status not updated. Update tests so that this would fail and then fix properly. See if a refactoring is possible to ensure that status updates and relay control are always in sync.
 
 ```
