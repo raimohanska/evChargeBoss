@@ -247,8 +247,9 @@ export class StatusPublisher implements Publisher {
   setPlan(slots: Slot[]): void {
     const charge = slots.filter((s) => s.charge);
     const cost = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
+    const powerKw = this.config.powerKw ?? 1;
     const totalSolarFraction = charge.reduce(
-      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / this.config.powerKw),
+      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / powerKw),
       0,
     );
     const pct = charge.length > 0 ? Math.round((totalSolarFraction / charge.length) * 100) : 0;
@@ -327,8 +328,9 @@ export class LoggingPublisher implements Publisher {
   setPlan(slots: Slot[]): void {
     const charge = slots.filter((s) => s.charge);
     const cost = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
+    const powerKw = this.config.powerKw ?? 1;
     const totalSolarFraction = charge.reduce(
-      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / this.config.powerKw),
+      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / powerKw),
       0,
     );
     const pct = charge.length > 0 ? Math.round((totalSolarFraction / charge.length) * 100) : 0;
