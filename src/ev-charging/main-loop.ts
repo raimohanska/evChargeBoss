@@ -168,6 +168,11 @@ export async function runSession(
       log(
         `Target time changed — re-planning with ${(config.evCharging.targetKwh - chargedKwh).toFixed(2)} kWh remaining.`,
       );
+      // Clear "Charging until …" so the next setStatus call is not suppressed.
+      // Without this, shouldSuppressStatus would block "Waiting for charging to start"
+      // when the re-planned slot starts, leaving the UI stuck on the old status
+      // even though the relay was just turned off.
+      publisher.setStatus(STATUS.replanning);
     }
     // Relay stays ON after a normal slot. The next iteration will send OFF
     // before sleeping if there is a gap, keeping the relay on for back-to-back

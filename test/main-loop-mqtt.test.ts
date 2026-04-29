@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import type { MqttRelaySimulator } from "./helpers/mqtt-relay-simulator.ts";
 import { FROM, SPEEDUP } from "./helpers/config.ts";
 import { startMqttSession } from "./helpers/mqtt-session.ts";
+import { STATUS } from "../src/ev-charging/mqtt-status.ts";
 
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
@@ -32,6 +33,25 @@ async function advanceToSolarWindow(relay: MqttRelaySimulator): Promise<void> {
   await relay.assertOn("2026-04-18T17:00"); // plug-in detection at session start
   await relay.assertOff("2026-04-19T10:00"); // sleep through the overnight gap
   await relay.assertOn("2026-04-19T10:00"); // solar-free slot begins charging
+}
+
+/**
+ * Polls statusHistory() until the predicate matches one of the entries or
+ * the timeout elapses.  Used to synchronise test assertions that depend on
+ * async MQTT message delivery (e.g. waiting for the first watt reading).
+ */
+async function waitUntilStatus(
+  statusHistory: () => readonly string[],
+  predicate: (s: string) => boolean,
+  timeoutMs = 3000,
+): Promise<void> {
+  const start = Date.now();
+  while (!statusHistory().some(predicate)) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`Timed out waiting for status. History: ${JSON.stringify(statusHistory())}`);
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
 }
 
 // Tests run sequentially: each MQTT session subscribes to the same topics, so
@@ -230,4 +250,53 @@ describe("main-loop MQTT integration — status history", { concurrency: false }
       teardown();
     }
   });
-});
+
+  /**
+   * When the target time changes while a charge slot is actively running, the
+   * slot is aborted and the relay is turned off.  The status must transition
+   * away from "Charging until …" immediately — it must not remain stuck on the
+   * old value until the next watt message arrives on the restarted relay.
+   *
+   * Expected sequence (target changed to 10:45 while the 10:00 slot is running):
+   *   1. Waiting for car to be plugged in
+   *   2. Planned charge start at 10:00
+   *   3. Waiting for charging to start
+   *   4. Charging until 12:00      ← from the initial 8-slot plan
+   *   5. Re-planning...            ← set immediately when target changes (the fix)
+   *   6. Waiting for charging to start  ← re-run of the aborted slot
+   *   7. Charging until 10:45      ← new 3-slot plan with chargeRunEnd=10:45
+   *   … (session continues with new target)
+   */
+  test("Status clears 'Charging until' immediately after mid-slot target-time change", async () => {
+    const { loopPromise, relay, statusHistory, publishTargetTime, teardown } =
+      await startMqttSession(FROM, SPEEDUP);
+    try {
+      await advanceToSolarWindow(relay);
+      // Wait until the first watt message has pushed "Charging until …" into the history.
+      await waitUntilStatus(statusHistory, (s) => s.startsWith("Charging until "));
+
+      // Abort the active slot by changing the target time.
+      publishTargetTime("10:45");
+      await relay.assertOff("2026-04-19T10:15");
+
+      // "Re-planning…" must appear in the history confirming the status was updated.
+      await waitUntilStatus(statusHistory, (s) => s === STATUS.replanning);
+
+      await loopPromise;
+
+      const history = statusHistory();
+      const chargingIdx = history.findIndex((s) => s.startsWith("Charging until "));
+      const replanningIdx = history.indexOf(STATUS.replanning, chargingIdx + 1);
+      assert.ok(
+        chargingIdx !== -1,
+        `Expected "Charging until …" in history. Got: ${JSON.stringify(history)}`,
+      );
+      assert.ok(
+        replanningIdx > chargingIdx,
+        `Expected "${STATUS.replanning}" after "Charging until …". Got: ${JSON.stringify(history)}`,
+      );
+    } finally {
+      teardown();
+    }
+  });
+}); // describe "main-loop MQTT integration — status history"
