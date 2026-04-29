@@ -56,7 +56,7 @@ const SENSORS: SensorDef[] = [
   { id: "status", name: "Status", icon: "mdi:ev-station" },
   {
     id: "plan_cost",
-    name: "Estimated Charge Cost (\u20ac)",
+    name: "Estimated Charge Cost (EUR)",
     icon: "mdi:currency-eur",
   },
   { id: "solar_pct", name: "Solar Power Share (%)", icon: "mdi:solar-power" },
@@ -307,7 +307,7 @@ export class LoggingPublisher implements Publisher {
       0,
     );
     const pct = charge.length > 0 ? Math.round((totalSolarFraction / charge.length) * 100) : 0;
-    log(`[Plan] Cost: \u20ac${cost.toFixed(2)}, Solar: ${pct}%`);
+    log(`[Plan] Cost: EUR ${cost.toFixed(2)}, Solar: ${pct}%`);
   }
 
   setChargedEnergy(kwh: number): void {

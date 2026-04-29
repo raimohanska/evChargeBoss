@@ -107,7 +107,7 @@ export function makeMqttSession(
       return new Promise((resolve, reject) => {
         client.publish(chargerTopic, payload, (err) => {
           if (err) return reject(err);
-          log(`[MQTT] → ${on ? "ON " : "OFF"} published to ${chargerTopic}`);
+          log(`[MQTT] -> ${on ? "ON " : "OFF"} published to ${chargerTopic}`);
           resolve();
         });
       });

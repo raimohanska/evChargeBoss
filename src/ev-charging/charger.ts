@@ -80,7 +80,7 @@ export async function runSlot({
       : `${slot.effectiveCostEur.toFixed(3)} €`
     : "too expensive";
   log(
-    `[${slot.charge ? "ON " : "OFF"}] ${localTimeShort(slot.start)}–${localTimeShort(slot.end)} | ${label}`,
+    `[${slot.charge ? "ON " : "OFF"}] ${localTimeShort(slot.start)}-${localTimeShort(slot.end)} | ${label}`,
   );
 
   let startEnergy: number | null = null;

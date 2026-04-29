@@ -59,7 +59,7 @@ export async function runSession(
       const solarPct =
         chargeSlotsDone > 0 ? Math.round((solarFractionAccum / chargeSlotsDone) * 100) : 0;
       log(
-        `Charging finished | ${chargedKwh.toFixed(2)} kWh charged, \u20ac${chargedCostEur.toFixed(3)} total cost, ${solarPct}% solar`,
+        `Charging finished | ${chargedKwh.toFixed(2)} kWh charged, EUR ${chargedCostEur.toFixed(3)} total cost, ${solarPct}% solar`,
       );
       publisher.resetTargetTime();
       await session.driver.send(false);
@@ -103,7 +103,7 @@ export async function runSession(
         chargeSlotsDone > 0 ? Math.round((solarFractionAccum / chargeSlotsDone) * 100) : 0;
       if (chargedKwh > 0) {
         log(
-          `Charging finished | ${chargedKwh.toFixed(2)} kWh charged, \u20ac${chargedCostEur.toFixed(3)} total cost, ${solarPct}% solar`,
+          `Charging finished | ${chargedKwh.toFixed(2)} kWh charged, EUR ${chargedCostEur.toFixed(3)} total cost, ${solarPct}% solar`,
         );
       }
       log("No charge slots remaining in window.");
