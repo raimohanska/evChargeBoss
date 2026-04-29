@@ -48,6 +48,7 @@
     "targetTemperatureDefault": 45,
     "targetTemperatureCheap": 65,
     "cheapFactor": 0.5,
+    "solarWattsThresholdForCheap": 2000,
     "mqtt": {
       "commandTopic": "zigbee2mqtt/water-heater/set"
     }

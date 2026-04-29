@@ -11,9 +11,11 @@ export async function planWaterHeating(
   const whConfig = config.waterHeating!;
   const pricedSlots = await fetchSlots(from, to, config.electricity, config.solar);
 
-  // Effective price per slot: 0 if any solar is forecast, otherwise spot + transport.
+  // Effective price per slot: 0 if solar exceeds the configured threshold, otherwise spot + transport.
   const prices = pricedSlots.map((s) =>
-    s.solarForecastW > 0 ? 0 : s.spotPriceEurPerKwh + s.transportCostEurPerKwh,
+    s.solarForecastW >= whConfig.solarWattsThresholdForCheap
+      ? 0
+      : s.spotPriceEurPerKwh + s.transportCostEurPerKwh,
   );
 
   const dailyAvg = prices.reduce((sum, p) => sum + p, 0) / prices.length;

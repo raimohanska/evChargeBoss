@@ -22,6 +22,7 @@ const CONFIG = {
     targetTemperatureDefault: 45,
     targetTemperatureCheap: 65,
     cheapFactor: 0.5,
+    solarWattsThresholdForCheap: 2000,
     mqtt: { commandTopic: "test/water-heater/set" },
   },
 };
@@ -33,14 +34,14 @@ test("planWaterHeating returns 96 slots for a 24h window", async () => {
   assert.equal(slots.length, 96);
 });
 
-test("every solar-forecast-positive slot gets targetTemperatureCheap", async () => {
+test("slots above solarWattsThresholdForCheap get targetTemperatureCheap", async () => {
   const slots = await planWaterHeating(FROM, TO, CONFIG);
   for (const slot of slots) {
-    if (slot.solarForecastW > 0) {
+    if (slot.solarForecastW >= CONFIG.waterHeating.solarWattsThresholdForCheap) {
       assert.equal(
         slot.targetTemp,
         CONFIG.waterHeating.targetTemperatureCheap,
-        `solar slot at ${slot.start.toISOString()} should be cheap`,
+        `solar slot at ${slot.start.toISOString()} (${slot.solarForecastW} W) should be cheap`,
       );
     }
   }
@@ -51,7 +52,9 @@ test("slot assignment matches the cheap-factor algorithm", async () => {
 
   // Re-derive prices the same way the planner does.
   const prices = slots.map((s) =>
-    s.solarForecastW > 0 ? 0 : s.spotPriceEurPerKwh + s.transportCostEurPerKwh,
+    s.solarForecastW >= CONFIG.waterHeating.solarWattsThresholdForCheap
+      ? 0
+      : s.spotPriceEurPerKwh + s.transportCostEurPerKwh,
   );
   const dailyAvg = prices.reduce((a, b) => a + b, 0) / prices.length;
 

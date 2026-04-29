@@ -109,7 +109,8 @@ When present, the program also controls a water heater via a single MQTT setpoin
 "waterHeating": {
   "targetTemperatureDefault": 45,  // °C during expensive slots
   "targetTemperatureCheap": 65,    // °C during cheap or solar-free slots
-  "cheapFactor": 0.5,              // slot is "cheap" if price < dailyAvg × cheapFactor
+  "cheapFactor": 0.5,                    // slot is "cheap" if price < dailyAvg × cheapFactor
+  "solarWattsThresholdForCheap": 2000,   // min solar forecast (W) to treat a slot as free
   "mqtt": {
     "commandTopic": "zigbee2mqtt/water-heater/set"  // raw numeric string published here
   }
