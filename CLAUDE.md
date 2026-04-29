@@ -6,6 +6,8 @@ Every completed task ends with a `git commit`. Do not batch multiple tasks into 
 
 Run `npx prettier --write` on changed files before committing.
 
+Run `npm run build` before committing. Fix any TypeScript or build errors before the commit goes in.
+
 ## Running the code
 
 ```sh
