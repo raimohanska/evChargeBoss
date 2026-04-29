@@ -9,6 +9,7 @@
     "targetKwh": 7,
     "powerKw": 3,
     "targetTime": "12:00",
+    "chargeNowHours": 2,
     "mqtt": {
       "powerTopic": "zigbee2mqtt/ev-relay",
       "powerField": "power",

@@ -165,18 +165,42 @@ export class StatusPublisher implements Publisher {
     this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
     this.pub(timeStateTopic, this.targetTimeOverride ?? this.config.targetTime);
 
+    // HA button entity: "Charge Now" — sets target time to now + chargeNowHours
+    const chargeNowCmdTopic = `${BASE}/charge_now/set`;
+    const chargeNowHours = this.config.chargeNowHours ?? 2;
+    const chargeNowDiscoveryPayload = JSON.stringify({
+      unique_id: `${DEVICE_ID}_charge_now`,
+      name: `Charge Now (+${chargeNowHours}h)`,
+      icon: "mdi:flash",
+      command_topic: chargeNowCmdTopic,
+      payload_press: "PRESS",
+      device: DEVICE,
+    });
+    this.pub(`${DISCOVERY}/button/${DEVICE_ID}_charge_now/config`, chargeNowDiscoveryPayload, true);
+
     this.client.subscribe(timeCmdTopic, (err) => {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
     });
+    this.client.subscribe(chargeNowCmdTopic, (err) => {
+      if (err) log(`[MQTT status] subscribe error: ${err.message}`);
+    });
     this.client.on("message", (topic: string, payload: Buffer) => {
-      if (topic !== timeCmdTopic) return;
-      const parts = payload.toString().trim().split(":");
-      if (parts.length < 2) return;
-      const newTime = `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
-      this.targetTimeOverride = newTime;
-      log(`[MQTT] Target time updated to ${newTime}`);
-      this.pub(timeStateTopic, newTime);
-      this.replanCallback?.();
+      if (topic === timeCmdTopic) {
+        const parts = payload.toString().trim().split(":");
+        if (parts.length < 2) return;
+        const newTime = `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
+        this.targetTimeOverride = newTime;
+        log(`[MQTT] Target time updated to ${newTime}`);
+        this.pub(timeStateTopic, newTime);
+        this.replanCallback?.();
+      } else if (topic === chargeNowCmdTopic && payload.toString().trim() === "PRESS") {
+        const target = new Date(Date.now() + chargeNowHours * 3_600_000);
+        const newTime = `${String(target.getHours()).padStart(2, "0")}:${String(target.getMinutes()).padStart(2, "0")}`;
+        this.targetTimeOverride = newTime;
+        log(`[MQTT] Charge Now pressed -> target time set to ${newTime}`);
+        this.pub(timeStateTopic, newTime);
+        this.replanCallback?.();
+      }
     });
 
     log("MQTT discovery and initial state published.");
