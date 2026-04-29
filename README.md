@@ -1,8 +1,11 @@
 # evChargeBoss
 
-Plans EV charging slots to minimise cost by combining day-ahead spot electricity prices with solar production forecasts. Selects the cheapest 15-minute slots within a configurable window, treating solar-covered slots as effectively free.
+Optimises home energy use by combining day-ahead spot electricity prices with solar production forecasts.
 
-Designed for Finnish electricity markets (spot-hinta.fi) and home solar + MQTT-controlled relay hardware.
+- **EV charging** — selects the cheapest 15-minute slots within a daily window, treating solar-covered slots as effectively free.
+- **Water heater** (optional) — adjusts the temperature setpoint every 15 minutes: `targetTemperatureCheap` during cheap/solar slots, `targetTemperatureDefault` otherwise. "Cheap" means the slot price is below half the 24-hour average (configurable).
+
+Designed for Finnish electricity markets (spot-hinta.fi) and home solar + MQTT-controlled hardware.
 
 ## Requirements
 
@@ -30,10 +33,10 @@ node --experimental-strip-types src/index.ts
 
 ## Modes
 
-| Flag | Behaviour |
-|------|-----------|
-| *(none)* | **Charge mode** — connects to MQTT, waits for car plug-in detection (power > threshold), plans, then controls the relay. Loops forever. |
-| `--plan` | Fetch data, print the plan, exit. No charging. |
+| Flag     | Behaviour                                                                                                                               |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| _(none)_ | **Charge mode** — connects to MQTT, waits for car plug-in detection (power > threshold), plans, then controls the relay. Loops forever. |
+| `--plan` | Fetch data, print the plan, exit. No charging.                                                                                          |
 
 All modes accept:
 
@@ -98,13 +101,30 @@ The intended hardware target is a **NOUS D3Z** DIN-rail relay (25 A, Zigbee) via
 }
 ```
 
+### Water heating (optional)
+
+When present, the program also controls a water heater via a single MQTT setpoint topic, running in parallel with EV charging.
+
+```jsonc
+"waterHeating": {
+  "targetTemperatureDefault": 45,  // °C during expensive slots
+  "targetTemperatureCheap": 65,    // °C during cheap or solar-free slots
+  "cheapFactor": 0.5,              // slot is "cheap" if price < dailyAvg × cheapFactor
+  "mqtt": {
+    "commandTopic": "zigbee2mqtt/water-heater/set"  // raw numeric string published here
+  }
+}
+```
+
+The payload is a plain number string (e.g. `"65"`). Find the correct topic with an MQTT explorer tool.
+
 ## Data sources
 
-| Source | Used for | Notes |
-|--------|----------|-------|
-| [spot-hinta.fi](https://spot-hinta.fi) | Day-ahead spot prices (15-min) | Finland, no key required |
-| [forecast.solar](https://forecast.solar) | Solar production forecast | Tilt/azimuth-aware, free tier |
-| [Open-Meteo](https://open-meteo.com) | Solar fallback | Used automatically if forecast.solar rate-limits |
+| Source                                   | Used for                       | Notes                                            |
+| ---------------------------------------- | ------------------------------ | ------------------------------------------------ |
+| [spot-hinta.fi](https://spot-hinta.fi)   | Day-ahead spot prices (15-min) | Finland, no key required                         |
+| [forecast.solar](https://forecast.solar) | Solar production forecast      | Tilt/azimuth-aware, free tier                    |
+| [Open-Meteo](https://open-meteo.com)     | Solar fallback                 | Used automatically if forecast.solar rate-limits |
 
 Both price and solar data are cached to disk as per-day JSON files (`.spot-cache-YYYY-MM-DD.json`, `.solar-cache-YYYY-MM-DD.json`). The cache accumulates across days, enabling historical replay with `--from`.
 
@@ -128,22 +148,36 @@ Tests use fixed cache fixtures in `test/fixtures/` and a pinned start date so th
 
 ```
 src/
-  index.ts          entry point, CLI flag parsing, main loop
-  config.ts         Config type definition, JSON loader
-  types.ts          Slot interface
-  planner.ts        core planning logic (slot selection)
-  print-plan.ts     terminal plan output (ANSI colours)
-  charger.ts        ChargingSession / ChargerDriver interfaces, runCharging loop
-  mqtt-client.ts    MQTT connect, plug-in detection, makeMqttSession()
-  spot.ts           spot price fetching + per-day file cache
-  solar.ts          solar forecast fetching + per-day file cache
-  solar-openmeteo.ts  Open-Meteo backup solar source
-  cache.ts          readCache / writeCache helpers
-  errors.ts         IncompleteDataError
-  utils.ts          log, sleep, assertNotNull, localDateString, localDateTimeString
-  polyfill.ts       fetch polyfill injected by esbuild for Node < 18
-config-example.json template configuration
+  index.ts                  entry point — starts EV charging + water heating loops
+  config.ts                 root Config type, JSON loader
+  ev-charging/
+    planner.ts              EV slot selection logic
+    main-loop.ts            charging session state machine
+    charger.ts              ChargingSession / ChargerDriver interfaces
+    mqtt-client.ts          MQTT connect, plug-in detection, makeMqttSession()
+    mqtt-status.ts          status publisher
+    config.ts               EvChargingConfig type
+    types.ts                Slot interface
+  water-heating/
+    planner.ts              assigns targetTemp per 15-min slot over 24h
+    index.ts                runWaterHeating() loop + runWaterHeatingLoop() (testable)
+    config.ts               WaterHeatingConfig type
+    types.ts                WaterHeatingSlot interface
+  electricity/
+    index.ts                fetchSlots() — spot prices + solar forecast
+    spot.ts                 spot price fetching + per-day file cache
+    solar.ts                solar forecast fetching + per-day file cache
+    solar-openmeteo.ts      Open-Meteo backup solar source
+    cache.ts                readCache / writeCache helpers
+    types.ts                PricedSlot interface
+  utils/
+    log.ts                  timestamped logger
+    timing-utils.ts         Clock, Canceller, sleep
+    date-time-format.ts     locale-independent date formatters
+    polyfill.ts             fetch polyfill injected by esbuild for Node < 18
+config-example.json         template configuration
 test/
-  planner.test.ts   unit tests for plan()
-  fixtures/         frozen cache files + config used by tests
+  planner.test.ts           unit tests for EV plan()
+  water-heating-test.ts     unit + loop tests for water heating
+  fixtures/                 frozen cache files + config used by tests
 ```

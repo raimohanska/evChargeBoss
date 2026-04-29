@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
 import { EvChargingConfig } from "./ev-charging/config.ts";
 import { ElectricityConfig, SolarConfig } from "./electricity/config.ts";
+import { WaterHeatingConfig } from "./water-heating/config.ts";
 
 const InfluxConfig = z.strictObject({
   url: z.string(),
@@ -38,6 +39,7 @@ const Config = z.strictObject({
   solar: SolarConfig,
   electricity: ElectricityConfig,
   influx: InfluxConfig.optional(),
+  waterHeating: WaterHeatingConfig.optional(),
   test: TestConfig,
 });
 

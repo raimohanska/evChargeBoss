@@ -53,9 +53,14 @@
 
 import { loadConfig } from "./config.ts";
 import { runEvCharging } from "./ev-charging/index.ts";
+import { runWaterHeating } from "./water-heating/index.ts";
 
 const config = loadConfig();
-runEvCharging(config).catch((err) => {
+
+const loops: Promise<void>[] = [runEvCharging(config)];
+if (config.waterHeating) loops.push(runWaterHeating(config));
+
+Promise.all(loops).catch((err) => {
   const msg = err instanceof Error ? err.message : String(err);
   console.error(`[${new Date().toISOString()}] Fatal: ${msg}`);
   process.exit(1);

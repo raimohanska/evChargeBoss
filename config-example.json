@@ -43,5 +43,13 @@
       "location": "garage",
       "charger_type": "ICU Compact Mini"
     }
+  },
+  "waterHeating": {
+    "targetTemperatureDefault": 45,
+    "targetTemperatureCheap": 65,
+    "cheapFactor": 0.5,
+    "mqtt": {
+      "commandTopic": "zigbee2mqtt/water-heater/set"
+    }
   }
 }
