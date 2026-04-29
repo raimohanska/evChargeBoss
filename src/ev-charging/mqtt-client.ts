@@ -137,9 +137,11 @@ export function makeMqttSession(
         });
         await clock.sleep(15_000);
         unsub();
-        const avg = readings.reduce((a, b) => a + b, 0) / readings.length;
-        const powerKw = avg / 1000;
-        log(`Detected charging power: ${powerKw.toFixed(2)} kW (${readings.length} samples)`);
+        const maxW = Math.max(...readings);
+        const powerKw = maxW / 1000;
+        log(
+          `Detected charging power: ${powerKw.toFixed(2)} kW (max of ${readings.length} samples)`,
+        );
         return powerKw;
       } catch (err) {
         client.end();
