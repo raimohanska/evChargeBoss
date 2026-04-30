@@ -54,5 +54,49 @@
     "mqtt": {
       "commandTopic": "zigbee2mqtt/water-heater/set"
     }
+  },
+  "mqttToInflux": {
+    "sensors": [{
+      "name": "autotalli_motion",
+      "type": "motion",
+      "device": "autotalli",
+      "location": "autotalli",
+      "mqtt_topic": "sensors/autotalli/motion",
+      "unit": ""
+    },
+    {
+      "name": "Autotallin liiketunnistin",
+      "type": "motion",
+      "device": "Zigbee PIR sensor",
+      "location": "autotalli",
+      "mqtt_topic": "zigbee2mqtt/Autotallin liiketunnistin",
+      "unit": "",
+      "json_field": "occupancy"
+    },
+    {
+      "name": "Radiator Return",
+      "type": "temperature",
+      "device": "heatpump",
+      "location": "patterit-paluu",
+      "mqtt_topic": "b0cbd8f1c4a4/HP/0001",
+      "unit": "°C"
+    },
+    {
+      "name": "raimo-unit-6_temperature",
+      "type": "temperature",
+      "device": "raimo-unit-6",
+      "location": "terassi",
+      "mqtt_topic": "sensors/raimo-unit-6/temperature",
+      "unit": "°C"
+    },
+    {
+      "name": "raimo_unit_wc_temperature",
+      "type": "temperature",
+      "device": "raimo_unit_wc",
+      "location": "wc",
+      "mqtt_topic": "sensors/raimo_unit_wc/temperature",
+      "unit": "°C"
+    }
+  ]
   }
 }
