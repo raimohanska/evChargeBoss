@@ -1,6 +1,7 @@
 import type { Config } from "../config.ts";
 import type { Clock } from "../utils/timing-utils.ts";
 import { planWaterHeating } from "./planner.ts";
+import { printWaterHeatingPlan } from "./print-plan.ts";
 import { connectMqtt } from "../ev-charging/mqtt-client.ts";
 import { makeClock } from "../utils/timing-utils.ts";
 import { log } from "../utils/log.ts";
@@ -20,6 +21,7 @@ export async function runWaterHeatingLoop(
 ): Promise<void> {
   const to = new Date(from.getTime() + WINDOW_MS);
   const slots = await planWaterHeating(from, to, config);
+  printWaterHeatingPlan(slots);
   const { commandTopic } = config.waterHeating!.mqtt;
 
   for (const slot of slots) {
