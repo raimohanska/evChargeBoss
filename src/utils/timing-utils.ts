@@ -7,7 +7,7 @@ export function sleep(ms: number, signal?: CancelSignal): Promise<void> {
       resolve();
     });
   });
-}/** Minimal AbortController-like that works on Node 12. */
+} /** Minimal AbortController-like that works on Node 12. */
 export class Canceller {
   private _listeners: Array<() => void> = [];
   readonly signal: CancelSignal = {
@@ -57,4 +57,3 @@ export function makeClock(speedupFactor = 1, startTime?: Date): Clock {
 }
 
 export const realClock: Clock = makeClock(1);
-

@@ -30,18 +30,14 @@ export class MqttRelaySimulator {
   } | null = null;
   private powerTimer: ReturnType<typeof setInterval> | null = null;
 
-  private readonly client: MqttClient
-  private readonly mqttConfig: MqttConfig
-  private readonly clock: Clock
+  private readonly client: MqttClient;
+  private readonly mqttConfig: MqttConfig;
+  private readonly clock: Clock;
 
-  constructor(
-    client: MqttClient,
-    mqttConfig: MqttConfig,
-    clock: Clock = realClock,
-  ) {
-    this.client = client
-    this.mqttConfig = mqttConfig
-    this.clock = clock
+  constructor(client: MqttClient, mqttConfig: MqttConfig, clock: Clock = realClock) {
+    this.client = client;
+    this.mqttConfig = mqttConfig;
+    this.clock = clock;
     client.subscribe(mqttConfig.chargerTopic, (err) => {
       if (err) throw new Error(`Relay simulator subscribe failed: ${err.message}`);
     });
@@ -57,7 +53,7 @@ export class MqttRelaySimulator {
     this.states.push(on);
     this.timestamps.push(this.clock.now());
     if (on) this.startEmittingPower();
-    else    this.stopEmittingPower();
+    else this.stopEmittingPower();
 
     const p = this.pending;
     if (p) {
@@ -74,14 +70,14 @@ export class MqttRelaySimulator {
         this.mqttConfig.powerTopic,
         JSON.stringify({ [this.mqttConfig.powerField]: 3000 }),
       );
-    }, 100);  
+    }, 100);
   }
 
   private stopEmittingPower(): void {
     if (this.powerTimer) {
       clearInterval(this.powerTimer);
       this.powerTimer = null;
-    }    
+    }
     // Emit zero watts so any active watt-listener sees the charger is off.
     this.client.publish(
       this.mqttConfig.powerTopic,
@@ -116,22 +112,22 @@ export class MqttRelaySimulator {
       actual = this.states[this.consumedIdx++];
     } else {
       actual = await new Promise<boolean>((resolve, reject) => {
-        const timer = setTimeout(
-          () => {
-            this.pending = null;
-            reject(new Error(
+        const timer = setTimeout(() => {
+          this.pending = null;
+          reject(
+            new Error(
               `Relay simulator: timed out after ${DEFAULT_TIMEOUT_MS}ms waiting for ${expected ? "ON" : "OFF"}`,
-            ));
-          },
-          DEFAULT_TIMEOUT_MS,
-        );
+            ),
+          );
+        }, DEFAULT_TIMEOUT_MS);
         this.pending = { resolve, reject, timer };
       });
       this.consumedIdx++;
     }
 
     assert.equal(
-      actual, expected,
+      actual,
+      expected,
       `Expected relay ${expected ? "ON" : "OFF"} but got ${actual ? "ON" : "OFF"}`,
     );
     return this.timestamps[this.consumedIdx - 1];

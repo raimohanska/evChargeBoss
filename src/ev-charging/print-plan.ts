@@ -40,5 +40,5 @@ export function printPlan(slots: Slot[]): void {
   log(
     `${hr.repeat(3)} Total: ${chargeSlots.length} slots, ~${totalCost.toFixed(3)} EUR charging cost, ${freeSlots} solar-free slots`,
   );
-}export const IS_TTY = process.stdout.isTTY === true;
-
+}
+export const IS_TTY = process.stdout.isTTY === true;

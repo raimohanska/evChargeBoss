@@ -1,4 +1,3 @@
-
 /** Format a Date as YYYY-MM-DD in local time, without relying on Intl/locale data. */
 export function localDateString(d: Date): string {
   const y = d.getFullYear();
@@ -19,5 +18,3 @@ export function localDateTimeString(d: Date): string {
 export function localTimeShort(d: Date): string {
   return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
-
-
