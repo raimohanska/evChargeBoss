@@ -18,7 +18,7 @@ export interface SessionSummary {
 }
 
 /** Escape a tag key or tag value per InfluxDB Line Protocol rules. */
-function escapeTagKeyValue(s: string): string {
+export function escapeTagKeyValue(s: string): string {
   return s.replace(/[,= ]/g, "\\$&");
 }
 
@@ -48,7 +48,7 @@ export function formatLineProtocol(
 }
 
 /** POST one Line Protocol line to InfluxDB v2 write API. */
-function writeLine(config: InfluxConfig, body: string): Promise<void> {
+export function writeLine(config: InfluxConfig, body: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const base = new URL(config.url);
     const basePath = base.pathname.replace(/\/$/, "");
