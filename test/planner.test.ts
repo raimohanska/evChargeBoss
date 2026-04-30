@@ -8,6 +8,7 @@ import { parseTargetTime } from "../src/ev-charging/main-loop.ts";
 
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
+process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
 
 // Fixed planning start: 2026-04-18 14:00 local (Helsinki, UTC+3).
 // 12:00 has already passed, so target is next day → window: 2026-04-18T14:00 → 2026-04-19T12:00.
