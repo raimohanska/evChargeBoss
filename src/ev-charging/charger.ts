@@ -74,7 +74,7 @@ export async function runSlot({
   powerThresholdW,
   powerKw,
   clock,
-}: RunSlotParams): Promise<number> {
+}: RunSlotParams): Promise<{ kwh: number; carFinished: boolean }> {
   const label = slot.charge
     ? slot.effectiveCostEur === 0
       ? "solar-free"
@@ -87,6 +87,7 @@ export async function runSlot({
   let startEnergy: number | null = null;
   let lastEnergy: number | null = null;
   let chargeActive = false;
+  let carFinished = false;
   let lastSessionKwh: number | undefined = undefined;
 
   const unsubWatts = slot.charge
@@ -103,6 +104,7 @@ export async function runSlot({
           chargeActive = true;
           publisher.setStatus(STATUS.charging(localTimeShort(runEnd)));
         } else if (chargeActive) {
+          carFinished = true;
           publisher.setStatus(STATUS.chargingFinished(lastSessionKwh));
         }
       })
@@ -135,8 +137,8 @@ export async function runSlot({
 
   // Prefer relay-measured energy; fall back to a plan-based estimate.
   if (startEnergy !== null && lastEnergy !== null) {
-    return lastEnergy - startEnergy;
+    return { kwh: lastEnergy - startEnergy, carFinished };
   }
-  if (signal?.aborted || !slot.charge) return 0;
-  return powerKw * 0.25;
+  if (signal?.aborted || !slot.charge) return { kwh: 0, carFinished };
+  return { kwh: powerKw * 0.25, carFinished };
 }

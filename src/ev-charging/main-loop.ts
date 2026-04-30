@@ -142,7 +142,7 @@ export async function runSession(
 
     // Run the single slot.
     const chargeRunEnd = findChargeRunEnd(slots, nextCharge);
-    const kwh = await runSlot({
+    const { kwh, carFinished } = await runSlot({
       slot: nextCharge,
       chargeRunEnd,
       driver: session.driver,
@@ -162,6 +162,21 @@ export async function runSession(
       const solarPct = Math.round((solarFractionAccum / chargeSlotsDone) * 100);
       publisher.setAccumulatedCost(chargedCostEur);
       publisher.setAccumulatedSolarPct(solarPct);
+    }
+
+    // Car's battery is full — power dropped below threshold while relay was ON.
+    // Exit now rather than starting the next slot and showing misleading statuses.
+    if (carFinished && !replanController.signal.aborted) {
+      const solarPct =
+        chargeSlotsDone > 0 ? Math.round((solarFractionAccum / chargeSlotsDone) * 100) : 0;
+      log(
+        `Charging finished (car full) | ${chargedKwh.toFixed(2)} kWh charged, EUR ${chargedCostEur.toFixed(3)} total cost, ${solarPct}% solar`,
+      );
+      publisher.resetTargetTime();
+      await session.driver.send(false);
+      publisher.setStatus(STATUS.idle);
+      await onSessionEnd?.({ chargedKwh, totalCostEur: chargedCostEur, solarPct });
+      return;
     }
 
     if (replanController.signal.aborted) {
