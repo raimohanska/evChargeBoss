@@ -5,7 +5,7 @@ import { writeLine, escapeTagKeyValue } from "../influx.ts";
 import type { InfluxConfig } from "../influx.ts";
 import { log } from "../utils/log.ts";
 
-function parseValue(payload: string, sensor: SensorConfig): number | null {
+export function parseValue(payload: string, sensor: SensorConfig): number | null {
   let raw: unknown;
 
   if (sensor.json_field) {
@@ -17,11 +17,11 @@ function parseValue(payload: string, sensor: SensorConfig): number | null {
     }
   } else {
     const trimmed = payload.trim();
-    if (trimmed === "true") raw = true;
-    else if (trimmed === "false") raw = false;
+    if (trimmed === "true" || trimmed === "ON") raw = true;
+    else if (trimmed === "false" || trimmed === "OFF") raw = false;
     else {
       const n = parseFloat(trimmed);
-      if (isNaN(n)) return null;
+      if (isNaN(n) || !isFinite(n)) return null;
       raw = n;
     }
   }
@@ -30,13 +30,14 @@ function parseValue(payload: string, sensor: SensorConfig): number | null {
   if (typeof raw === "boolean") {
     value = raw ? 1 : 0;
   } else if (typeof raw === "number") {
+    if (!isFinite(raw)) return null;
     value = raw;
   } else if (typeof raw === "string") {
-    if (raw === "true") value = 1;
-    else if (raw === "false") value = 0;
+    if (raw === "true" || raw === "ON") value = 1;
+    else if (raw === "false" || raw === "OFF") value = 0;
     else {
       const n = parseFloat(raw);
-      if (isNaN(n)) return null;
+      if (isNaN(n) || !isFinite(n)) return null;
       value = n;
     }
   } else {
@@ -51,7 +52,7 @@ function parseValue(payload: string, sensor: SensorConfig): number | null {
   return value;
 }
 
-function formatSensorLine(sensor: SensorConfig, value: number, timestampMs: number): string {
+export function formatSensorLine(sensor: SensorConfig, value: number, timestampMs: number): string {
   const tags = [
     `name=${escapeTagKeyValue(sensor.name)}`,
     `device=${escapeTagKeyValue(sensor.device)}`,
@@ -82,7 +83,7 @@ async function handleMessage(
       await writeLine(influxConfig, line);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log(`[MqttToInflux] ERROR writing ${sensor.name}: ${msg}`);
+      log(`[MqttToInflux] ERROR writing ${sensor.name}: ${msg} — line: ${line}`);
     }
   }
 }
