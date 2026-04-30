@@ -94,6 +94,13 @@ describe("formatSensorLine", () => {
     );
   });
 
+  test("empty location tag omitted (avoids InfluxDB 400)", () => {
+    const sensor: SensorConfig = { ...temperature, location: "" };
+    const line = formatSensorLine(sensor, 27.5, 1000);
+    assert.doesNotMatch(line, /location=/);
+    assert.match(line, /^temperature,/);
+  });
+
   test("spaces in name are escaped", () => {
     const sensor: SensorConfig = { ...temperature, name: "Warm water setpoint" };
     const line = formatSensorLine(sensor, 55, 1000);

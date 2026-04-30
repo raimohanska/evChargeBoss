@@ -53,12 +53,15 @@ export function parseValue(payload: string, sensor: SensorConfig): number | null
 }
 
 export function formatSensorLine(sensor: SensorConfig, value: number, timestampMs: number): string {
-  const tags = [
-    `name=${escapeTagKeyValue(sensor.name)}`,
-    `device=${escapeTagKeyValue(sensor.device)}`,
-    `location=${escapeTagKeyValue(sensor.location)}`,
+  const tagEntries: [string, string][] = [
+    ["name", sensor.name],
+    ["device", sensor.device],
+    ["location", sensor.location],
+    ["unit", sensor.unit],
   ];
-  if (sensor.unit) tags.push(`unit=${escapeTagKeyValue(sensor.unit)}`);
+  const tags = tagEntries
+    .filter(([, v]) => v !== "")
+    .map(([k, v]) => `${escapeTagKeyValue(k)}=${escapeTagKeyValue(v)}`);
   return `${escapeTagKeyValue(sensor.type)},${tags.join(",")} value=${value} ${timestampMs}`;
 }
 
