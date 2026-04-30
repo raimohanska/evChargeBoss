@@ -8,7 +8,9 @@ export type WaterHeatingMqttConfig = z.infer<typeof WaterHeatingMqttConfig>;
 export const WaterHeatingConfig = z.strictObject({
   targetTemperatureDefault: z.number(),
   targetTemperatureCheap: z.number(),
+  targetTemperatureExpensive: z.number().optional(),
   cheapFactor: z.number().positive().default(0.5),
+  expensiveFactor: z.number().positive().optional(),
   solarWattsThresholdForCheap: z.number().nonnegative(),
   mqtt: WaterHeatingMqttConfig,
 });

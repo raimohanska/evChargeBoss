@@ -21,7 +21,7 @@ export async function runWaterHeatingLoop(
 ): Promise<void> {
   const to = new Date(from.getTime() + WINDOW_MS);
   const slots = await planWaterHeating(from, to, config);
-  printWaterHeatingPlan(slots);
+  printWaterHeatingPlan(slots, config.waterHeating!);
   const { commandTopic } = config.waterHeating!.mqtt;
 
   for (const slot of slots) {

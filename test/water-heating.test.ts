@@ -20,9 +20,11 @@ const BASE_CONFIG = loadConfig();
 const CONFIG = {
   ...BASE_CONFIG,
   waterHeating: {
-    targetTemperatureDefault: 45,
+    targetTemperatureDefault: 51,
     targetTemperatureCheap: 65,
+    targetTemperatureExpensive: 40,
     cheapFactor: 0.5,
+    expensiveFactor: 1.5,
     solarWattsThresholdForCheap: 2000,
     mqtt: { commandTopic: "test/water-heater/set" },
   },
@@ -60,10 +62,18 @@ test("slot assignment matches the cheap-factor algorithm", async () => {
   const dailyAvg = prices.reduce((a, b) => a + b, 0) / prices.length;
 
   for (let i = 0; i < slots.length; i++) {
-    const expectedTemp =
-      prices[i] === 0 || prices[i] < dailyAvg * CONFIG.waterHeating.cheapFactor
-        ? CONFIG.waterHeating.targetTemperatureCheap
-        : CONFIG.waterHeating.targetTemperatureDefault;
+    let expectedTemp: number;
+    if (prices[i] === 0 || prices[i] < dailyAvg * CONFIG.waterHeating.cheapFactor) {
+      expectedTemp = CONFIG.waterHeating.targetTemperatureCheap;
+    } else if (
+      CONFIG.waterHeating.expensiveFactor != null &&
+      CONFIG.waterHeating.targetTemperatureExpensive != null &&
+      prices[i] > dailyAvg * CONFIG.waterHeating.expensiveFactor
+    ) {
+      expectedTemp = CONFIG.waterHeating.targetTemperatureExpensive;
+    } else {
+      expectedTemp = CONFIG.waterHeating.targetTemperatureDefault;
+    }
     assert.equal(
       slots[i].targetTemp,
       expectedTemp,
@@ -77,8 +87,24 @@ test("mix of cheap and default slots", async () => {
   const cheapCount = slots.filter(
     (s) => s.targetTemp === CONFIG.waterHeating.targetTemperatureCheap,
   ).length;
+  const defaultCount = slots.filter(
+    (s) => s.targetTemp === CONFIG.waterHeating.targetTemperatureDefault,
+  ).length;
   assert.ok(cheapCount > 0, "expected at least one cheap slot");
-  assert.ok(cheapCount < slots.length, "expected at least one default slot");
+  assert.ok(defaultCount > 0, "expected at least one default slot");
+});
+
+test("expensive tier: slots above expensiveFactor * avg get targetTemperatureExpensive", async () => {
+  // Use a low expensiveFactor so at least some slots are above it.
+  const config = {
+    ...CONFIG,
+    waterHeating: { ...CONFIG.waterHeating, expensiveFactor: 0.8 },
+  };
+  const slots = await planWaterHeating(FROM, TO, config);
+  const expensiveCount = slots.filter(
+    (s) => s.targetTemp === config.waterHeating.targetTemperatureExpensive,
+  ).length;
+  assert.ok(expensiveCount > 0, "expected at least one expensive slot with expensiveFactor=0.8");
 });
 
 // ── Execution loop tests ──────────────────────────────────────────────────────

@@ -1,10 +1,14 @@
 import type { WaterHeatingSlot } from "./types.ts";
+import type { WaterHeatingConfig } from "./config.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
 import { log } from "../utils/log.ts";
 import { IS_TTY } from "../ev-charging/print-plan.ts";
 
-export function printWaterHeatingPlan(slots: WaterHeatingSlot[]): void {
-  const maxTemp = Math.max(...slots.map((s) => s.targetTemp));
+export function printWaterHeatingPlan(
+  slots: WaterHeatingSlot[],
+  whConfig: WaterHeatingConfig,
+): void {
+  const { targetTemperatureCheap: cheapTemp, targetTemperatureExpensive: expensiveTemp } = whConfig;
   const hr = IS_TTY ? "\u2500" : "-";
 
   log(`  ${"TIME".padEnd(5)}  ${"SPOT".padEnd(11)}  ${"SOLAR".padEnd(6)}  TEMP`);
@@ -23,14 +27,21 @@ export function printWaterHeatingPlan(slots: WaterHeatingSlot[]): void {
         : `${"0".padStart(5)}W`;
 
     const tempStr = `${s.targetTemp}°C`.padStart(4);
-    const temp =
-      s.targetTemp === maxTemp ? (IS_TTY ? `\x1b[92m${tempStr}\x1b[0m` : tempStr) : tempStr;
+    let temp = tempStr;
+    if (IS_TTY) {
+      if (s.targetTemp === cheapTemp) temp = `\x1b[92m${tempStr}\x1b[0m`;
+      else if (expensiveTemp != null && s.targetTemp === expensiveTemp)
+        temp = `\x1b[33m${tempStr}\x1b[0m`;
+    }
 
     log(`  ${time}  ${spot}  ${sun}  ${temp}`);
   }
 
-  const hotSlots = slots.filter((s) => s.targetTemp === maxTemp).length;
-  log(
-    `${hr.repeat(3)} Water heating: ${slots.length} slots, ${hotSlots} at ${maxTemp}°C (cheap/solar)`,
-  );
+  const cheapSlots = slots.filter((s) => s.targetTemp === cheapTemp).length;
+  let summary = `${hr.repeat(3)} Water heating: ${slots.length} slots, ${cheapSlots} at ${cheapTemp}°C (cheap/solar)`;
+  if (expensiveTemp != null) {
+    const expensiveSlots = slots.filter((s) => s.targetTemp === expensiveTemp).length;
+    if (expensiveSlots > 0) summary += `, ${expensiveSlots} at ${expensiveTemp}°C (expensive)`;
+  }
+  log(summary);
 }

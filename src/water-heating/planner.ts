@@ -23,11 +23,19 @@ export async function planWaterHeating(
     `Water heating: planning ${pricedSlots.length} slots, avg ${(dailyAvg * 100).toFixed(2)} cts/kWh`,
   );
 
-  return pricedSlots.map((s, i) => ({
-    ...s,
-    targetTemp:
-      prices[i] === 0 || prices[i] < dailyAvg * whConfig.cheapFactor
-        ? whConfig.targetTemperatureCheap
-        : whConfig.targetTemperatureDefault,
-  }));
+  return pricedSlots.map((s, i) => {
+    let targetTemp: number;
+    if (prices[i] === 0 || prices[i] < dailyAvg * whConfig.cheapFactor) {
+      targetTemp = whConfig.targetTemperatureCheap;
+    } else if (
+      whConfig.expensiveFactor != null &&
+      whConfig.targetTemperatureExpensive != null &&
+      prices[i] > dailyAvg * whConfig.expensiveFactor
+    ) {
+      targetTemp = whConfig.targetTemperatureExpensive;
+    } else {
+      targetTemp = whConfig.targetTemperatureDefault;
+    }
+    return { ...s, targetTemp };
+  });
 }
