@@ -12,7 +12,14 @@ export async function plan(
   config: Config,
   verbose?: boolean,
 ): Promise<Slot[]> {
-  const pricedSlots = await fetchSlots(from, targetTime, config.electricity, config.solar, verbose);
+  const pricedSlots = await fetchSlots(
+    from,
+    targetTime,
+    config.electricity,
+    config.solar,
+    verbose,
+    config.influx,
+  );
 
   if (verbose !== false) {
     log(

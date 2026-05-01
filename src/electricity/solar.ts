@@ -15,7 +15,7 @@ export async function fetchSolarForecast(
   dates: string[],
   solarConfig: SolarConfig,
   verbose?: boolean,
-): Promise<Map<number, number>> {
+): Promise<{ map: Map<number, number>; fresh: boolean }> {
   const missingDates = dates.filter(
     (d) => readCache(`${CACHE_DIR}/.solar-cache-${d}.json`) === null,
   );
@@ -29,7 +29,7 @@ export async function fetchSolarForecast(
     if (!res.ok) {
       if (verbose !== false)
         log(`  forecast.solar HTTP ${res.status} — falling back to Open-Meteo`);
-      return fetchSolarForecastOpenMeteo(solarConfig, verbose);
+      return { map: await fetchSolarForecastOpenMeteo(solarConfig, verbose), fresh: true };
     }
     const json = (await res.json()) as { result: ForecastSolarResult };
     const map = new Map<number, number>();
@@ -37,7 +37,7 @@ export async function fetchSolarForecast(
       map.set(new Date(tsStr.replace(" ", "T")).getTime(), w);
     }
     if (verbose !== false) log(`  Got ${map.size} solar forecast slots`);
-    return map;
+    return { map, fresh: true };
   }
 
   const map = new Map<number, number>();
@@ -48,7 +48,7 @@ export async function fetchSolarForecast(
     }
   }
   if (verbose !== false) log(`  Solar forecast loaded from cache (${map.size} slots)`);
-  return map;
+  return { map, fresh: false };
 }
 
 export function persistSolarCache(map: Map<number, number>, verbose?: boolean): void {

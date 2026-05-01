@@ -9,7 +9,14 @@ export async function planWaterHeating(
   config: Config,
 ): Promise<WaterHeatingSlot[]> {
   const whConfig = config.waterHeating!;
-  const pricedSlots = await fetchSlots(from, to, config.electricity, config.solar);
+  const pricedSlots = await fetchSlots(
+    from,
+    to,
+    config.electricity,
+    config.solar,
+    undefined,
+    config.influx,
+  );
 
   // Effective price per slot: 0 if solar exceeds the configured threshold, otherwise spot + transport.
   const prices = pricedSlots.map((s) =>

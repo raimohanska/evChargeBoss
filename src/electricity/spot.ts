@@ -14,7 +14,7 @@ interface SpotHintaEntry {
 export async function fetchSpotPrices(
   dates: string[],
   verbose?: boolean,
-): Promise<Map<number, number>> {
+): Promise<{ map: Map<number, number>; fresh: boolean }> {
   const missingDates = dates.filter(
     (d) => readCache(`${CACHE_DIR}/.spot-cache-${d}.json`) === null,
   );
@@ -30,7 +30,7 @@ export async function fetchSpotPrices(
       map.set(new Date(entry.DateTime).getTime(), entry.PriceWithTax);
     }
     if (verbose !== false) log(`  Got ${map.size} quarter-hour price slots`);
-    return map;
+    return { map, fresh: true };
   }
 
   const map = new Map<number, number>();
@@ -41,7 +41,7 @@ export async function fetchSpotPrices(
     }
   }
   if (verbose !== false) log(`  Spot prices loaded from cache (${map.size} slots)`);
-  return map;
+  return { map, fresh: false };
 }
 
 export function persistSpotCache(map: Map<number, number>, verbose?: boolean): void {

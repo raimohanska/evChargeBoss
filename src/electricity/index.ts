@@ -6,8 +6,20 @@ import { log } from "../utils/log.ts";
 import { assertNotNull } from "../utils/assertNotNull.ts";
 import { IncompleteDataError } from "./IncompleteDataError.ts";
 import { type ElectricityConfig, type SolarConfig } from "./config.ts";
+import type { InfluxConfig } from "../influx.ts";
+import { writeLine, escapeTagKeyValue } from "../influx.ts";
 
 export type { PricedSlot } from "./types.ts";
+
+function buildTagStr(tags?: Record<string, string>): string {
+  if (!tags || Object.keys(tags).length === 0) return "";
+  return (
+    "," +
+    Object.entries(tags)
+      .map(([k, v]) => `${escapeTagKeyValue(k)}=${escapeTagKeyValue(v)}`)
+      .join(",")
+  );
+}
 
 /**
  * Fetch spot prices and solar forecast for every 15-minute slot between
@@ -15,6 +27,10 @@ export type { PricedSlot } from "./types.ts";
  * enriched slots.  The returned slots contain the raw spot price, the
  * configured transport cost, and the shade-corrected solar estimate.
  * Charging decisions (effectiveCostEur, charge flag) are left to the caller.
+ *
+ * If `influxConfig` is provided and the respective `electricity.influx` /
+ * `solar.influx` measurement configs are present, freshly fetched data
+ * (i.e. not served from cache) is written to InfluxDB.
  */
 export async function fetchSlots(
   from: Date,
@@ -22,14 +38,13 @@ export async function fetchSlots(
   electicity: ElectricityConfig,
   solar: SolarConfig,
   verbose?: boolean,
+  influxConfig?: InfluxConfig,
 ): Promise<PricedSlot[]> {
   const slotStarts = slotsBetween(from, to);
   const dates = datesInRange(from, to);
 
-  const [spotMap, solarMap] = await Promise.all([
-    fetchSpotPrices(dates, verbose),
-    fetchSolarForecast(dates, solar, verbose),
-  ]);
+  const [{ map: spotMap, fresh: spotFresh }, { map: solarMap, fresh: solarFresh }] =
+    await Promise.all([fetchSpotPrices(dates, verbose), fetchSolarForecast(dates, solar, verbose)]);
 
   const missingSpot = slotStarts.filter((s) => !spotMap.has(s.getTime()));
   if (missingSpot.length > 0) {
@@ -46,7 +61,7 @@ export async function fetchSlots(
     log(`  ${missingSolar} solar slots without exact match — using nearest preceding value`);
   persistSolarCache(solarMap, verbose);
 
-  return slotStarts.map((start) => {
+  const slots = slotStarts.map((start) => {
     const epoch = start.getTime();
     const spotPriceEurPerKwh = assertNotNull(
       spotMap.get(epoch),
@@ -62,4 +77,29 @@ export async function fetchSlots(
       solarForecastW,
     };
   });
+
+  if (influxConfig) {
+    if (spotFresh && electicity.influx) {
+      const tagStr = buildTagStr({ ...influxConfig.tags, ...electicity.influx.tags });
+      const measurement = escapeTagKeyValue(electicity.influx.measurement);
+      const body = slots
+        .map((s) => `${measurement}${tagStr} value=${s.spotPriceEurPerKwh} ${s.start.getTime()}`)
+        .join("\n");
+      writeLine(influxConfig, body).catch((e: Error) =>
+        log(`[Influx] electricity forecast write failed: ${e.message}`),
+      );
+    }
+    if (solarFresh && solar.influx) {
+      const tagStr = buildTagStr({ ...influxConfig.tags, ...solar.influx.tags });
+      const measurement = escapeTagKeyValue(solar.influx.measurement);
+      const body = slots
+        .map((s) => `${measurement}${tagStr} value=${s.solarForecastW} ${s.start.getTime()}`)
+        .join("\n");
+      writeLine(influxConfig, body).catch((e: Error) =>
+        log(`[Influx] solar forecast write failed: ${e.message}`),
+      );
+    }
+  }
+
+  return slots;
 }
