@@ -1,83 +1,71 @@
 /**
- * Tests for forecast-to-Influx logging in fetchSlots.
+ * Integration tests for forecast-to-Influx logging in fetchSlots.
+ *
+ * Requires the InfluxDB container:
+ *   docker compose up -d
  *
  * Uses future dates (2099-01-01) that have no local cache files to trigger
- * the "fresh" fetch path.  A local HTTP server captures the Influx write
- * requests.  globalThis.fetch is temporarily replaced to return canned
- * spot/solar data without hitting the real APIs.
+ * the "fresh" fetch path.  globalThis.fetch is temporarily replaced to return
+ * canned spot/solar data without hitting the real APIs.  Actual writes go to
+ * the real InfluxDB and are verified with a Flux query.
  *
- * Cache files written to CWD by persistSpotCache/persistSolarCache are
- * cleaned up in the after() hook and reused in the "cached" test.
+ * NOTE: CACHE_DIR in spot.ts/solar.ts is captured at module-load time, so the
+ * env var cannot be overridden from within a test file.  Cache files for the
+ * 2099-01-01 test date are therefore written to CWD (".") and cleaned up in
+ * the after() hook.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { existsSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { fetchSlots } from "../src/electricity/index.ts";
 import { loadConfig } from "../src/config.ts";
+import { queryInflux, parseFluxCsv } from "../src/influx.ts";
+import type { InfluxConfig } from "../src/influx.ts";
 
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
 const CONFIG = loadConfig();
 
-// Future date: no local cache file exists → fetchSpotPrices/fetchSolarForecast
-// will call the real fetch and return fresh=true.
+const INFLUX: InfluxConfig = {
+  url: "http://localhost:8086",
+  token: "test-token",
+  org: "evchargeboss",
+  bucket: "evchargeboss",
+};
+
+// Future date with no cache anywhere → always fresh on first call.
 const DATE = "2099-01-01";
-const FROM = new Date("2099-01-01T00:00:00"); // Helsinki local time → 2 slots
-const TO = new Date("2099-01-01T00:30:00");
+const FROM = new Date("2099-01-01T12:00:00"); // Helsinki local → 2 quarter-hour slots
+const TO = new Date("2099-01-01T12:30:00");
 const T0 = FROM.getTime();
 const T1 = T0 + 15 * 60 * 1000;
 
-// Cache files written to CACHE_DIR = "." (CWD) by persist*Cache.
+// CACHE_DIR is "." (CWD) at module-load time; persist*Cache writes here.
 const SPOT_CACHE = `.spot-cache-${DATE}.json`;
 const SOLAR_CACHE = `.solar-cache-${DATE}.json`;
 
-const electricityWithInflux = {
+// Unique measurement names so test 1 and test 2 never share a namespace.
+const EL_MEASUREMENT_FRESH = "test-forecast-el-fresh";
+const SOL_MEASUREMENT_FRESH = "test-forecast-sol-fresh";
+const EL_MEASUREMENT_CACHED = "test-forecast-el-cached";
+const SOL_MEASUREMENT_CACHED = "test-forecast-sol-cached";
+
+const elConfigFresh = {
   ...CONFIG.electricity,
-  influx: { measurement: "electricity-cost-forecast", tags: { unit: "Eur/kWh" } },
+  influx: { measurement: EL_MEASUREMENT_FRESH },
 };
-const solarWithInflux = {
+const solConfigFresh = {
   ...CONFIG.solar,
-  influx: { measurement: "power-forecast", tags: { device: "solar", unit: "W" } },
+  influx: { measurement: SOL_MEASUREMENT_FRESH, tags: { unit: "W" } },
 };
-
-// ─── Local HTTP server to capture Influx write requests ───────────────────────
-
-const capturedBodies: string[] = [];
-const bodyCallbacks: Array<() => void> = [];
-
-const influxServer = createServer((req, res) => {
-  let data = "";
-  req.on("data", (chunk) => (data += chunk));
-  req.on("end", () => {
-    capturedBodies.push(data);
-    res.writeHead(204);
-    res.end();
-    bodyCallbacks.shift()?.(); // notify the next waiting promise
-  });
-});
-
-/** Returns a Promise that resolves when the server receives the next body. */
-function nextBody(): Promise<void> {
-  return new Promise((resolve) => bodyCallbacks.push(resolve));
-}
-
-let influxPort: number;
-
-before(async () => {
-  await new Promise<void>((resolve) => influxServer.listen(0, "127.0.0.1", resolve));
-  influxPort = (influxServer.address() as AddressInfo).port;
-  // Clean up any leftover cache files from a previous test run.
-  if (existsSync(SPOT_CACHE)) rmSync(SPOT_CACHE);
-  if (existsSync(SOLAR_CACHE)) rmSync(SOLAR_CACHE);
-});
-
-after(() => {
-  influxServer.close();
-  if (existsSync(SPOT_CACHE)) rmSync(SPOT_CACHE);
-  if (existsSync(SOLAR_CACHE)) rmSync(SOLAR_CACHE);
-});
+const elConfigCached = {
+  ...CONFIG.electricity,
+  influx: { measurement: EL_MEASUREMENT_CACHED },
+};
+const solConfigCached = {
+  ...CONFIG.solar,
+  influx: { measurement: SOL_MEASUREMENT_CACHED },
+};
 
 // ─── Fetch mock ───────────────────────────────────────────────────────────────
 
@@ -121,90 +109,88 @@ function installFetchMock(): () => void {
   };
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Poll InfluxDB for rows matching `measurement` at timestamp `epochMs`, up to 5 s. */
+async function pollForRows(
+  measurement: string,
+  epochMs: number,
+  timeoutMs = 5000,
+): Promise<Record<string, string>[]> {
+  const flux = `
+    from(bucket: "${INFLUX.bucket}")
+      |> range(start: 2098-01-01T00:00:00Z, stop: 2100-01-01T00:00:00Z)
+      |> filter(fn: (r) => r._measurement == "${measurement}")
+      |> filter(fn: (r) => r._time == ${new Date(epochMs).toISOString()})
+  `;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const csv = await queryInflux(INFLUX, flux);
+    const rows = parseFluxCsv(csv);
+    if (rows.length > 0) return rows;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return [];
+}
+
+// ─── Setup / teardown ─────────────────────────────────────────────────────────
+
+before(async () => {
+  // Verify InfluxDB is reachable.
+  await queryInflux(INFLUX, `from(bucket: "${INFLUX.bucket}") |> range(start: -1s) |> limit(n: 1)`);
+  // Remove any leftover cache files so test 1 always hits the fresh path.
+  if (existsSync(SPOT_CACHE)) rmSync(SPOT_CACHE);
+  if (existsSync(SOLAR_CACHE)) rmSync(SOLAR_CACHE);
+});
+
+after(() => {
+  if (existsSync(SPOT_CACHE)) rmSync(SPOT_CACHE);
+  if (existsSync(SOLAR_CACHE)) rmSync(SOLAR_CACHE);
+});
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-test("writes electricity and solar forecast to influx when data is fresh", async () => {
+test("writes electricity and solar forecast to InfluxDB when data is fresh", async () => {
   const restoreFetch = installFetchMock();
   try {
-    capturedBodies.length = 0;
-    const influxConfig = {
-      url: `http://127.0.0.1:${influxPort}`,
-      token: "test",
-      org: "test",
-      bucket: "test",
-    };
-
-    // Register listeners before the call so they are queued when writes arrive.
-    const recv1 = nextBody();
-    const recv2 = nextBody();
-
-    const slots = await fetchSlots(
-      FROM,
-      TO,
-      electricityWithInflux,
-      solarWithInflux,
-      false,
-      influxConfig,
-    );
+    const slots = await fetchSlots(FROM, TO, elConfigFresh, solConfigFresh, false, INFLUX);
     assert.equal(slots.length, 2, "should return 2 slots");
-
-    // Wait for both fire-and-forget HTTP writes to reach the local server.
-    await recv1;
-    await recv2;
-
-    assert.equal(capturedBodies.length, 2, "should have written 2 bodies (electricity + solar)");
-
-    const elBody = capturedBodies.find((b) => b.startsWith("electricity-cost-forecast"))!;
-    const solBody = capturedBodies.find((b) => b.startsWith("power-forecast"))!;
-
-    assert.ok(elBody, "electricity body present");
-    assert.ok(solBody, "solar body present");
-    assert.equal(elBody.split("\n").length, 2, "one line per slot in electricity body");
-    assert.ok(elBody.includes("unit=Eur/kWh"), "electricity tag present");
-    assert.ok(elBody.includes("value=0.062"), "first slot price in electricity body");
-    assert.ok(elBody.includes(String(T0)), "T0 timestamp in electricity body");
-    assert.ok(solBody.includes("unit=W"), "solar tag present");
-    assert.ok(solBody.includes("value=500"), "first slot watts in solar body");
   } finally {
     restoreFetch();
   }
+
+  // Verify electricity row landed in InfluxDB.
+  const elRows = await pollForRows(EL_MEASUREMENT_FRESH, T0);
+  assert.ok(elRows.length > 0, "electricity row for T0 should appear in InfluxDB");
+  const elRow = elRows.find((r) => r["_field"] === "value");
+  assert.ok(elRow, "electricity row has value field");
+  assert.equal(parseFloat(elRow!["_value"]), 0.062, "electricity T0 = spot price 0.062");
+
+  // Verify solar row landed in InfluxDB.
+  const solRows = await pollForRows(SOL_MEASUREMENT_FRESH, T0);
+  assert.ok(solRows.length > 0, "solar row for T0 should appear in InfluxDB");
+  const solRow = solRows.find((r) => r["_field"] === "value");
+  assert.ok(solRow, "solar row has value field");
+  assert.equal(parseFloat(solRow!["_value"]), 500, "solar T0 = 500 W");
+  assert.equal(solRow!["unit"], "W", "solar row has unit tag");
 });
 
-test("does not write to influx when data is served from cache", async () => {
-  // Cache files for DATE were written by the previous test (persistSpotCache /
-  // persistSolarCache).  fetchSpotPrices/fetchSolarForecast will read from
-  // cache → fresh=false → no Influx write.
+test("does not write to InfluxDB when data is served from cache", async () => {
+  // Cache files written by the previous test mean fresh=false → no write.
   assert.ok(existsSync(SPOT_CACHE), "spot cache should exist from previous test");
 
-  capturedBodies.length = 0;
-  const influxConfig = {
-    url: `http://127.0.0.1:${influxPort}`,
-    token: "test",
-    org: "test",
-    bucket: "test",
-  };
+  // Use distinct measurement names that have never been written to.
+  await fetchSlots(FROM, TO, elConfigCached, solConfigCached, false, INFLUX);
 
-  const slots = await fetchSlots(
-    FROM,
-    TO,
-    electricityWithInflux,
-    solarWithInflux,
-    false,
-    influxConfig,
-  );
-  assert.equal(slots.length, 2);
+  // Allow async fire-and-forget to settle before querying.
+  await new Promise<void>((r) => setTimeout(r, 500));
 
-  // Allow time for any spurious async writes.
-  await new Promise<void>((r) => setTimeout(r, 50));
-  assert.equal(capturedBodies.length, 0, "no writes when data comes from cache");
-});
-
-test("does not write to influx when influx config is absent", async () => {
-  // Still cached → no network call needed, and no influx config → no write.
-  capturedBodies.length = 0;
-
-  await fetchSlots(FROM, TO, electricityWithInflux, solarWithInflux, false, undefined);
-
-  await new Promise<void>((r) => setTimeout(r, 50));
-  assert.equal(capturedBodies.length, 0, "no writes when influx config is not provided");
+  const flux = `
+    from(bucket: "${INFLUX.bucket}")
+      |> range(start: 2098-01-01T00:00:00Z, stop: 2100-01-01T00:00:00Z)
+      |> filter(fn: (r) => r._measurement == "${EL_MEASUREMENT_CACHED}" or r._measurement == "${SOL_MEASUREMENT_CACHED}")
+  `;
+  const csv = await queryInflux(INFLUX, flux);
+  const rows = parseFluxCsv(csv);
+  assert.equal(rows.length, 0, "no rows for cached measurements — nothing was written");
 });
