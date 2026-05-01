@@ -29,10 +29,23 @@
       { "time": "13:00", "outputFraction": 1.0 },
       { "time": "14:30", "outputFraction": 0.5 },
       { "time": "16:30", "outputFraction": 0.1 }
-    ]
+    ],
+    "influx": {
+      "measurement": "power-forecast",
+      "tags": {
+        "device": "solar",
+        "unit": "W"
+      }
+    }
   },
   "electricity": {
-    "transportCostEurKwh": 0.045
+    "transportCostEurKwh": 0.045,
+    "influx": {
+      "measurement": "electricity-cost-forecast",
+      "tags": {
+        "unit": "Eur/kWh"
+      }
+    }
   },
   "influx": {
     "url": "http://localhost:8086",
