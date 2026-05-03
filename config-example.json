@@ -63,9 +63,8 @@
       "setpointDefault": 51,
       "setpointCheap": 60,
       "setpointExpensive": 45,
-      "cheapFactor": 0.5,
       "expensiveFactor": 1.5,
-      "solarWattsThresholdForCheap": 2000,
+      "defaultPowerConsumptionW": 2000,
       "mqtt": {
         "commandTopic": "zigbee2mqtt/water-heater/set"
       }

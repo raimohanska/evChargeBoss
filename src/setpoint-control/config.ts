@@ -11,9 +11,9 @@ export const SetpointControlConfig = z.strictObject({
   setpointDefault: z.number(),
   setpointCheap: z.number(),
   setpointExpensive: z.number().optional(),
-  cheapFactor: z.number().positive().default(0.5),
   expensiveFactor: z.number().positive().optional(),
-  solarWattsThresholdForCheap: z.number().nonnegative(),
+  /** Device power consumption in watts, used to compute expected energy cost per 15-min slot. */
+  defaultPowerConsumptionW: z.number().positive(),
   mqtt: SetpointControlMqttConfig,
 });
 export type SetpointControlConfig = z.infer<typeof SetpointControlConfig>;

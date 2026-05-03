@@ -1,8 +1,21 @@
 import type { Config } from "../config.ts";
 import type { SetpointControlConfig } from "./config.ts";
-import type { SetpointSlot } from "./types.ts";
+import type { CostTier, SetpointSlot } from "./types.ts";
 import { fetchSlots } from "../electricity/index.ts";
 import { log } from "../utils/log.ts";
+
+/** Energy cost of one 15-min slot in euros: (device kWh − solar kWh) × rate */
+function slotCostEur(
+  solarForecastW: number,
+  spotPriceEurPerKwh: number,
+  transportCostEurPerKwh: number,
+  defaultPowerConsumptionW: number,
+): number {
+  const slotHours = 0.25;
+  const deviceKwh = (defaultPowerConsumptionW * slotHours) / 1000;
+  const solarKwh = (solarForecastW * slotHours) / 1000;
+  return (deviceKwh - solarKwh) * (spotPriceEurPerKwh + transportCostEurPerKwh);
+}
 
 export async function planSetpoint(
   from: Date,
@@ -19,31 +32,54 @@ export async function planSetpoint(
     config.influx,
   );
 
-  // Effective price per slot: 0 if solar exceeds the configured threshold, otherwise spot + transport.
-  const prices = pricedSlots.map((s) =>
-    s.solarForecastW >= spConfig.solarWattsThresholdForCheap
-      ? 0
-      : s.spotPriceEurPerKwh + s.transportCostEurPerKwh,
+  const costs = pricedSlots.map((s) =>
+    slotCostEur(
+      s.solarForecastW,
+      s.spotPriceEurPerKwh,
+      s.transportCostEurPerKwh,
+      spConfig.defaultPowerConsumptionW,
+    ),
   );
 
-  const dailyAvg = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+  const avgCost = costs.reduce((sum, c) => sum + c, 0) / costs.length;
   log(
-    `[${spConfig.name}] Planning ${pricedSlots.length} slots, avg ${(dailyAvg * 100).toFixed(2)} cts/kWh`,
+    `[${spConfig.name}] Planning ${pricedSlots.length} slots, avg slot cost ${(avgCost * 100).toFixed(2)} cts`,
+  );
+
+  // Identify expensive slots first, count = N.
+  const hasExpensive = spConfig.expensiveFactor != null && spConfig.setpointExpensive != null;
+  const expensiveThreshold = hasExpensive ? avgCost * spConfig.expensiveFactor! : Infinity;
+  const expensiveIndices = new Set(
+    costs
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c > expensiveThreshold)
+      .map(({ i }) => i),
+  );
+  const n = expensiveIndices.size;
+
+  // Pick the N cheapest non-expensive slots.
+  const cheapIndices = new Set(
+    costs
+      .map((c, i) => ({ c, i }))
+      .filter(({ i }) => !expensiveIndices.has(i))
+      .sort((a, b) => a.c - b.c)
+      .slice(0, n)
+      .map(({ i }) => i),
   );
 
   return pricedSlots.map((s, i) => {
     let setpoint: number;
-    if (prices[i] === 0 || prices[i] < dailyAvg * spConfig.cheapFactor) {
+    let costTier: CostTier;
+    if (expensiveIndices.has(i)) {
+      setpoint = spConfig.setpointExpensive!;
+      costTier = "expensive";
+    } else if (cheapIndices.has(i)) {
       setpoint = spConfig.setpointCheap;
-    } else if (
-      spConfig.expensiveFactor != null &&
-      spConfig.setpointExpensive != null &&
-      prices[i] > dailyAvg * spConfig.expensiveFactor
-    ) {
-      setpoint = spConfig.setpointExpensive;
+      costTier = "cheap";
     } else {
       setpoint = spConfig.setpointDefault;
+      costTier = "average";
     }
-    return { ...s, setpoint };
+    return { ...s, setpoint, costTier };
   });
 }

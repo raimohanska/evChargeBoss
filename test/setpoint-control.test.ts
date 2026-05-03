@@ -23,9 +23,8 @@ const SP_CONFIG = {
   setpointDefault: 51,
   setpointCheap: 65,
   setpointExpensive: 40,
-  cheapFactor: 0.5,
   expensiveFactor: 1.5,
-  solarWattsThresholdForCheap: 2000,
+  defaultPowerConsumptionW: 2000,
   mqtt: { commandTopic: "test/water-heater/set" },
 };
 
@@ -41,65 +40,89 @@ test("planSetpoint returns 96 slots for a 24h window", async () => {
   assert.equal(slots.length, 96);
 });
 
-test("slots above solarWattsThresholdForCheap get setpointCheap", async () => {
+test("cheap count is at most expensive count", async () => {
   const slots = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
-  for (const slot of slots) {
-    if (slot.solarForecastW >= SP_CONFIG.solarWattsThresholdForCheap) {
-      assert.equal(
-        slot.setpoint,
-        SP_CONFIG.setpointCheap,
-        `solar slot at ${slot.start.toISOString()} (${slot.solarForecastW} W) should be cheap`,
-      );
-    }
-  }
+  const cheapCount = slots.filter((s) => s.costTier === "cheap").length;
+  const expensiveCount = slots.filter((s) => s.costTier === "expensive").length;
+  assert.ok(
+    cheapCount <= expensiveCount,
+    `cheapCount (${cheapCount}) should be <= expensiveCount (${expensiveCount})`,
+  );
+  assert.ok(cheapCount > 0, "expected at least some cheap slots");
 });
 
-test("slot assignment matches the cheap-factor algorithm", async () => {
+test("slot assignment matches the energy-cost algorithm", async () => {
   const slots = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
 
-  // Re-derive prices the same way the planner does.
-  const prices = slots.map((s) =>
-    s.solarForecastW >= SP_CONFIG.solarWattsThresholdForCheap
-      ? 0
-      : s.spotPriceEurPerKwh + s.transportCostEurPerKwh,
+  // Re-derive slot costs the same way the planner does.
+  const slotHours = 0.25;
+  const deviceKwh = (SP_CONFIG.defaultPowerConsumptionW * slotHours) / 1000;
+  const costs = slots.map((s) => {
+    const solarKwh = (s.solarForecastW * slotHours) / 1000;
+    return (deviceKwh - solarKwh) * (s.spotPriceEurPerKwh + s.transportCostEurPerKwh);
+  });
+  const avgCost = costs.reduce((a, b) => a + b, 0) / costs.length;
+  const threshold = avgCost * SP_CONFIG.expensiveFactor;
+
+  const expensiveIndices = new Set(
+    costs
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c > threshold)
+      .map(({ i }) => i),
   );
-  const dailyAvg = prices.reduce((a, b) => a + b, 0) / prices.length;
+  const n = expensiveIndices.size;
+  const cheapIndices = new Set(
+    costs
+      .map((c, i) => ({ c, i }))
+      .filter(({ i }) => !expensiveIndices.has(i))
+      .sort((a, b) => a.c - b.c)
+      .slice(0, n)
+      .map(({ i }) => i),
+  );
 
   for (let i = 0; i < slots.length; i++) {
+    let expectedTier: string;
     let expectedSetpoint: number;
-    if (prices[i] === 0 || prices[i] < dailyAvg * SP_CONFIG.cheapFactor) {
-      expectedSetpoint = SP_CONFIG.setpointCheap;
-    } else if (
-      SP_CONFIG.expensiveFactor != null &&
-      SP_CONFIG.setpointExpensive != null &&
-      prices[i] > dailyAvg * SP_CONFIG.expensiveFactor
-    ) {
+    if (expensiveIndices.has(i)) {
+      expectedTier = "expensive";
       expectedSetpoint = SP_CONFIG.setpointExpensive;
+    } else if (cheapIndices.has(i)) {
+      expectedTier = "cheap";
+      expectedSetpoint = SP_CONFIG.setpointCheap;
     } else {
+      expectedTier = "average";
       expectedSetpoint = SP_CONFIG.setpointDefault;
     }
     assert.equal(
-      slots[i].setpoint,
-      expectedSetpoint,
-      `slot ${i} at ${slots[i].start.toISOString()}: price=${prices[i].toFixed(4)} avg=${dailyAvg.toFixed(4)}`,
+      slots[i].costTier,
+      expectedTier,
+      `slot ${i} at ${slots[i].start.toISOString()}: cost=${costs[i].toFixed(5)} avg=${avgCost.toFixed(5)}`,
     );
+    assert.equal(slots[i].setpoint, expectedSetpoint);
   }
 });
 
-test("mix of cheap and default slots", async () => {
-  const slots = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
-  const cheapCount = slots.filter((s) => s.setpoint === SP_CONFIG.setpointCheap).length;
-  const defaultCount = slots.filter((s) => s.setpoint === SP_CONFIG.setpointDefault).length;
-  assert.ok(cheapCount > 0, "expected at least one cheap slot");
-  assert.ok(defaultCount > 0, "expected at least one default slot");
-});
-
-test("expensive tier: slots above expensiveFactor * avg get setpointExpensive", async () => {
-  // Use a low expensiveFactor so at least some slots are above it.
+test("mix of cheap, average and expensive slots with low expensiveFactor", async () => {
+  // Use expensiveFactor=0.8 so at least some slots are above avg*0.8.
   const spConfig = { ...SP_CONFIG, expensiveFactor: 0.8 };
   const slots = await planSetpoint(FROM, TO, spConfig, CONFIG);
-  const expensiveCount = slots.filter((s) => s.setpoint === spConfig.setpointExpensive).length;
+  const cheapCount = slots.filter((s) => s.costTier === "cheap").length;
+  const expensiveCount = slots.filter((s) => s.costTier === "expensive").length;
   assert.ok(expensiveCount > 0, "expected at least one expensive slot with expensiveFactor=0.8");
+  assert.ok(
+    cheapCount <= expensiveCount,
+    `cheapCount (${cheapCount}) should be <= expensiveCount (${expensiveCount})`,
+  );
+  assert.ok(cheapCount > 0, "expected some cheap slots");
+});
+
+test("no cheap/expensive when expensiveFactor absent", async () => {
+  const spConfig = { ...SP_CONFIG, expensiveFactor: undefined, setpointExpensive: undefined };
+  const slots = await planSetpoint(FROM, TO, spConfig, CONFIG);
+  assert.ok(
+    slots.every((s) => s.costTier === "average" && s.setpoint === SP_CONFIG.setpointDefault),
+    "without expensiveFactor all slots should be average/default",
+  );
 });
 
 // ── Execution loop tests ──────────────────────────────────────────────────────

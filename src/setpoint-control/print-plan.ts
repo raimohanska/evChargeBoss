@@ -4,41 +4,37 @@ import { localTimeShort } from "../utils/date-time-format.ts";
 import { log } from "../utils/log.ts";
 import { IS_TTY } from "../ev-charging/print-plan.ts";
 
+const COST_WIDTH = 9; // width of "expensive"
+
+function costLabel(tier: SetpointSlot["costTier"]): string {
+  const label = tier.padEnd(COST_WIDTH);
+  if (!IS_TTY) return label;
+  if (tier === "cheap") return `\x1b[32m${label}\x1b[0m`;
+  if (tier === "expensive") return `\x1b[31m${label}\x1b[0m`;
+  return label; // average: no colour
+}
+
 export function printSetpointPlan(slots: SetpointSlot[], spConfig: SetpointControlConfig): void {
-  const { setpointCheap, setpointExpensive } = spConfig;
   const hr = IS_TTY ? "\u2500" : "-";
 
-  log(`  ${"TIME".padEnd(5)}  ${"SPOT".padEnd(11)}  ${"SOLAR".padEnd(6)}  SETPOINT`);
-  log(`  ${hr.repeat(5)}  ${hr.repeat(11)}  ${hr.repeat(6)}  ${hr.repeat(8)}`);
+  log(`  TIME   SOLAR       SPOT          COST       SETPOINT`);
+  log(
+    `  ${hr.repeat(5)}  ${hr.repeat(10)}  ${hr.repeat(10)}  ${hr.repeat(COST_WIDTH)}  ${hr.repeat(8)}`,
+  );
 
   for (const s of slots) {
     const time = localTimeShort(s.start).padStart(5, "0");
+    const solar = `${s.solarForecastW.toFixed(0).padStart(6)}W`;
     const spot = `${(s.spotPriceEurPerKwh * 100).toFixed(2).padStart(5)} c/kWh`;
-
-    const sunW = s.solarForecastW.toFixed(0).padStart(4) + "W";
-    const sun =
-      s.solarForecastW > 0
-        ? IS_TTY
-          ? `\x1b[33m\u2600\x1b[0m${sunW}`
-          : `*${sunW}`
-        : `${"0".padStart(5)}W`;
-
-    const spStr = String(s.setpoint).padStart(8);
-    let sp = spStr;
-    if (IS_TTY) {
-      if (s.setpoint === setpointCheap) sp = `\x1b[92m${spStr}\x1b[0m`;
-      else if (setpointExpensive != null && s.setpoint === setpointExpensive)
-        sp = `\x1b[33m${spStr}\x1b[0m`;
-    }
-
-    log(`  ${time}  ${spot}  ${sun}  ${sp}`);
+    const cost = costLabel(s.costTier);
+    const setpoint = String(s.setpoint).padStart(8);
+    log(`  ${time}  ${solar}  ${spot}  ${cost}  ${setpoint}`);
   }
 
-  const cheapSlots = slots.filter((s) => s.setpoint === setpointCheap).length;
-  let summary = `${hr.repeat(3)} ${spConfig.name}: ${slots.length} slots, ${cheapSlots} at ${setpointCheap} (cheap/solar)`;
-  if (setpointExpensive != null) {
-    const expensiveSlots = slots.filter((s) => s.setpoint === setpointExpensive).length;
-    if (expensiveSlots > 0) summary += `, ${expensiveSlots} at ${setpointExpensive} (expensive)`;
-  }
+  const cheapCount = slots.filter((s) => s.costTier === "cheap").length;
+  const expensiveCount = slots.filter((s) => s.costTier === "expensive").length;
+  let summary = `${hr.repeat(3)} ${spConfig.name}: ${slots.length} slots`;
+  if (cheapCount > 0) summary += `, ${cheapCount} cheap`;
+  if (expensiveCount > 0) summary += `, ${expensiveCount} expensive`;
   log(summary);
 }
