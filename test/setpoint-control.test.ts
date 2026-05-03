@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { planWaterHeating } from "../src/water-heating/planner.ts";
-import { runWaterHeatingLoop } from "../src/water-heating/index.ts";
+import { planSetpoint } from "../src/setpoint-control/planner.ts";
+import { runSetpointControlLoop } from "../src/setpoint-control/index.ts";
 import { loadConfig } from "../src/config.ts";
 import { makeClock } from "../src/utils/timing-utils.ts";
 
@@ -17,33 +17,37 @@ const WINDOW_MS = 24 * 60 * 60 * 1000;
 const TO = new Date(FROM.getTime() + WINDOW_MS);
 
 const BASE_CONFIG = loadConfig();
+
+const SP_CONFIG = {
+  name: "Water Heater",
+  setpointDefault: 51,
+  setpointCheap: 65,
+  setpointExpensive: 40,
+  cheapFactor: 0.5,
+  expensiveFactor: 1.5,
+  solarWattsThresholdForCheap: 2000,
+  mqtt: { commandTopic: "test/water-heater/set" },
+};
+
 const CONFIG = {
   ...BASE_CONFIG,
-  waterHeating: {
-    targetTemperatureDefault: 51,
-    targetTemperatureCheap: 65,
-    targetTemperatureExpensive: 40,
-    cheapFactor: 0.5,
-    expensiveFactor: 1.5,
-    solarWattsThresholdForCheap: 2000,
-    mqtt: { commandTopic: "test/water-heater/set" },
-  },
+  setpointControl: { waterHeating: SP_CONFIG },
 };
 
 // ── Planner tests ─────────────────────────────────────────────────────────────
 
-test("planWaterHeating returns 96 slots for a 24h window", async () => {
-  const slots = await planWaterHeating(FROM, TO, CONFIG);
+test("planSetpoint returns 96 slots for a 24h window", async () => {
+  const slots = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
   assert.equal(slots.length, 96);
 });
 
-test("slots above solarWattsThresholdForCheap get targetTemperatureCheap", async () => {
-  const slots = await planWaterHeating(FROM, TO, CONFIG);
+test("slots above solarWattsThresholdForCheap get setpointCheap", async () => {
+  const slots = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
   for (const slot of slots) {
-    if (slot.solarForecastW >= CONFIG.waterHeating.solarWattsThresholdForCheap) {
+    if (slot.solarForecastW >= SP_CONFIG.solarWattsThresholdForCheap) {
       assert.equal(
-        slot.targetTemp,
-        CONFIG.waterHeating.targetTemperatureCheap,
+        slot.setpoint,
+        SP_CONFIG.setpointCheap,
         `solar slot at ${slot.start.toISOString()} (${slot.solarForecastW} W) should be cheap`,
       );
     }
@@ -51,78 +55,69 @@ test("slots above solarWattsThresholdForCheap get targetTemperatureCheap", async
 });
 
 test("slot assignment matches the cheap-factor algorithm", async () => {
-  const slots = await planWaterHeating(FROM, TO, CONFIG);
+  const slots = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
 
   // Re-derive prices the same way the planner does.
   const prices = slots.map((s) =>
-    s.solarForecastW >= CONFIG.waterHeating.solarWattsThresholdForCheap
+    s.solarForecastW >= SP_CONFIG.solarWattsThresholdForCheap
       ? 0
       : s.spotPriceEurPerKwh + s.transportCostEurPerKwh,
   );
   const dailyAvg = prices.reduce((a, b) => a + b, 0) / prices.length;
 
   for (let i = 0; i < slots.length; i++) {
-    let expectedTemp: number;
-    if (prices[i] === 0 || prices[i] < dailyAvg * CONFIG.waterHeating.cheapFactor) {
-      expectedTemp = CONFIG.waterHeating.targetTemperatureCheap;
+    let expectedSetpoint: number;
+    if (prices[i] === 0 || prices[i] < dailyAvg * SP_CONFIG.cheapFactor) {
+      expectedSetpoint = SP_CONFIG.setpointCheap;
     } else if (
-      CONFIG.waterHeating.expensiveFactor != null &&
-      CONFIG.waterHeating.targetTemperatureExpensive != null &&
-      prices[i] > dailyAvg * CONFIG.waterHeating.expensiveFactor
+      SP_CONFIG.expensiveFactor != null &&
+      SP_CONFIG.setpointExpensive != null &&
+      prices[i] > dailyAvg * SP_CONFIG.expensiveFactor
     ) {
-      expectedTemp = CONFIG.waterHeating.targetTemperatureExpensive;
+      expectedSetpoint = SP_CONFIG.setpointExpensive;
     } else {
-      expectedTemp = CONFIG.waterHeating.targetTemperatureDefault;
+      expectedSetpoint = SP_CONFIG.setpointDefault;
     }
     assert.equal(
-      slots[i].targetTemp,
-      expectedTemp,
+      slots[i].setpoint,
+      expectedSetpoint,
       `slot ${i} at ${slots[i].start.toISOString()}: price=${prices[i].toFixed(4)} avg=${dailyAvg.toFixed(4)}`,
     );
   }
 });
 
 test("mix of cheap and default slots", async () => {
-  const slots = await planWaterHeating(FROM, TO, CONFIG);
-  const cheapCount = slots.filter(
-    (s) => s.targetTemp === CONFIG.waterHeating.targetTemperatureCheap,
-  ).length;
-  const defaultCount = slots.filter(
-    (s) => s.targetTemp === CONFIG.waterHeating.targetTemperatureDefault,
-  ).length;
+  const slots = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
+  const cheapCount = slots.filter((s) => s.setpoint === SP_CONFIG.setpointCheap).length;
+  const defaultCount = slots.filter((s) => s.setpoint === SP_CONFIG.setpointDefault).length;
   assert.ok(cheapCount > 0, "expected at least one cheap slot");
   assert.ok(defaultCount > 0, "expected at least one default slot");
 });
 
-test("expensive tier: slots above expensiveFactor * avg get targetTemperatureExpensive", async () => {
+test("expensive tier: slots above expensiveFactor * avg get setpointExpensive", async () => {
   // Use a low expensiveFactor so at least some slots are above it.
-  const config = {
-    ...CONFIG,
-    waterHeating: { ...CONFIG.waterHeating, expensiveFactor: 0.8 },
-  };
-  const slots = await planWaterHeating(FROM, TO, config);
-  const expensiveCount = slots.filter(
-    (s) => s.targetTemp === config.waterHeating.targetTemperatureExpensive,
-  ).length;
+  const spConfig = { ...SP_CONFIG, expensiveFactor: 0.8 };
+  const slots = await planSetpoint(FROM, TO, spConfig, CONFIG);
+  const expensiveCount = slots.filter((s) => s.setpoint === spConfig.setpointExpensive).length;
   assert.ok(expensiveCount > 0, "expected at least one expensive slot with expensiveFactor=0.8");
 });
 
 // ── Execution loop tests ──────────────────────────────────────────────────────
 
-test("runWaterHeatingLoop publishes one command per slot in order", async () => {
+test("runSetpointControlLoop publishes one command per slot in order", async () => {
   // Run at 100 000× speed so 24 h of slots complete in about 1 s.
   const clock = makeClock(100_000, FROM);
 
   const published: { topic: string; payload: string }[] = [];
   const publish = (topic: string, payload: string) => published.push({ topic, payload });
 
-  await runWaterHeatingLoop(FROM, CONFIG, publish, clock);
+  await runSetpointControlLoop(FROM, SP_CONFIG, CONFIG, publish, clock);
 
-  const expectedSlots = await planWaterHeating(FROM, TO, CONFIG);
+  const expectedSlots = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
 
   assert.equal(published.length, expectedSlots.length, "one publish per slot");
   for (let i = 0; i < expectedSlots.length; i++) {
-    assert.equal(published[i].topic, CONFIG.waterHeating.mqtt.commandTopic);
-    assert.equal(published[i].payload, String(expectedSlots[i].targetTemp));
+    assert.equal(published[i].topic, SP_CONFIG.mqtt.commandTopic);
+    assert.equal(published[i].payload, String(expectedSlots[i].setpoint));
   }
 });

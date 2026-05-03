@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
 import { EvChargingConfig } from "./ev-charging/config.ts";
 import { ElectricityConfig, SolarConfig } from "./electricity/config.ts";
-import { WaterHeatingConfig } from "./water-heating/config.ts";
+import { SetpointControlConfig } from "./setpoint-control/config.ts";
 import { MqttToInfluxConfig } from "./mqtt-to-influx/config.ts";
 
 const InfluxConfig = z.strictObject({
@@ -40,7 +40,7 @@ const Config = z.strictObject({
   solar: SolarConfig,
   electricity: ElectricityConfig,
   influx: InfluxConfig.optional(),
-  waterHeating: WaterHeatingConfig.optional(),
+  setpointControl: z.record(z.string(), SetpointControlConfig).optional(),
   mqttToInflux: MqttToInfluxConfig.optional(),
   test: TestConfig,
 });

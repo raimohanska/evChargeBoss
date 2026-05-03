@@ -53,14 +53,15 @@
 
 import { loadConfig } from "./config.ts";
 import { runEvCharging } from "./ev-charging/index.ts";
-import { runWaterHeating } from "./water-heating/index.ts";
+import { runSetpointControl } from "./setpoint-control/index.ts";
 import { runMqttToInflux } from "./mqtt-to-influx/index.ts";
 import { runElectricityPoller } from "./electricity/poller.ts";
 
 const config = loadConfig();
 
 const loops: Promise<void>[] = [runEvCharging(config)];
-if (config.waterHeating) loops.push(runWaterHeating(config));
+for (const [id, spConfig] of Object.entries(config.setpointControl ?? {}))
+  loops.push(runSetpointControl(id, spConfig, config));
 if (config.mqttToInflux) loops.push(runMqttToInflux(config));
 if (config.influx) loops.push(runElectricityPoller(config));
 

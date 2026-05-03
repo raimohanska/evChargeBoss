@@ -3,7 +3,7 @@
   "scripts": {
     "typecheck": "tsc",
     "build": "tsc && esbuild src/index.ts --bundle --platform=node --target=node12 --outfile=dist/bundle.cjs --inject:src/utils/polyfill.ts",
-    "test": "TZ=Europe/Helsinki node --strip-types --test --test-concurrency=1 test/planner.test.ts test/water-heating.test.ts test/mqtt-client.test.ts test/mqtt-to-influx.test.ts",
+    "test": "TZ=Europe/Helsinki node --strip-types --test --test-concurrency=1 test/planner.test.ts test/setpoint-control.test.ts test/mqtt-client.test.ts test/mqtt-to-influx.test.ts",
     "test:integration": "TZ=Europe/Helsinki node --strip-types --test test/main-loop-mqtt.test.ts test/influx.test.ts test/forecast-influx.test.ts",
     "lint": "eslint src/ test/ --max-warnings=0",
     "format": "prettier --write src/ test/"
