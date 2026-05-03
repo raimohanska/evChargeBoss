@@ -55,12 +55,14 @@ import { loadConfig } from "./config.ts";
 import { runEvCharging } from "./ev-charging/index.ts";
 import { runWaterHeating } from "./water-heating/index.ts";
 import { runMqttToInflux } from "./mqtt-to-influx/index.ts";
+import { runElectricityPoller } from "./electricity/poller.ts";
 
 const config = loadConfig();
 
 const loops: Promise<void>[] = [runEvCharging(config)];
 if (config.waterHeating) loops.push(runWaterHeating(config));
 if (config.mqttToInflux) loops.push(runMqttToInflux(config));
+if (config.influx) loops.push(runElectricityPoller(config));
 
 Promise.all(loops).catch((err) => {
   const msg = err instanceof Error ? err.message : String(err);
