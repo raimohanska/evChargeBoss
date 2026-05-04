@@ -1,7 +1,10 @@
 import type { Config } from "../config.ts";
 import type { SetpointControlConfig } from "./config.ts";
 import type { CostTier, SetpointSlot } from "./types.ts";
+import type { PricedSlot } from "../electricity/types.ts";
 import { fetchSlots } from "../electricity/index.ts";
+import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
+import { localTimeShort } from "../utils/date-time-format.ts";
 import { log } from "../utils/log.ts";
 
 /** Energy cost of one 15-min slot in euros: (device kWh − solar kWh) × rate */
@@ -17,20 +20,39 @@ function slotCostEur(
   return (deviceKwh - solarKwh) * (spotPriceEurPerKwh + transportCostEurPerKwh);
 }
 
+async function fetchAvailableSlots(
+  from: Date,
+  to: Date,
+  spConfig: SetpointControlConfig,
+  config: Config,
+): Promise<PricedSlot[]> {
+  try {
+    return await fetchSlots(from, to, config.electricity, config.solar, undefined, config.influx);
+  } catch (err) {
+    if (!(err instanceof IncompleteDataError) || err.missingSlots.length === 0) throw err;
+    const firstMissing = err.missingSlots[0];
+    if (firstMissing.getTime() <= from.getTime()) throw err; // no usable data at all
+    log(
+      `[${spConfig.name}] Spot prices only available until ${localTimeShort(firstMissing)} — using shorter plan`,
+    );
+    return await fetchSlots(
+      from,
+      firstMissing,
+      config.electricity,
+      config.solar,
+      undefined,
+      config.influx,
+    );
+  }
+}
+
 export async function planSetpoint(
   from: Date,
   to: Date,
   spConfig: SetpointControlConfig,
   config: Config,
 ): Promise<SetpointSlot[]> {
-  const pricedSlots = await fetchSlots(
-    from,
-    to,
-    config.electricity,
-    config.solar,
-    undefined,
-    config.influx,
-  );
+  const pricedSlots = await fetchAvailableSlots(from, to, spConfig, config);
 
   const costs = pricedSlots.map((s) =>
     slotCostEur(
