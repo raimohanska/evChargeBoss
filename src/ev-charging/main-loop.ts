@@ -3,6 +3,7 @@ import type { Slot } from "./types.ts";
 import type { SessionSummary } from "../influx.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
+import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
 import { runSlot } from "./charger.ts";
 import { STATUS } from "./mqtt-status.ts";
 import type { Publisher } from "./mqtt-status.ts";
@@ -76,14 +77,17 @@ export async function runSession(
     const targetDate = parseTargetTime(targetTimeStr, now);
     planFrom = undefined;
 
-    const slots = await plan(
-      now,
-      targetDate,
-      remainingKwh,
-      powerKw,
-      config,
-      prevSlots === undefined,
-    );
+    let slots: Slot[];
+    try {
+      slots = await plan(now, targetDate, remainingKwh, powerKw, config, prevSlots === undefined);
+    } catch (err) {
+      if (err instanceof IncompleteDataError && prevSlots !== undefined) {
+        log(`Re-plan failed (${err.message}) — keeping current plan`);
+        slots = prevSlots;
+      } else {
+        throw err;
+      }
+    }
 
     if (replanController.signal.aborted) {
       log("Target time changed during planning — re-planning.");
