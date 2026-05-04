@@ -15,9 +15,11 @@ export async function fetchSpotPrices(
   dates: string[],
   verbose?: boolean,
 ): Promise<{ map: Map<number, number>; fresh: boolean }> {
-  const missingDates = dates.filter(
-    (d) => readCache(`${CACHE_DIR}/.spot-cache-${d}.json`) === null,
-  );
+  const SLOTS_PER_DAY = 96; // 24 hours × 4 quarter-hours
+  const missingDates = dates.filter((d) => {
+    const cached = readCache<Record<string, number>>(`${CACHE_DIR}/.spot-cache-${d}.json`);
+    return cached === null || Object.keys(cached).length < SLOTS_PER_DAY;
+  });
 
   if (missingDates.length > 0) {
     if (verbose !== false)
@@ -51,8 +53,18 @@ export function persistSpotCache(map: Map<number, number>, verbose?: boolean): v
     if (!byDate.has(date)) byDate.set(date, {});
     byDate.get(date)![localDateTimeString(new Date(epoch))] = price;
   }
+  let written = 0;
   for (const [date, data] of byDate) {
+    const count = Object.keys(data).length;
+    if (count < 96) {
+      if (verbose !== false)
+        log(
+          `  Spot cache for ${date}: only ${count}/96 slots — skipping write to avoid partial cache`,
+        );
+      continue;
+    }
     writeCache(`${CACHE_DIR}/.spot-cache-${date}.json`, data);
+    written++;
   }
-  if (verbose !== false) log(`  Spot prices cached (${byDate.size} day file(s)).`);
+  if (verbose !== false) log(`  Spot prices cached (${written} day file(s)).`);
 }
