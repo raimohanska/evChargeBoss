@@ -4,6 +4,8 @@ import type { Clock } from "../utils/timing-utils.ts";
 import { makeClock } from "../utils/timing-utils.ts";
 import { fetchSlots } from "./index.ts";
 import { datesInRange } from "./dates.ts";
+import { IncompleteDataError } from "./IncompleteDataError.ts";
+import { localTimeShort } from "../utils/date-time-format.ts";
 import { log } from "../utils/log.ts";
 
 const POLL_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
@@ -27,7 +29,6 @@ function allCached(dates: string[]): boolean {
 export async function runElectricityPollOnce(config: Config, clock: Clock): Promise<void> {
   const now = clock.now();
 
-  // from = midnight of current day (local time)
   const from = new Date(now);
   from.setHours(0, 0, 0, 0);
 
@@ -38,12 +39,41 @@ export async function runElectricityPollOnce(config: Config, clock: Clock): Prom
 
   const dates = datesInRange(from, to);
   if (allCached(dates)) {
-    log("[ElectricityPoller] All slots cached — skipping fetch");
+    log("[ElectricityPoller] Cache hit — skipping fetch");
     return;
   }
 
-  const slots = await fetchSlots(from, to, config.electricity, config.solar, false, config.influx);
-  log(`[ElectricityPoller] Fetched ${slots.length} slots`);
+  try {
+    const slots = await fetchSlots(
+      from,
+      to,
+      config.electricity,
+      config.solar,
+      false,
+      config.influx,
+    );
+    log(`[ElectricityPoller] Fetched ${slots.length} slots`);
+  } catch (err) {
+    if (err instanceof IncompleteDataError && err.missingSlots.length > 0) {
+      const firstMissing = err.missingSlots[0];
+      if (firstMissing.getTime() > from.getTime()) {
+        // Partial data available — fetch and write what we have.
+        const slots = await fetchSlots(
+          from,
+          firstMissing,
+          config.electricity,
+          config.solar,
+          false,
+          config.influx,
+        );
+        log(
+          `[ElectricityPoller] Fetched ${slots.length} slots (partial — spot prices until ${localTimeShort(firstMissing)})`,
+        );
+        return;
+      }
+    }
+    throw err;
+  }
 }
 
 /**
@@ -61,8 +91,7 @@ export async function runElectricityPoller(config: Config): Promise<void> {
       await runElectricityPollOnce(config, clock);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log(`[ElectricityPoller] ERROR: ${msg}`);
-      log("[ElectricityPoller] Retrying in 60s...");
+      log(`[ElectricityPoller] Fetch failed: ${msg} — retrying in 60s`);
       await clock.sleep(60_000);
       continue;
     }
