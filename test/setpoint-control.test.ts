@@ -3,10 +3,8 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { planSetpoint } from "../src/setpoint-control/planner.ts";
 import { runSetpointControlLoop } from "../src/setpoint-control/index.ts";
-import type { SetpointSlot } from "../src/setpoint-control/types.ts";
 import { loadConfig } from "../src/config.ts";
 import { makeClock } from "../src/utils/timing-utils.ts";
-import { IncompleteDataError } from "../src/electricity/IncompleteDataError.ts";
 
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
@@ -130,18 +128,6 @@ test("no cheap/expensive when expensiveFactor absent", async () => {
 // ── Execution loop tests ──────────────────────────────────────────────────────
 
 describe("runSetpointControlLoop", () => {
-  // planFn that returns the portion of fixedPlan relevant to `from`.
-  // Simulates a rolling re-plan: each call returns slots starting from the
-  // current time, so currentPlan[0] always holds the current slot's setpoint.
-  function makeSlicingPlanFn(fixedPlan: SetpointSlot[]): typeof planSetpoint {
-    return async (from: Date) => {
-      const aligned = new Date(from);
-      aligned.setMinutes(Math.floor(aligned.getMinutes() / 15) * 15, 0, 0);
-      const idx = fixedPlan.findIndex((s) => s.start.getTime() >= aligned.getTime());
-      return idx >= 0 ? fixedPlan.slice(idx) : [fixedPlan[fixedPlan.length - 1]];
-    };
-  }
-
   test("publishes one command per slot in order", async () => {
     const clock = makeClock(100_000, FROM);
 
@@ -149,118 +135,12 @@ describe("runSetpointControlLoop", () => {
     const publish = (topic: string, payload: string) => published.push({ topic, payload });
 
     const fixedPlan = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
-    await runSetpointControlLoop(
-      FROM,
-      SP_CONFIG,
-      CONFIG,
-      publish,
-      clock,
-      makeSlicingPlanFn(fixedPlan),
-    );
+    await runSetpointControlLoop(FROM, SP_CONFIG, CONFIG, publish, clock, async () => fixedPlan);
 
     assert.equal(published.length, fixedPlan.length, "one publish per slot");
     for (let i = 0; i < fixedPlan.length; i++) {
       assert.equal(published[i].topic, SP_CONFIG.mqtt.commandTopic);
       assert.equal(published[i].payload, String(fixedPlan[i].setpoint));
     }
-  });
-
-  test("keeps current plan when re-plan fails with IncompleteDataError", async () => {
-    const clock = makeClock(100_000, FROM);
-    const published: string[] = [];
-    const publish = (_: string, payload: string) => published.push(payload);
-
-    // Use a 3-slot plan; subsequent re-plans all fail.
-    const fixedSlots = (await planSetpoint(FROM, TO, SP_CONFIG, CONFIG)).slice(0, 3);
-    let calls = 0;
-    const planFn = async (): Promise<SetpointSlot[]> => {
-      if (calls++ === 0) return fixedSlots;
-      throw new IncompleteDataError("prices not available yet", []);
-    };
-
-    await runSetpointControlLoop(FROM, SP_CONFIG, CONFIG, publish, clock, planFn);
-
-    assert.deepEqual(
-      published,
-      fixedSlots.map((s) => String(s.setpoint)),
-    );
-  });
-
-  test("uses fresh setpoints when re-plan succeeds at each slot", async () => {
-    const clock = makeClock(100_000, FROM);
-    const published: string[] = [];
-    const publish = (_: string, payload: string) => published.push(payload);
-
-    const makeSlots = (setpoints: number[], base: Date): SetpointSlot[] =>
-      setpoints.map((setpoint, i) => {
-        const start = new Date(base.getTime() + i * 15 * 60 * 1000);
-        return {
-          start,
-          end: new Date(start.getTime() + 15 * 60 * 1000),
-          setpoint,
-          costTier: "average",
-          spotPriceEurPerKwh: 0.05,
-          transportCostEurPerKwh: 0.045,
-          solarForecastW: 0,
-        };
-      });
-
-    const s1 = FROM;
-    const s2 = new Date(FROM.getTime() + 15 * 60 * 1000);
-
-    // plans[0] = initial (2 slots); plans[1] = re-plan at slot 0; plans[2] = re-plan at slot 1.
-    const plans = [
-      makeSlots([11, 22], s1), // initial
-      makeSlots([33, 44], s1), // re-plan at slot 0 → publish 33
-      makeSlots([55, 66], s2), // re-plan at slot 1 → publish 55
-    ];
-    let call = 0;
-    const planFn = async (): Promise<SetpointSlot[]> => plans[call++] ?? plans[plans.length - 1];
-
-    await runSetpointControlLoop(FROM, SP_CONFIG, CONFIG, publish, clock, planFn);
-
-    assert.deepEqual(published, ["33", "55"]);
-  });
-
-  test("falls back to last good plan then resumes fresh plans", async () => {
-    const clock = makeClock(100_000, FROM);
-    const published: string[] = [];
-    const publish = (_: string, payload: string) => published.push(payload);
-
-    const makeSlots = (setpoints: number[], base: Date): SetpointSlot[] =>
-      setpoints.map((setpoint, i) => {
-        const start = new Date(base.getTime() + i * 15 * 60 * 1000);
-        return {
-          start,
-          end: new Date(start.getTime() + 15 * 60 * 1000),
-          setpoint,
-          costTier: "average",
-          spotPriceEurPerKwh: 0.05,
-          transportCostEurPerKwh: 0.045,
-          solarForecastW: 0,
-        };
-      });
-
-    const s1 = FROM;
-    const s2 = new Date(FROM.getTime() + 15 * 60 * 1000);
-    const s3 = new Date(FROM.getTime() + 30 * 60 * 1000);
-
-    // initial: [A, B, C]; re-plan at slot 0: [X, Y, Z]; slot 1: fail; slot 2: [P, Q, R]
-    const results: Array<SetpointSlot[] | Error> = [
-      makeSlots([10, 20, 30], s1), // initial
-      makeSlots([11, 22, 33], s1), // re-plan slot 0 → publish 11
-      new IncompleteDataError("missing", []), // re-plan slot 1 → keep last plan[1] = 22
-      makeSlots([99, 88], s3), // re-plan slot 2 → publish 99
-    ];
-    let call = 0;
-    const planFn = async (): Promise<SetpointSlot[]> => {
-      const r = results[call++];
-      if (r instanceof Error) throw r;
-      return r;
-    };
-
-    await runSetpointControlLoop(FROM, SP_CONFIG, CONFIG, publish, clock, planFn);
-
-    assert.deepEqual(published, ["11", "22", "99"]);
   });
 });

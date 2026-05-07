@@ -8,7 +8,6 @@ import { connectMqtt } from "../ev-charging/mqtt-client.ts";
 import { makeClock } from "../utils/timing-utils.ts";
 import { log } from "../utils/log.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
-import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -20,9 +19,9 @@ type PlanFn = (
 ) => Promise<SetpointSlot[]>;
 
 /**
- * Executes one 24-hour planning window, re-planning at every slot boundary.
- * On IncompleteDataError the most recently successful plan is kept; the slot
- * index advances so the correct setpoint is still published. Exported for testing.
+ * Plans once for up to 24 hours (or shorter if data is not available) and
+ * executes every slot in that plan before returning. The outer retry loop
+ * calls this again for the next window. Exported for testing.
  */
 export async function runSetpointControlLoop(
   from: Date,
@@ -34,38 +33,18 @@ export async function runSetpointControlLoop(
 ): Promise<void> {
   const to = new Date(from.getTime() + WINDOW_MS);
 
-  // Initial plan — if this fails propagate to the outer retry loop.
-  const initialSlots = await planFn(from, to, spConfig, config);
-  printSetpointPlan(initialSlots, spConfig);
+  // Plan once — propagate errors to the outer retry loop.
+  const slots = await planFn(from, to, spConfig, config);
+  printSetpointPlan(slots, spConfig);
 
   const { commandTopic } = spConfig.mqtt;
 
-  // currentPlan = most recently successful plan.
-  // planOffset = index into currentPlan for the current time slot; advances
-  // when re-planning fails so the right slot is still used from the old plan.
-  let currentPlan = initialSlots;
-  let planOffset = 0;
-
-  for (const initialSlot of initialSlots) {
-    const msUntilSlot = initialSlot.start.getTime() - clock.now().getTime();
+  for (const slot of slots) {
+    const msUntilSlot = slot.start.getTime() - clock.now().getTime();
     if (msUntilSlot > 0) await clock.sleep(msUntilSlot);
 
-    const now = clock.now();
-    const newTo = new Date(now.getTime() + WINDOW_MS);
-    try {
-      currentPlan = await planFn(now, newTo, spConfig, config);
-      printSetpointPlan(currentPlan, spConfig);
-      planOffset = 0;
-    } catch (err) {
-      if (!(err instanceof IncompleteDataError)) throw err;
-      log(`[${spConfig.name}] Re-plan skipped (incomplete data) — keeping current plan`);
-    }
-
-    const setpoint = currentPlan[planOffset]?.setpoint ?? spConfig.setpointDefault;
-    publish(commandTopic, String(setpoint));
-    log(`[${spConfig.name}] setpoint: ${setpoint} at ${localTimeShort(initialSlot.start)}`);
-
-    if (planOffset < currentPlan.length - 1) planOffset++;
+    publish(commandTopic, String(slot.setpoint));
+    log(`[${spConfig.name}] setpoint: ${slot.setpoint} at ${localTimeShort(slot.start)}`);
   }
 }
 
