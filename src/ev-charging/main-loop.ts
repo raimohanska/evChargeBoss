@@ -12,6 +12,49 @@ import { log } from "../utils/log.ts";
 import { Canceller } from "../utils/timing-utils.ts";
 import type { Clock } from "../utils/timing-utils.ts";
 import type { ChargingSession } from "./charger.ts";
+import {
+  findNewestPlanFile,
+  readPlanFile,
+  writePlanFile,
+  planFilePath,
+  timestampForFilename,
+  cleanOldPlanFiles,
+} from "../utils/plan-store.ts";
+
+type SerializedSlot = Omit<Slot, "start" | "end"> & { start: string; end: string };
+
+interface EvChargingPlanFile {
+  version: 1;
+  createdAt: string;
+  config: {
+    targetKwh: number;
+    targetTime: string;
+    powerKw: number | undefined;
+  };
+  slots: SerializedSlot[];
+}
+
+function serializeSlots(slots: Slot[]): SerializedSlot[] {
+  return slots.map((s) => ({ ...s, start: s.start.toISOString(), end: s.end.toISOString() }));
+}
+
+function deserializeSlots(serialized: SerializedSlot[]): Slot[] {
+  return serialized.map((s) => ({ ...s, start: new Date(s.start), end: new Date(s.end) }));
+}
+
+function isEvPlanApplicable(
+  plan: EvChargingPlanFile,
+  now: Date,
+  evConfig: Config["evCharging"],
+): boolean {
+  if (plan.version !== 1) return false;
+  if (plan.config.targetKwh !== evConfig.targetKwh) return false;
+  if (plan.config.targetTime !== evConfig.targetTime) return false;
+  if (plan.config.powerKw !== evConfig.powerKw) return false;
+  const createdAt = new Date(plan.createdAt);
+  const targetDate = parseTargetTime(plan.config.targetTime, createdAt);
+  return targetDate > now;
+}
 
 export function parseTargetTime(timeStr: string, from: Date): Date {
   const [h, m] = timeStr.split(":").map(Number);
@@ -42,12 +85,29 @@ export async function runSession(
   publisher.setStatus(STATUS.waitingForCar);
   const powerKw = await session.waitForStart();
 
+  cleanOldPlanFiles();
+  let prevSlots: Slot[] | undefined;
+  let sessionFile: string;
+  const newestPlanPath = findNewestPlanFile("ev-charging");
+  if (newestPlanPath !== null) {
+    const savedPlan = readPlanFile<EvChargingPlanFile>(newestPlanPath);
+    const checkNow = from ?? clock.now();
+    if (savedPlan !== null && isEvPlanApplicable(savedPlan, checkNow, config.evCharging)) {
+      log(`Resuming plan from ${newestPlanPath}`);
+      prevSlots = deserializeSlots(savedPlan.slots);
+      sessionFile = newestPlanPath;
+    } else {
+      sessionFile = planFilePath("ev-charging", timestampForFilename(clock.now()));
+    }
+  } else {
+    sessionFile = planFilePath("ev-charging", timestampForFilename(clock.now()));
+  }
+
   let planFrom: Date | undefined = from;
   let chargedKwh = 0;
   let chargedCostEur = 0;
   let solarFractionAccum = 0;
   let chargeSlotsDone = 0;
-  let prevSlots: Slot[] | undefined;
   let replanController = new Canceller();
 
   // Keep the replan callback pointed at the current controller.
@@ -80,6 +140,20 @@ export async function runSession(
     let slots: Slot[];
     try {
       slots = await plan(now, targetDate, remainingKwh, powerKw, config, prevSlots === undefined);
+      try {
+        writePlanFile(sessionFile, {
+          version: 1 as const,
+          createdAt: clock.now().toISOString(),
+          config: {
+            targetKwh: config.evCharging.targetKwh,
+            targetTime: config.evCharging.targetTime,
+            powerKw: config.evCharging.powerKw,
+          },
+          slots: serializeSlots(slots),
+        });
+      } catch (writeErr) {
+        log(`Warning: could not write plan file: ${writeErr}`);
+      }
     } catch (err) {
       if (err instanceof IncompleteDataError && prevSlots !== undefined) {
         log(`Re-plan failed (${err.message}) — keeping current plan`);

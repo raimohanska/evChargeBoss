@@ -1,6 +1,7 @@
 import type { Config } from "../config.ts";
 import type { SetpointControlConfig } from "./config.ts";
 import type { SetpointSlot } from "./types.ts";
+import type { CostTier } from "./types.ts";
 import type { Clock } from "../utils/timing-utils.ts";
 import { planSetpoint } from "./planner.ts";
 import { printSetpointPlan } from "./print-plan.ts";
@@ -9,6 +10,60 @@ import { makeClock } from "../utils/timing-utils.ts";
 import { log } from "../utils/log.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
 import { SetpointStatusPublisher } from "./ha-status.ts";
+import {
+  findNewestPlanFile,
+  readPlanFile,
+  writePlanFile,
+  planFilePath,
+  timestampForFilename,
+  cleanOldPlanFiles,
+} from "../utils/plan-store.ts";
+
+type SerializedSetpointSlot = Omit<SetpointSlot, "start" | "end"> & {
+  start: string;
+  end: string;
+};
+
+interface SetpointPlanFile {
+  version: 1;
+  createdAt: string;
+  config: {
+    setpointCheap: number;
+    setpointDefault: number;
+    setpointExpensive: number | undefined;
+    expensiveFactor: number | undefined;
+  };
+  slots: SerializedSetpointSlot[];
+}
+
+function serializeSetpointSlots(slots: SetpointSlot[]): SerializedSetpointSlot[] {
+  return slots.map((s) => ({ ...s, start: s.start.toISOString(), end: s.end.toISOString() }));
+}
+
+function deserializeSetpointSlots(serialized: SerializedSetpointSlot[]): SetpointSlot[] {
+  return serialized.map((s) => ({
+    ...s,
+    start: new Date(s.start),
+    end: new Date(s.end),
+    costTier: s.costTier as CostTier,
+  }));
+}
+
+function isSetpointPlanApplicable(
+  plan: SetpointPlanFile,
+  now: Date,
+  spConfig: SetpointControlConfig,
+): boolean {
+  if (plan.version !== 1) return false;
+  if (plan.config.setpointCheap !== spConfig.setpointCheap) return false;
+  if (plan.config.setpointDefault !== spConfig.setpointDefault) return false;
+  if (plan.config.setpointExpensive !== spConfig.setpointExpensive) return false;
+  if (plan.config.expensiveFactor !== spConfig.expensiveFactor) return false;
+  if (plan.slots.length === 0) return false;
+  const windowStart = new Date(plan.slots[0].start);
+  const windowEnd = new Date(plan.slots[plan.slots.length - 1].end);
+  return now >= windowStart && now < windowEnd;
+}
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -34,12 +89,65 @@ export async function runSetpointControlLoop(
   getTemperature?: () => number | undefined,
   isEnabled?: () => boolean,
   onSlot?: (slot: SetpointSlot, setpoint: number) => void,
+  id?: string,
 ): Promise<void> {
   const to = new Date(from.getTime() + WINDOW_MS);
 
-  // Plan once — propagate errors to the outer retry loop.
-  const slots = await planFn(from, to, spConfig, config);
-  printSetpointPlan(slots, spConfig);
+  let slots: SetpointSlot[];
+
+  // Try to resume a persisted plan when an id is provided.
+  if (id !== undefined) {
+    const prefix = `setpoint-${id}`;
+    const newestPlanPath = findNewestPlanFile(prefix);
+    if (newestPlanPath !== null) {
+      const savedPlan = readPlanFile<SetpointPlanFile>(newestPlanPath);
+      if (savedPlan !== null && isSetpointPlanApplicable(savedPlan, from, spConfig)) {
+        log(`[${spConfig.name}] Resuming plan from ${newestPlanPath}`);
+        slots = deserializeSetpointSlots(savedPlan.slots);
+        printSetpointPlan(slots, spConfig);
+      } else {
+        slots = await planFn(from, to, spConfig, config);
+        printSetpointPlan(slots, spConfig);
+        try {
+          writePlanFile(planFilePath(prefix, timestampForFilename(from)), {
+            version: 1 as const,
+            createdAt: from.toISOString(),
+            config: {
+              setpointCheap: spConfig.setpointCheap,
+              setpointDefault: spConfig.setpointDefault,
+              setpointExpensive: spConfig.setpointExpensive,
+              expensiveFactor: spConfig.expensiveFactor,
+            },
+            slots: serializeSetpointSlots(slots),
+          });
+        } catch (writeErr) {
+          log(`[${spConfig.name}] Warning: could not write plan file: ${writeErr}`);
+        }
+      }
+    } else {
+      slots = await planFn(from, to, spConfig, config);
+      printSetpointPlan(slots, spConfig);
+      try {
+        writePlanFile(planFilePath(prefix, timestampForFilename(from)), {
+          version: 1 as const,
+          createdAt: from.toISOString(),
+          config: {
+            setpointCheap: spConfig.setpointCheap,
+            setpointDefault: spConfig.setpointDefault,
+            setpointExpensive: spConfig.setpointExpensive,
+            expensiveFactor: spConfig.expensiveFactor,
+          },
+          slots: serializeSetpointSlots(slots),
+        });
+      } catch (writeErr) {
+        log(`[${spConfig.name}] Warning: could not write plan file: ${writeErr}`);
+      }
+    }
+  } else {
+    // Plan once — propagate errors to the outer retry loop.
+    slots = await planFn(from, to, spConfig, config);
+    printSetpointPlan(slots, spConfig);
+  }
 
   const { commandTopic } = spConfig.mqtt;
 
@@ -114,6 +222,8 @@ export async function runSetpointControl(
 
   log(`=== Setpoint Control: ${spConfig.name} ===`);
 
+  cleanOldPlanFiles();
+
   const mqttClient = await connectMqtt(config.mqtt);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1);
   const publish = (topic: string, payload: string) => mqttClient.publish(topic, payload);
@@ -166,6 +276,7 @@ export async function runSetpointControl(
           const until = localTimeShort(new Date(slot.start.getTime() + 15 * 60 * 1000));
           publisher.setCurrentSlot(slot.costTier, slot.setpoint, setpoint, until);
         },
+        id,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

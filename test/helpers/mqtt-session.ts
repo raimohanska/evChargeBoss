@@ -1,3 +1,5 @@
+import os from "os";
+import path from "path";
 import { connectMqtt, makeMqttSession } from "../../src/ev-charging/mqtt-client.ts";
 import type { Publisher } from "../../src/ev-charging/mqtt-status.ts";
 import { createPublisher, shouldSuppressStatus } from "../../src/ev-charging/mqtt-status.ts";
@@ -7,6 +9,9 @@ import type { Config, MqttConfig } from "../../src/config.ts";
 import type { SessionSummary } from "../../src/influx.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
 import { makeTestConfig } from "./config.ts";
+
+// Use a unique plans directory per session to prevent cross-test interference.
+let _sessionCounter = 0;
 
 export interface MqttTestSession {
   loopPromise: Promise<void>;
@@ -34,6 +39,11 @@ export async function startMqttSession(
   mqttOverrides: Partial<MqttConfig> = {},
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
 ): Promise<MqttTestSession> {
+  // Isolate plan files per test session so tests don't interfere with each other.
+  process.env.PLANS_DIR = path.join(
+    os.tmpdir(),
+    `evchargeboss-test-plans-${process.pid}-${++_sessionCounter}`,
+  );
   const config = makeTestConfig(chargingOverrides, mqttOverrides);
   const [sessionClient, relayClient] = await Promise.all([
     connectMqtt(config.mqtt!),
