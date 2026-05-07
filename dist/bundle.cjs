@@ -33367,12 +33367,19 @@ function findNewestPlanFile(prefix) {
     return null;
   }
 }
-function readPlanFile(filePath) {
+function readPlanFile(filePath, schema) {
+  let raw;
   try {
-    return JSON.parse((0, import_fs3.readFileSync)(filePath, "utf8"));
+    raw = JSON.parse((0, import_fs3.readFileSync)(filePath, "utf8"));
   } catch {
     return null;
   }
+  const result = schema.safeParse(raw);
+  if (!result.success) {
+    log(`Warning: plan file ${filePath} failed validation \u2014 ignoring. ${result.error.message}`);
+    return null;
+  }
+  return result.data;
 }
 function writePlanFile(filePath, data) {
   (0, import_fs3.mkdirSync)(import_path.default.dirname(filePath), { recursive: true });
@@ -33396,6 +33403,26 @@ function cleanOldPlanFiles() {
 }
 
 // src/ev-charging/main-loop.ts
+var SerializedSlotSchema = external_exports.object({
+  start: external_exports.string(),
+  end: external_exports.string(),
+  spotPriceEurPerKwh: external_exports.number(),
+  transportCostEurPerKwh: external_exports.number(),
+  solarForecastW: external_exports.number(),
+  effectiveCostEur: external_exports.number(),
+  charge: external_exports.boolean()
+});
+var EvChargingPlanFileSchema = external_exports.object({
+  version: external_exports.literal(1),
+  createdAt: external_exports.string(),
+  detectedPowerKw: external_exports.number().optional(),
+  config: external_exports.object({
+    targetKwh: external_exports.number(),
+    targetTime: external_exports.string(),
+    powerKw: external_exports.number().optional()
+  }),
+  slots: external_exports.array(SerializedSlotSchema)
+});
 function serializeSlots(slots) {
   return slots.map((s) => ({ ...s, start: s.start.toISOString(), end: s.end.toISOString() }));
 }
@@ -33422,24 +33449,24 @@ function parseTargetTime(timeStr, from) {
   return tomorrow;
 }
 async function runSession(session, publisher, config3, from, clock, onSessionEnd) {
-  var _a7, _b, _c;
-  publisher.setStatus(STATUS.waitingForCar);
-  const powerKw = await session.waitForStart();
+  var _a7, _b, _c, _d, _e;
   cleanOldPlanFiles();
   let prevSlots;
   let sessionFile;
+  let powerKw;
+  const checkNow = from != null ? from : clock.now();
   const newestPlanPath = findNewestPlanFile("ev-charging");
-  if (newestPlanPath !== null) {
-    const savedPlan = readPlanFile(newestPlanPath);
-    const checkNow = from != null ? from : clock.now();
-    if (savedPlan !== null && isEvPlanApplicable(savedPlan, checkNow, config3.evCharging)) {
-      log(`Resuming plan from ${newestPlanPath}`);
-      prevSlots = deserializeSlots(savedPlan.slots);
-      sessionFile = newestPlanPath;
-    } else {
-      sessionFile = planFilePath("ev-charging", timestampForFilename(clock.now()));
-    }
+  const savedPlan = newestPlanPath !== null ? readPlanFile(newestPlanPath, EvChargingPlanFileSchema) : null;
+  const resumedPlan = savedPlan !== null && isEvPlanApplicable(savedPlan, checkNow, config3.evCharging) ? savedPlan : null;
+  if (resumedPlan !== null) {
+    log(`Resuming plan from ${newestPlanPath}`);
+    prevSlots = deserializeSlots(resumedPlan.slots);
+    sessionFile = newestPlanPath;
+    powerKw = (_b = (_a7 = resumedPlan.detectedPowerKw) != null ? _a7 : config3.evCharging.powerKw) != null ? _b : 0;
+    publisher.setStatus(STATUS.replanning);
   } else {
+    publisher.setStatus(STATUS.waitingForCar);
+    powerKw = await session.waitForStart();
     sessionFile = planFilePath("ev-charging", timestampForFilename(clock.now()));
   }
   let planFrom = from;
@@ -33465,7 +33492,7 @@ async function runSession(session, publisher, config3, from, clock, onSessionEnd
     }
     replanController = new Canceller();
     updateReplanCallback();
-    const targetTimeStr = (_a7 = publisher.getTargetTimeOverride()) != null ? _a7 : config3.evCharging.targetTime;
+    const targetTimeStr = (_c = publisher.getTargetTimeOverride()) != null ? _c : config3.evCharging.targetTime;
     const now = planFrom != null ? planFrom : clock.now();
     const targetDate = parseTargetTime(targetTimeStr, now);
     planFrom = void 0;
@@ -33476,6 +33503,7 @@ async function runSession(session, publisher, config3, from, clock, onSessionEnd
         writePlanFile(sessionFile, {
           version: 1,
           createdAt: clock.now().toISOString(),
+          detectedPowerKw: powerKw,
           config: {
             targetKwh: config3.evCharging.targetKwh,
             targetTime: config3.evCharging.targetTime,
@@ -33546,7 +33574,7 @@ async function runSession(session, publisher, config3, from, clock, onSessionEnd
       signal: replanController.signal,
       wattsSource: session.wattsSource,
       prevChargedKwh: chargedKwh,
-      powerThresholdW: (_c = (_b = config3.evCharging.mqtt) == null ? void 0 : _b.powerThresholdW) != null ? _c : 10,
+      powerThresholdW: (_e = (_d = config3.evCharging.mqtt) == null ? void 0 : _d.powerThresholdW) != null ? _e : 10,
       powerKw,
       clock
     });
@@ -34104,6 +34132,26 @@ var SetpointStatusPublisher = class {
 };
 
 // src/setpoint-control/index.ts
+var SerializedSetpointSlotSchema = external_exports.object({
+  start: external_exports.string(),
+  end: external_exports.string(),
+  spotPriceEurPerKwh: external_exports.number(),
+  transportCostEurPerKwh: external_exports.number(),
+  solarForecastW: external_exports.number(),
+  setpoint: external_exports.number(),
+  costTier: external_exports.enum(["cheap", "average", "expensive"])
+});
+var SetpointPlanFileSchema = external_exports.object({
+  version: external_exports.literal(1),
+  createdAt: external_exports.string(),
+  config: external_exports.object({
+    setpointCheap: external_exports.number(),
+    setpointDefault: external_exports.number(),
+    setpointExpensive: external_exports.number().optional(),
+    expensiveFactor: external_exports.number().optional()
+  }),
+  slots: external_exports.array(SerializedSetpointSlotSchema)
+});
 function serializeSetpointSlots(slots) {
   return slots.map((s) => ({ ...s, start: s.start.toISOString(), end: s.end.toISOString() }));
 }
@@ -34111,8 +34159,7 @@ function deserializeSetpointSlots(serialized) {
   return serialized.map((s) => ({
     ...s,
     start: new Date(s.start),
-    end: new Date(s.end),
-    costTier: s.costTier
+    end: new Date(s.end)
   }));
 }
 function isSetpointPlanApplicable(plan2, now, spConfig) {
@@ -34134,7 +34181,7 @@ async function runSetpointControlLoop(from, spConfig, config3, publish, clock, p
     const prefix = `setpoint-${id}`;
     const newestPlanPath = findNewestPlanFile(prefix);
     if (newestPlanPath !== null) {
-      const savedPlan = readPlanFile(newestPlanPath);
+      const savedPlan = readPlanFile(newestPlanPath, SetpointPlanFileSchema);
       if (savedPlan !== null && isSetpointPlanApplicable(savedPlan, from, spConfig)) {
         log(`[${spConfig.name}] Resuming plan from ${newestPlanPath}`);
         slots = deserializeSetpointSlots(savedPlan.slots);

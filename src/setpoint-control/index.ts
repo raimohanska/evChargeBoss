@@ -1,7 +1,7 @@
 import type { Config } from "../config.ts";
 import type { SetpointControlConfig } from "./config.ts";
 import type { SetpointSlot } from "./types.ts";
-import type { CostTier } from "./types.ts";
+import { z } from "zod";
 import type { Clock } from "../utils/timing-utils.ts";
 import { planSetpoint } from "./planner.ts";
 import { printSetpointPlan } from "./print-plan.ts";
@@ -19,22 +19,31 @@ import {
   cleanOldPlanFiles,
 } from "../utils/plan-store.ts";
 
-type SerializedSetpointSlot = Omit<SetpointSlot, "start" | "end"> & {
-  start: string;
-  end: string;
-};
+const SerializedSetpointSlotSchema = z.object({
+  start: z.string(),
+  end: z.string(),
+  spotPriceEurPerKwh: z.number(),
+  transportCostEurPerKwh: z.number(),
+  solarForecastW: z.number(),
+  setpoint: z.number(),
+  costTier: z.enum(["cheap", "average", "expensive"]),
+});
 
-interface SetpointPlanFile {
-  version: 1;
-  createdAt: string;
-  config: {
-    setpointCheap: number;
-    setpointDefault: number;
-    setpointExpensive: number | undefined;
-    expensiveFactor: number | undefined;
-  };
-  slots: SerializedSetpointSlot[];
-}
+type SerializedSetpointSlot = z.infer<typeof SerializedSetpointSlotSchema>;
+
+const SetpointPlanFileSchema = z.object({
+  version: z.literal(1),
+  createdAt: z.string(),
+  config: z.object({
+    setpointCheap: z.number(),
+    setpointDefault: z.number(),
+    setpointExpensive: z.number().optional(),
+    expensiveFactor: z.number().optional(),
+  }),
+  slots: z.array(SerializedSetpointSlotSchema),
+});
+
+type SetpointPlanFile = z.infer<typeof SetpointPlanFileSchema>;
 
 function serializeSetpointSlots(slots: SetpointSlot[]): SerializedSetpointSlot[] {
   return slots.map((s) => ({ ...s, start: s.start.toISOString(), end: s.end.toISOString() }));
@@ -45,7 +54,6 @@ function deserializeSetpointSlots(serialized: SerializedSetpointSlot[]): Setpoin
     ...s,
     start: new Date(s.start),
     end: new Date(s.end),
-    costTier: s.costTier as CostTier,
   }));
 }
 
@@ -100,7 +108,7 @@ export async function runSetpointControlLoop(
     const prefix = `setpoint-${id}`;
     const newestPlanPath = findNewestPlanFile(prefix);
     if (newestPlanPath !== null) {
-      const savedPlan = readPlanFile<SetpointPlanFile>(newestPlanPath);
+      const savedPlan = readPlanFile<SetpointPlanFile>(newestPlanPath, SetpointPlanFileSchema);
       if (savedPlan !== null && isSetpointPlanApplicable(savedPlan, from, spConfig)) {
         log(`[${spConfig.name}] Resuming plan from ${newestPlanPath}`);
         slots = deserializeSetpointSlots(savedPlan.slots);

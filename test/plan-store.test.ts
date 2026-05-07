@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
 import os from "os";
 import path from "path";
+import { z } from "zod";
 
 // Set up a unique temp dir for plan files — must be set before plan-store loads.
 const tmpDir = path.join(os.tmpdir(), `evchargeboss-plan-store-test-${process.pid}`);
@@ -31,12 +32,16 @@ describe("timestampForFilename", () => {
   });
 });
 
+// A minimal schema used by readPlanFile tests.
+const TestSchema = z.object({ version: z.literal(1), foo: z.string(), n: z.number() });
+type TestData = z.infer<typeof TestSchema>;
+
 describe("writePlanFile / readPlanFile", () => {
   test("roundtrips JSON data", () => {
     const filePath = planFilePath("test-rw", timestampForFilename(new Date()));
-    const data = { version: 1 as const, foo: "bar", n: 42 };
+    const data: TestData = { version: 1, foo: "bar", n: 42 };
     writePlanFile(filePath, data);
-    const result = readPlanFile<typeof data>(filePath);
+    const result = readPlanFile(filePath, TestSchema);
     assert.deepEqual(result, data);
   });
 
@@ -47,15 +52,23 @@ describe("writePlanFile / readPlanFile", () => {
   });
 
   test("readPlanFile returns null for missing file", () => {
-    const result = readPlanFile("/nonexistent/path/that/does/not/exist.json");
+    const result = readPlanFile("/nonexistent/path/that/does/not/exist.json", TestSchema);
     assert.equal(result, null);
   });
 
   test("readPlanFile returns null for invalid JSON", () => {
     const filePath = planFilePath("test-invalid", "2026-01-01T00-00-00");
-    writePlanFile(filePath, "placeholder");
+    writePlanFile(filePath, { version: 1, foo: "x", n: 0 });
     writeFileSync(filePath, "not valid json");
-    const result = readPlanFile(filePath);
+    const result = readPlanFile(filePath, TestSchema);
+    assert.equal(result, null);
+  });
+
+  test("readPlanFile returns null when schema validation fails", () => {
+    const filePath = planFilePath("test-schema-fail", "2026-01-01T00-00-01");
+    // Write data that does not match TestSchema (n is a string, not a number).
+    writePlanFile(filePath, { version: 1, foo: "ok", n: "not-a-number" });
+    const result = readPlanFile(filePath, TestSchema);
     assert.equal(result, null);
   });
 });

@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, unlinkSync, mkdirSync } from "fs";
 import path from "path";
+import { z } from "zod";
 import { localDateTimeString } from "./date-time-format.ts";
+import { log } from "./log.ts";
 
 function getPlansDir(): string {
   return path.join(process.env.PLANS_DIR ?? ".", ".plans");
@@ -38,13 +40,23 @@ export function findNewestPlanFile(prefix: string): string | null {
   }
 }
 
-/** Read and JSON-parse a plan file; returns null on any error. */
-export function readPlanFile<T>(filePath: string): T | null {
+/**
+ * Read, JSON-parse, and validate a plan file against a Zod schema.
+ * Returns null (and logs a warning) on any error or schema mismatch.
+ */
+export function readPlanFile<T>(filePath: string, schema: z.ZodType<T>): T | null {
+  let raw: unknown;
   try {
-    return JSON.parse(readFileSync(filePath, "utf8")) as T;
+    raw = JSON.parse(readFileSync(filePath, "utf8"));
   } catch {
     return null;
   }
+  const result = schema.safeParse(raw);
+  if (!result.success) {
+    log(`Warning: plan file ${filePath} failed validation — ignoring. ${result.error.message}`);
+    return null;
+  }
+  return result.data;
 }
 
 /** Write data as formatted JSON to filePath, creating parent directories as needed. */

@@ -1,6 +1,7 @@
 import type { Config } from "../config.ts";
 import type { Slot } from "./types.ts";
 import type { SessionSummary } from "../influx.ts";
+import { z } from "zod";
 import { plan } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
 import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
@@ -21,18 +22,31 @@ import {
   cleanOldPlanFiles,
 } from "../utils/plan-store.ts";
 
-type SerializedSlot = Omit<Slot, "start" | "end"> & { start: string; end: string };
+const SerializedSlotSchema = z.object({
+  start: z.string(),
+  end: z.string(),
+  spotPriceEurPerKwh: z.number(),
+  transportCostEurPerKwh: z.number(),
+  solarForecastW: z.number(),
+  effectiveCostEur: z.number(),
+  charge: z.boolean(),
+});
 
-interface EvChargingPlanFile {
-  version: 1;
-  createdAt: string;
-  config: {
-    targetKwh: number;
-    targetTime: string;
-    powerKw: number | undefined;
-  };
-  slots: SerializedSlot[];
-}
+type SerializedSlot = z.infer<typeof SerializedSlotSchema>;
+
+const EvChargingPlanFileSchema = z.object({
+  version: z.literal(1),
+  createdAt: z.string(),
+  detectedPowerKw: z.number().optional(),
+  config: z.object({
+    targetKwh: z.number(),
+    targetTime: z.string(),
+    powerKw: z.number().optional(),
+  }),
+  slots: z.array(SerializedSlotSchema),
+});
+
+type EvChargingPlanFile = z.infer<typeof EvChargingPlanFileSchema>;
 
 function serializeSlots(slots: Slot[]): SerializedSlot[] {
   return slots.map((s) => ({ ...s, start: s.start.toISOString(), end: s.end.toISOString() }));
@@ -82,24 +96,32 @@ export async function runSession(
   clock: Clock,
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
 ): Promise<void> {
-  publisher.setStatus(STATUS.waitingForCar);
-  const powerKw = await session.waitForStart();
-
   cleanOldPlanFiles();
   let prevSlots: Slot[] | undefined;
   let sessionFile: string;
+  let powerKw: number;
+
+  // Check for a resumable plan before touching the relay.
+  const checkNow = from ?? clock.now();
   const newestPlanPath = findNewestPlanFile("ev-charging");
-  if (newestPlanPath !== null) {
-    const savedPlan = readPlanFile<EvChargingPlanFile>(newestPlanPath);
-    const checkNow = from ?? clock.now();
-    if (savedPlan !== null && isEvPlanApplicable(savedPlan, checkNow, config.evCharging)) {
-      log(`Resuming plan from ${newestPlanPath}`);
-      prevSlots = deserializeSlots(savedPlan.slots);
-      sessionFile = newestPlanPath;
-    } else {
-      sessionFile = planFilePath("ev-charging", timestampForFilename(clock.now()));
-    }
+  const savedPlan =
+    newestPlanPath !== null
+      ? readPlanFile<EvChargingPlanFile>(newestPlanPath, EvChargingPlanFileSchema)
+      : null;
+  const resumedPlan =
+    savedPlan !== null && isEvPlanApplicable(savedPlan, checkNow, config.evCharging)
+      ? savedPlan
+      : null;
+
+  if (resumedPlan !== null) {
+    log(`Resuming plan from ${newestPlanPath}`);
+    prevSlots = deserializeSlots(resumedPlan.slots);
+    sessionFile = newestPlanPath!;
+    powerKw = resumedPlan.detectedPowerKw ?? config.evCharging.powerKw ?? 0;
+    publisher.setStatus(STATUS.replanning);
   } else {
+    publisher.setStatus(STATUS.waitingForCar);
+    powerKw = await session.waitForStart();
     sessionFile = planFilePath("ev-charging", timestampForFilename(clock.now()));
   }
 
@@ -144,6 +166,7 @@ export async function runSession(
         writePlanFile(sessionFile, {
           version: 1 as const,
           createdAt: clock.now().toISOString(),
+          detectedPowerKw: powerKw,
           config: {
             targetKwh: config.evCharging.targetKwh,
             targetTime: config.evCharging.targetTime,
