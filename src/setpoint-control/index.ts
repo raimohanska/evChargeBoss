@@ -30,6 +30,7 @@ export async function runSetpointControlLoop(
   publish: (topic: string, payload: string) => void,
   clock: Clock,
   planFn: PlanFn = planSetpoint,
+  getTemperature?: () => number | undefined,
 ): Promise<void> {
   const to = new Date(from.getTime() + WINDOW_MS);
 
@@ -43,8 +44,48 @@ export async function runSetpointControlLoop(
     const msUntilSlot = slot.start.getTime() - clock.now().getTime();
     if (msUntilSlot > 0) await clock.sleep(msUntilSlot);
 
-    publish(commandTopic, String(slot.setpoint));
-    log(`[${spConfig.name}] setpoint: ${slot.setpoint} at ${localTimeShort(slot.start)}`);
+    let setpoint = slot.setpoint;
+
+    if (getTemperature !== undefined && spConfig.roomTemperature !== undefined) {
+      const rtConfig = spConfig.roomTemperature;
+      const temp = getTemperature();
+      const low = rtConfig.targetTemperature - rtConfig.allowedDeviationDown;
+      const high = rtConfig.targetTemperature + rtConfig.allowedDeviationUp;
+
+      if (temp === undefined) {
+        log(
+          `[${spConfig.name}] Room temperature unavailable at ${localTimeShort(slot.start)}, using planned setpoint ${setpoint}`,
+        );
+      } else if (temp < low) {
+        const adjusted = setpoint + rtConfig.influence;
+        log(
+          `[${spConfig.name}] Room ${temp.toFixed(1)}°C below range (${low.toFixed(1)}–${high.toFixed(1)}°C), raising setpoint by ${rtConfig.influence}: ${setpoint} → ${adjusted}`,
+        );
+        setpoint = adjusted;
+      } else if (temp > high) {
+        const adjusted = setpoint - rtConfig.influence;
+        log(
+          `[${spConfig.name}] Room ${temp.toFixed(1)}°C above range (${low.toFixed(1)}–${high.toFixed(1)}°C), lowering setpoint by ${rtConfig.influence}: ${setpoint} → ${adjusted}`,
+        );
+        setpoint = adjusted;
+      } else {
+        log(
+          `[${spConfig.name}] Room ${temp.toFixed(1)}°C within range (${low.toFixed(1)}–${high.toFixed(1)}°C), no adjustment to planned setpoint ${setpoint}`,
+        );
+      }
+
+      if (spConfig.setpointMin !== undefined && setpoint < spConfig.setpointMin) {
+        log(`[${spConfig.name}] Setpoint ${setpoint} clamped to min ${spConfig.setpointMin}`);
+        setpoint = spConfig.setpointMin;
+      }
+      if (spConfig.setpointMax !== undefined && setpoint > spConfig.setpointMax) {
+        log(`[${spConfig.name}] Setpoint ${setpoint} clamped to max ${spConfig.setpointMax}`);
+        setpoint = spConfig.setpointMax;
+      }
+    }
+
+    publish(commandTopic, String(setpoint));
+    log(`[${spConfig.name}] setpoint: ${setpoint} at ${localTimeShort(slot.start)}`);
   }
 }
 
@@ -66,9 +107,35 @@ export async function runSetpointControl(
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1);
   const publish = (topic: string, payload: string) => mqttClient.publish(topic, payload);
 
+  let getTemperature: (() => number | undefined) | undefined;
+  if (spConfig.roomTemperature) {
+    const { temperatureTopic } = spConfig.roomTemperature.mqtt;
+    let latestTemperature: number | undefined;
+
+    mqttClient.subscribe(temperatureTopic);
+    mqttClient.on("message", (topic: string, message: Buffer) => {
+      if (topic !== temperatureTopic) return;
+      const value = parseFloat(message.toString());
+      if (!isNaN(value)) {
+        latestTemperature = value;
+      }
+    });
+
+    log(`[${spConfig.name}] Subscribed to room temperature topic: ${temperatureTopic}`);
+    getTemperature = () => latestTemperature;
+  }
+
   while (true) {
     try {
-      await runSetpointControlLoop(clock.now(), spConfig, config, publish, clock);
+      await runSetpointControlLoop(
+        clock.now(),
+        spConfig,
+        config,
+        publish,
+        clock,
+        planSetpoint,
+        getTemperature,
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log(`[${spConfig.name}] ERROR: ${msg}`);

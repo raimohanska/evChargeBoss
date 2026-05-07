@@ -144,3 +144,164 @@ describe("runSetpointControlLoop", () => {
     }
   });
 });
+
+// ── Room temperature adjustment tests ────────────────────────────────────────
+
+describe("runSetpointControlLoop room temperature adjustment", () => {
+  const RT_CONFIG = {
+    targetTemperature: 21,
+    allowedDeviationUp: 1,
+    allowedDeviationDown: 1,
+    influence: 5,
+    mqtt: { temperatureTopic: "test/room/temperature" },
+  };
+
+  const SP_CONFIG_RT = { ...SP_CONFIG, roomTemperature: RT_CONFIG };
+
+  test("temperature below range raises setpoint by influence on every slot", async () => {
+    const clock = makeClock(100_000, FROM);
+    const published: string[] = [];
+    const publish = (_topic: string, payload: string) => published.push(payload);
+
+    const fixedPlan = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
+    // 18°C < 21 − 1 = 20 → below range
+    await runSetpointControlLoop(
+      FROM,
+      SP_CONFIG_RT,
+      CONFIG,
+      publish,
+      clock,
+      async () => fixedPlan,
+      () => 18,
+    );
+
+    assert.equal(published.length, fixedPlan.length);
+    for (let i = 0; i < fixedPlan.length; i++) {
+      assert.equal(published[i], String(fixedPlan[i].setpoint + 5), `slot ${i}`);
+    }
+  });
+
+  test("temperature above range lowers setpoint by influence on every slot", async () => {
+    const clock = makeClock(100_000, FROM);
+    const published: string[] = [];
+    const publish = (_topic: string, payload: string) => published.push(payload);
+
+    const fixedPlan = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
+    // 23.5°C > 21 + 1 = 22 → above range
+    await runSetpointControlLoop(
+      FROM,
+      SP_CONFIG_RT,
+      CONFIG,
+      publish,
+      clock,
+      async () => fixedPlan,
+      () => 23.5,
+    );
+
+    assert.equal(published.length, fixedPlan.length);
+    for (let i = 0; i < fixedPlan.length; i++) {
+      assert.equal(published[i], String(fixedPlan[i].setpoint - 5), `slot ${i}`);
+    }
+  });
+
+  test("temperature within range leaves setpoint unchanged", async () => {
+    const clock = makeClock(100_000, FROM);
+    const published: string[] = [];
+    const publish = (_topic: string, payload: string) => published.push(payload);
+
+    const fixedPlan = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
+    // 21°C = target → within range
+    await runSetpointControlLoop(
+      FROM,
+      SP_CONFIG_RT,
+      CONFIG,
+      publish,
+      clock,
+      async () => fixedPlan,
+      () => 21,
+    );
+
+    assert.equal(published.length, fixedPlan.length);
+    for (let i = 0; i < fixedPlan.length; i++) {
+      assert.equal(published[i], String(fixedPlan[i].setpoint), `slot ${i}`);
+    }
+  });
+
+  test("temperature unavailable leaves setpoint unchanged", async () => {
+    const clock = makeClock(100_000, FROM);
+    const published: string[] = [];
+    const publish = (_topic: string, payload: string) => published.push(payload);
+
+    const fixedPlan = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
+    await runSetpointControlLoop(
+      FROM,
+      SP_CONFIG_RT,
+      CONFIG,
+      publish,
+      clock,
+      async () => fixedPlan,
+      () => undefined,
+    );
+
+    assert.equal(published.length, fixedPlan.length);
+    for (let i = 0; i < fixedPlan.length; i++) {
+      assert.equal(published[i], String(fixedPlan[i].setpoint), `slot ${i}`);
+    }
+  });
+
+  test("adjusted setpoint clamped to setpointMin", async () => {
+    const clock = makeClock(100_000, FROM);
+    const published: string[] = [];
+    const publish = (_topic: string, payload: string) => published.push(payload);
+
+    const fixedPlan = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
+    // setpointMin=50: expensive slots (planned 40) + 5 = 45 < 50 → clamped to 50
+    const spConfig = { ...SP_CONFIG_RT, setpointMin: 50 };
+    // 18°C → below range → raise by 5
+    await runSetpointControlLoop(
+      FROM,
+      spConfig,
+      CONFIG,
+      publish,
+      clock,
+      async () => fixedPlan,
+      () => 18,
+    );
+
+    assert.equal(published.length, fixedPlan.length);
+    for (let i = 0; i < fixedPlan.length; i++) {
+      const expected = Math.max(fixedPlan[i].setpoint + 5, 50);
+      assert.equal(published[i], String(expected), `slot ${i}: planned=${fixedPlan[i].setpoint}`);
+    }
+    const clampedCount = fixedPlan.filter((s) => s.setpoint + 5 < 50).length;
+    assert.ok(clampedCount > 0, "expected at least one slot clamped to min");
+  });
+
+  test("adjusted setpoint clamped to setpointMax", async () => {
+    const clock = makeClock(100_000, FROM);
+    const published: string[] = [];
+    const publish = (_topic: string, payload: string) => published.push(payload);
+
+    const fixedPlan = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
+    // setpointMax=68: cheap slots (planned 65) + 5 = 70 > 68 → clamped to 68
+    const spConfig = { ...SP_CONFIG_RT, setpointMax: 68 };
+    // 18°C → below range → raise by 5
+    await runSetpointControlLoop(
+      FROM,
+      spConfig,
+      CONFIG,
+      publish,
+      clock,
+      async () => fixedPlan,
+      () => 18,
+    );
+
+    assert.equal(published.length, fixedPlan.length);
+    for (let i = 0; i < fixedPlan.length; i++) {
+      const expected = Math.min(fixedPlan[i].setpoint + 5, 68);
+      assert.equal(published[i], String(expected), `slot ${i}: planned=${fixedPlan[i].setpoint}`);
+    }
+    const clampedCount = fixedPlan.filter((s) => s.setpoint + 5 > 68).length;
+    assert.ok(clampedCount > 0, "expected at least one slot clamped to max");
+  });
+});
