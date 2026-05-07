@@ -35,6 +35,7 @@ export async function plan(
       effectiveCostEur:
         gridFraction * (ps.spotPriceEurPerKwh + ps.transportCostEurPerKwh) * powerKw * 0.25,
       charge: false,
+      canHold: false,
     };
   });
 
@@ -53,6 +54,18 @@ export async function plan(
   // effectively free and can top up the battery if there is still capacity.
   slots.forEach((s) => {
     if (!s.charge && s.effectiveCostEur === 0) s.charge = true;
+  });
+
+  // Compute canHold for each slot: true when skipping this slot entirely still
+  // leaves enough future charge slots to reach targetKwh.
+  // Each charge slot delivers powerKw * 0.25 kWh; we need ceil(targetKwh /
+  // kwhPerSlot) slots minimum.  A slot can be held iff (chargeCount - 1) other
+  // slots cover targetKwh — i.e. there is at least one spare slot in the plan.
+  const kwhPerSlot = powerKw * 0.25;
+  const chargeCount = slots.filter((s) => s.charge).length;
+  const spareKwh = (chargeCount - 1) * kwhPerSlot;
+  slots.forEach((s) => {
+    s.canHold = s.charge && spareKwh >= targetKwh;
   });
 
   return slots;

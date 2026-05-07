@@ -30,6 +30,7 @@ const SerializedSlotSchema = z.object({
   solarForecastW: z.number(),
   effectiveCostEur: z.number(),
   charge: z.boolean(),
+  canHold: z.boolean().default(false),
 });
 
 type SerializedSlot = z.infer<typeof SerializedSlotSchema>;

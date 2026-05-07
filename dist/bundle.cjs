@@ -32786,7 +32786,8 @@ async function plan(from, targetTime, targetKwh, powerKw, config3, verbose) {
     return {
       ...ps,
       effectiveCostEur: gridFraction * (ps.spotPriceEurPerKwh + ps.transportCostEurPerKwh) * powerKw * 0.25,
-      charge: false
+      charge: false,
+      canHold: false
     };
   });
   const slotsNeeded = Math.ceil(targetKwh / (powerKw * 0.25));
@@ -32799,6 +32800,12 @@ async function plan(from, targetTime, targetKwh, powerKw, config3, verbose) {
   slots.forEach((s) => s.charge = selected.has(s.start.getTime()));
   slots.forEach((s) => {
     if (!s.charge && s.effectiveCostEur === 0) s.charge = true;
+  });
+  const kwhPerSlot = powerKw * 0.25;
+  const chargeCount = slots.filter((s) => s.charge).length;
+  const spareKwh = (chargeCount - 1) * kwhPerSlot;
+  slots.forEach((s) => {
+    s.canHold = s.charge && spareKwh >= targetKwh;
   });
   return slots;
 }
@@ -33394,7 +33401,7 @@ async function runSlot({
     }
   }) : void 0;
   let unsubHold;
-  if (slot.charge && holdSource) {
+  if (slot.charge && slot.canHold && holdSource) {
     unsubHold = holdSource.subscribe((held) => {
       isHeld = held;
       if (held) {
@@ -33503,7 +33510,8 @@ var SerializedSlotSchema = external_exports.object({
   transportCostEurPerKwh: external_exports.number(),
   solarForecastW: external_exports.number(),
   effectiveCostEur: external_exports.number(),
-  charge: external_exports.boolean()
+  charge: external_exports.boolean(),
+  canHold: external_exports.boolean().default(false)
 });
 var EvChargingPlanFileSchema = external_exports.object({
   version: external_exports.literal(1),
