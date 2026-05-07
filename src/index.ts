@@ -51,17 +51,18 @@
 // Add new trigger/charging modes by implementing ChargingSession (src/ev-charging/charger.ts).
 // The main loop in src/ev-charging/main-loop.ts does not need to change.
 
-import { loadConfig } from "./config.ts";
+import { loadConfig, getConfigPath } from "./config.ts";
 import { runEvCharging } from "./ev-charging/index.ts";
 import { runSetpointControl } from "./setpoint-control/index.ts";
 import { runMqttToInflux } from "./mqtt-to-influx/index.ts";
 import { runElectricityPoller } from "./electricity/poller.ts";
 
+const configPath = getConfigPath();
 const config = loadConfig();
 
 const loops: Promise<void>[] = [runEvCharging(config)];
 for (const [id, spConfig] of Object.entries(config.setpointControl ?? {}))
-  loops.push(runSetpointControl(id, spConfig, config));
+  loops.push(runSetpointControl(id, spConfig, config, configPath));
 if (config.mqttToInflux) loops.push(runMqttToInflux(config));
 if (config.influx) loops.push(runElectricityPoller(config));
 

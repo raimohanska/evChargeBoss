@@ -8,6 +8,7 @@ import { connectMqtt } from "../ev-charging/mqtt-client.ts";
 import { makeClock } from "../utils/timing-utils.ts";
 import { log } from "../utils/log.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
+import { SetpointStatusPublisher } from "./ha-status.ts";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -31,6 +32,8 @@ export async function runSetpointControlLoop(
   clock: Clock,
   planFn: PlanFn = planSetpoint,
   getTemperature?: () => number | undefined,
+  isEnabled?: () => boolean,
+  onSlot?: (slot: SetpointSlot, setpoint: number) => void,
 ): Promise<void> {
   const to = new Date(from.getTime() + WINDOW_MS);
 
@@ -41,8 +44,14 @@ export async function runSetpointControlLoop(
   const { commandTopic } = spConfig.mqtt;
 
   for (const slot of slots) {
-    const msUntilSlot = slot.start.getTime() - clock.now().getTime();
-    if (msUntilSlot > 0) await clock.sleep(msUntilSlot);
+    // Poll every 1 second while waiting for slot start — allows immediate cancellation.
+    const slotStartMs = slot.start.getTime();
+    while (clock.now().getTime() < slotStartMs) {
+      if (isEnabled?.() === false) return;
+      const remaining = slotStartMs - clock.now().getTime();
+      await clock.sleep(Math.min(1_000, remaining));
+    }
+    if (isEnabled?.() === false) return;
 
     let setpoint = slot.setpoint;
 
@@ -86,6 +95,7 @@ export async function runSetpointControlLoop(
 
     publish(commandTopic, String(setpoint));
     log(`[${spConfig.name}] setpoint: ${setpoint} at ${localTimeShort(slot.start)}`);
+    onSlot?.(slot, setpoint);
   }
 }
 
@@ -93,6 +103,7 @@ export async function runSetpointControl(
   id: string,
   spConfig: SetpointControlConfig,
   config: Config,
+  configPath: string,
 ): Promise<void> {
   if (!config.mqtt) {
     console.error(
@@ -106,6 +117,9 @@ export async function runSetpointControl(
   const mqttClient = await connectMqtt(config.mqtt);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1);
   const publish = (topic: string, payload: string) => mqttClient.publish(topic, payload);
+
+  const publisher = new SetpointStatusPublisher(mqttClient, id, spConfig, config, configPath);
+  publisher.initDiscovery();
 
   let getTemperature: (() => number | undefined) | undefined;
   if (spConfig.roomTemperature) {
@@ -123,9 +137,21 @@ export async function runSetpointControl(
 
     log(`[${spConfig.name}] Subscribed to room temperature topic: ${temperatureTopic}`);
     getTemperature = () => latestTemperature;
+
+    // Give the broker a moment to deliver a retained message before the first plan.
+    await clock.sleep(2_000);
+    log(
+      `[${spConfig.name}] Initial room temperature: ${latestTemperature !== undefined ? `${latestTemperature}°C` : "unavailable"}`,
+    );
   }
 
   while (true) {
+    if (!publisher.isEnabled()) {
+      publisher.setStatus("Disabled");
+      await clock.sleep(5_000);
+      continue;
+    }
+    publisher.setStatus("Planning...");
     try {
       await runSetpointControlLoop(
         clock.now(),
@@ -135,10 +161,15 @@ export async function runSetpointControl(
         clock,
         planSetpoint,
         getTemperature,
+        publisher.isEnabled.bind(publisher),
+        (slot, setpoint) => {
+          publisher.setCurrentSlot(slot.costTier, setpoint, localTimeShort(slot.start));
+        },
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log(`[${spConfig.name}] ERROR: ${msg}`);
+      publisher.setStatus(`Error: ${msg}`);
       log("Retrying in 60s...");
       await clock.sleep(60_000);
     }

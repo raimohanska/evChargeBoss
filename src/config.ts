@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, renameSync, existsSync } from "fs";
 import { z } from "zod";
 import { EvChargingConfig } from "./ev-charging/config.ts";
 import { ElectricityConfig, SolarConfig } from "./electricity/config.ts";
@@ -47,7 +47,7 @@ const Config = z.strictObject({
 
 export type Config = z.infer<typeof Config>;
 
-function getConfigPath(): string {
+export function getConfigPath(): string {
   if (process.env.CONFIG_FILE) return process.env.CONFIG_FILE;
   const idx = process.argv.indexOf("--config");
   if (idx !== -1 && process.argv[idx + 1]) return process.argv[idx + 1];
@@ -60,6 +60,20 @@ function getConfigPath(): string {
       "\n   and edit it to configure your system before running for real.\n",
   );
   return "config-example.json";
+}
+
+/**
+ * Atomically writes config to disk by writing to a tmp file then renaming.
+ * If the path resolves to config-example.json, the write is skipped.
+ */
+export function writeConfigAtomically(configPath: string, config: Config): void {
+  if (configPath.endsWith("config-example.json")) {
+    console.warn("[Config] Refusing to overwrite config-example.json — changes not persisted.");
+    return;
+  }
+  const tmp = `${configPath}.tmp`;
+  writeFileSync(tmp, JSON.stringify(config, null, 2) + "\n", "utf8");
+  renameSync(tmp, configPath);
 }
 
 export function loadConfig(): Config {

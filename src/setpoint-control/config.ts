@@ -17,6 +17,8 @@ export type RoomTemperatureConfig = z.infer<typeof RoomTemperatureConfig>;
 export const SetpointControlConfig = z.strictObject({
   /** Human-readable name used in log messages, e.g. "Water Heater". */
   name: z.string(),
+  /** When false, automation is disabled and no setpoint commands are published. Defaults to true. */
+  enabled: z.boolean().optional(),
   setpointDefault: z.number(),
   setpointCheap: z.number(),
   setpointExpensive: z.number().optional(),
