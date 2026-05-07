@@ -20,6 +20,7 @@ export const STATUS = {
       ? `Charging finished at ${kwh.toFixed(1)} kWh`
       : "Charging finished",
   chargePaused: (next: string) => `Charge paused, next slot at ${next}`,
+  heatingHold: "Charging paused (heating peak)",
   error: (msg: string) => msg,
 } as const;
 

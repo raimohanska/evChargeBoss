@@ -65,10 +65,11 @@ export class MqttRelaySimulator {
 
   private startEmittingPower(): void {
     if (this.powerTimer) return; // already stopped (OFF came in during delay)
+    const { powerTopic, powerField } = this.mqttConfig;
     this.powerTimer = setInterval(() => {
       this.client.publish(
-        this.mqttConfig.powerTopic,
-        JSON.stringify({ [this.mqttConfig.powerField]: 3000 }),
+        powerTopic,
+        powerField !== undefined ? JSON.stringify({ [powerField]: 3000 }) : "3000",
       );
     }, 100);
   }
@@ -81,7 +82,9 @@ export class MqttRelaySimulator {
     // Emit zero watts so any active watt-listener sees the charger is off.
     this.client.publish(
       this.mqttConfig.powerTopic,
-      JSON.stringify({ [this.mqttConfig.powerField]: 0 }),
+      this.mqttConfig.powerField !== undefined
+        ? JSON.stringify({ [this.mqttConfig.powerField]: 0 })
+        : "0",
     );
   }
 

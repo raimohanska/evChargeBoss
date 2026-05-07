@@ -87,9 +87,15 @@ export class MqttRelaySimulator {
     this.relayOnSince = this.clock.now();
     const { powerTopic, powerField, energyField } = this.mqttConfig;
     const publish = () => {
-      const payload: Record<string, number> = { [powerField]: 3000 };
-      if (energyField) payload[energyField] = this.totalEnergyKwh;
-      this.client.publish(powerTopic, JSON.stringify(payload));
+      let msgStr: string;
+      if (powerField !== undefined) {
+        const payload: Record<string, number> = { [powerField]: 3000 };
+        if (energyField) payload[energyField] = this.totalEnergyKwh;
+        msgStr = JSON.stringify(payload);
+      } else {
+        msgStr = "3000";
+      }
+      this.client.publish(powerTopic, msgStr);
     };
     // Set timer first so the guard in stopEmittingPower can clear it before
     // the repeated publish fires.  Publish once immediately so waitForPlugIn
@@ -114,7 +120,9 @@ export class MqttRelaySimulator {
     // Emit zero watts so any active watt-listener sees the charger is off.
     this.client.publish(
       this.mqttConfig.powerTopic,
-      JSON.stringify({ [this.mqttConfig.powerField]: 0 }),
+      this.mqttConfig.powerField !== undefined
+        ? JSON.stringify({ [this.mqttConfig.powerField]: 0 })
+        : "0",
     );
   }
 

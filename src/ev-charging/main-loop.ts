@@ -250,6 +250,7 @@ export async function runSession(
       publisher,
       signal: replanController.signal,
       wattsSource: session.wattsSource,
+      holdSource: session.holdSource,
       prevChargedKwh: chargedKwh,
       powerThresholdW: config.evCharging.mqtt?.powerThresholdW ?? 10,
       powerKw,

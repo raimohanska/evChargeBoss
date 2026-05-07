@@ -19,6 +19,12 @@ export interface WattsSource {
   subscribe(cb: (update: WattsUpdate) => void): () => void;
 }
 
+// Emits the current "held" state immediately on subscribe, then on every change.
+// When held is true the relay should be kept OFF regardless of the charge schedule.
+export interface HoldSource {
+  subscribe(cb: (held: boolean) => void): () => void;
+}
+
 // A session encapsulates how to wait for "ready to charge" and which driver to use.
 // waitForStart() resolves when it is time to plan and begin charging.
 // It returns the detected charging power in kW (measured from the relay during plug-in).
@@ -26,6 +32,7 @@ export interface ChargingSession {
   waitForStart(): Promise<number>;
   driver: ChargerDriver;
   wattsSource?: WattsSource;
+  holdSource?: HoldSource;
   end(): void;
 }
 
@@ -45,6 +52,7 @@ export interface RunSlotParams {
   publisher: Publisher | undefined;
   signal: CancelSignal | undefined;
   wattsSource: WattsSource | undefined;
+  holdSource: HoldSource | undefined;
   prevChargedKwh: number;
   powerThresholdW: number;
   powerKw: number;
@@ -70,6 +78,7 @@ export async function runSlot({
   publisher,
   signal,
   wattsSource,
+  holdSource,
   prevChargedKwh,
   powerThresholdW,
   powerKw,
@@ -89,6 +98,8 @@ export async function runSlot({
   let chargeActive = false;
   let carFinished = false;
   let lastSessionKwh: number | undefined = undefined;
+  let isHeld = false;
+  let relayOn = false;
 
   const unsubWatts = slot.charge
     ? wattsSource?.subscribe(({ watts, energyKwh }) => {
@@ -103,37 +114,61 @@ export async function runSlot({
         if (watts > powerThresholdW) {
           chargeActive = true;
           publisher.setStatus(STATUS.charging(localTimeShort(runEnd)));
-        } else if (chargeActive) {
+        } else if (chargeActive && !isHeld) {
           carFinished = true;
           publisher.setStatus(STATUS.chargingFinished(lastSessionKwh));
         }
       })
     : undefined;
 
-  // Set initial status before sending the relay command.  A retained MQTT
-  // message on powerTopic is not required: the persistent msgHandler in
-  // makeMqttSession() ensures live updates reach wattsListeners without
-  // relying on broker retain.  Between consecutive charge slots the relay is
-  // always sent OFF first, so the retained reading (if any) will already be
-  // 0 W and the status correctly starts as waitingForChargingToStart.
-  if (slot.charge && publisher) {
-    publisher.setStatus(
-      wattsSource
-        ? STATUS.waitingForChargingToStart
-        : STATUS.charging(localTimeShort(chargeRunEnd ?? slot.end)),
-    );
+  // When holdSource is present for a charge slot it fires immediately with the
+  // current held state, driving both the initial relay command and any mid-slot
+  // hold/resume transitions.  Without holdSource the original await-send path is used.
+  let unsubHold: (() => void) | undefined;
+  if (slot.charge && holdSource) {
+    unsubHold = holdSource.subscribe((held) => {
+      isHeld = held;
+      if (held) {
+        relayOn = false;
+        driver.send(false).catch((err) => log(`[HOLD] relay OFF error: ${err}`));
+        publisher?.setStatus(STATUS.heatingHold);
+      } else {
+        relayOn = true;
+        driver.send(true).catch((err) => log(`[HOLD] relay ON error: ${err}`));
+        publisher?.setStatus(
+          wattsSource
+            ? STATUS.waitingForChargingToStart
+            : STATUS.charging(localTimeShort(chargeRunEnd ?? slot.end)),
+        );
+      }
+    });
+  } else {
+    // Set initial status before sending the relay command.  A retained MQTT
+    // message on powerTopic is not required: the persistent msgHandler in
+    // makeMqttSession() ensures live updates reach wattsListeners without
+    // relying on broker retain.  Between consecutive charge slots the relay is
+    // always sent OFF first, so the retained reading (if any) will already be
+    // 0 W and the status correctly starts as waitingForChargingToStart.
+    if (slot.charge && publisher) {
+      publisher.setStatus(
+        wattsSource
+          ? STATUS.waitingForChargingToStart
+          : STATUS.charging(localTimeShort(chargeRunEnd ?? slot.end)),
+      );
+    }
+    await driver.send(slot.charge);
+    if (slot.charge) relayOn = true;
   }
-
-  await driver.send(slot.charge);
 
   const msUntilEnd = slot.end.getTime() - clock.now().getTime();
   if (msUntilEnd > 0) await clock.sleep(msUntilEnd, signal);
 
-  if (signal?.aborted && slot.charge) {
+  if (signal?.aborted && relayOn) {
     await driver.send(false);
   }
 
   unsubWatts?.();
+  unsubHold?.();
 
   // Prefer relay-measured energy; fall back to a plan-based estimate.
   if (startEnergy !== null && lastEnergy !== null) {

@@ -48,7 +48,7 @@ test("wattsSource delivers updates after waitForStart() resolves", async () => {
   );
 
   const publishPower = (w: number) =>
-    helperClient.publish(mqtt.powerTopic, JSON.stringify({ [mqtt.powerField]: w }));
+    helperClient.publish(mqtt.powerTopic, JSON.stringify({ [mqtt.powerField!]: w }));
 
   // Continuously publish power so waitForPlugIn reliably receives a reading
   // above threshold regardless of subscribe timing — same approach used by

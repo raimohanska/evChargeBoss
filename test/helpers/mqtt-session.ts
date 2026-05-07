@@ -98,7 +98,13 @@ export async function startMqttSession(
   };
 
   const clock = makeClock(speedup, from);
-  const session = makeMqttSession(sessionClient, config.evCharging.mqtt!, publisher, clock);
+  const session = makeMqttSession(
+    sessionClient,
+    config.evCharging.mqtt!,
+    publisher,
+    clock,
+    config.evCharging.holdWhenHeating,
+  );
   const relay = new MqttRelaySimulator(relayClient, config.evCharging.mqtt!, clock);
 
   // Wait for the relay's charger-topic subscription to be confirmed (SUBACK) before

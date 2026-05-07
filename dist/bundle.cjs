@@ -32180,12 +32180,19 @@ init_polyfill();
 var Mode = external_exports.enum(["charge", "plan"]);
 var EvChargingMqttConfig = external_exports.strictObject({
   powerTopic: external_exports.string(),
-  powerField: external_exports.string(),
+  powerField: external_exports.string().optional(),
   powerThresholdW: external_exports.number(),
   energyField: external_exports.string().optional(),
   chargerTopic: external_exports.string(),
   onPayload: external_exports.string(),
   offPayload: external_exports.string()
+});
+var HoldWhenHeatingConfig = external_exports.object({
+  thresholdW: external_exports.number(),
+  mqtt: external_exports.object({
+    powerTopic: external_exports.string(),
+    powerField: external_exports.string().optional()
+  })
 });
 var EvChargingConfig = external_exports.strictObject({
   mode: Mode,
@@ -32193,7 +32200,8 @@ var EvChargingConfig = external_exports.strictObject({
   powerKw: external_exports.number().positive().optional(),
   targetTime: external_exports.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
   chargeNowHours: external_exports.number().positive().optional(),
-  mqtt: EvChargingMqttConfig.optional()
+  mqtt: EvChargingMqttConfig.optional(),
+  holdWhenHeating: HoldWhenHeatingConfig.optional()
 });
 
 // src/electricity/config.ts
@@ -32828,6 +32836,20 @@ var IS_TTY = process.stdout.isTTY === true;
 // src/ev-charging/mqtt-client.ts
 init_polyfill();
 var import_mqtt = __toESM(require_mqtt2(), 1);
+function parseWatts(message, powerField) {
+  try {
+    if (powerField !== void 0) {
+      const data = JSON.parse(message.toString());
+      const w = data[powerField];
+      return typeof w === "number" ? w : null;
+    } else {
+      const w = Number(message.toString());
+      return isNaN(w) ? null : w;
+    }
+  } catch {
+    return null;
+  }
+}
 async function connectMqtt(brokerConfig) {
   const { brokerUrl, username, password } = brokerConfig;
   return new Promise((resolve, reject) => {
@@ -32848,14 +32870,14 @@ async function connectMqtt(brokerConfig) {
 }
 async function waitForPlugIn(client, mqttConfig) {
   const { powerTopic, powerField, powerThresholdW } = mqttConfig;
-  log(`Waiting for car plug-in (${powerTopic}.${powerField} > ${powerThresholdW} W)...`);
+  const topicLabel = powerField ? `${powerTopic}.${powerField}` : powerTopic;
+  log(`Waiting for car plug-in (${topicLabel} > ${powerThresholdW} W)...`);
   return new Promise((resolve, reject) => {
     function onMessage(topic, message) {
       if (topic !== powerTopic) return;
       try {
-        const data = JSON.parse(message.toString());
-        const watts = data[powerField];
-        if (typeof watts === "number" && watts > powerThresholdW) {
+        const watts = parseWatts(message, powerField);
+        if (watts !== null && watts > powerThresholdW) {
           log(`Car detected: ${watts} W on ${topic}`);
           client.off("message", onMessage);
           client.off("error", onError);
@@ -32876,7 +32898,7 @@ async function waitForPlugIn(client, mqttConfig) {
     });
   });
 }
-function makeMqttSession(client, mqttConfig, _publisher, clock) {
+function makeMqttSession(client, mqttConfig, _publisher, clock, holdWhenHeating) {
   const { chargerTopic, onPayload, offPayload, powerTopic, powerField, energyField } = mqttConfig;
   const wattsListeners = [];
   const wattsSource = {
@@ -32891,12 +32913,22 @@ function makeMqttSession(client, mqttConfig, _publisher, clock) {
   const msgHandler = (topic, message) => {
     if (topic !== powerTopic) return;
     try {
-      const data = JSON.parse(message.toString());
-      const w = data[powerField];
-      if (typeof w !== "number") return;
-      const e = energyField ? data[energyField] : void 0;
-      for (const l of wattsListeners)
-        l({ watts: w, ...typeof e === "number" && { energyKwh: e } });
+      let w = null;
+      let e;
+      if (powerField !== void 0) {
+        const data = JSON.parse(message.toString());
+        const raw = data[powerField];
+        if (typeof raw !== "number") return;
+        w = raw;
+        if (energyField !== void 0) {
+          const eRaw = data[energyField];
+          if (typeof eRaw === "number") e = eRaw;
+        }
+      } else {
+        w = Number(message.toString());
+        if (isNaN(w)) return;
+      }
+      for (const l of wattsListeners) l({ watts: w, ...e !== void 0 && { energyKwh: e } });
     } catch {
     }
   };
@@ -32913,9 +32945,45 @@ function makeMqttSession(client, mqttConfig, _publisher, clock) {
       });
     }
   };
+  let heatingHeld = false;
+  const holdListeners = [];
+  let heatingCleanup;
+  const holdSource = holdWhenHeating ? {
+    subscribe(cb) {
+      cb(heatingHeld);
+      holdListeners.push(cb);
+      return () => {
+        const i = holdListeners.indexOf(cb);
+        if (i !== -1) holdListeners.splice(i, 1);
+      };
+    }
+  } : void 0;
+  if (holdWhenHeating) {
+    const { powerTopic: heatingTopic, powerField: heatingField } = holdWhenHeating.mqtt;
+    const { thresholdW } = holdWhenHeating;
+    const heatingMsgHandler = (topic, message) => {
+      if (topic !== heatingTopic) return;
+      const w = parseWatts(message, heatingField);
+      if (w === null) return;
+      const held = w > thresholdW;
+      if (held === heatingHeld) return;
+      heatingHeld = held;
+      log(`[HOLD] Heating power ${w} W \u2014 charging ${held ? "paused" : "resumed"}`);
+      for (const l of holdListeners) l(held);
+    };
+    client.on("message", heatingMsgHandler);
+    client.subscribe(heatingTopic, (err) => {
+      if (err) log(`[HOLD] Failed to subscribe to ${heatingTopic}: ${err}`);
+    });
+    heatingCleanup = () => {
+      client.off("message", heatingMsgHandler);
+      client.unsubscribe(heatingTopic);
+    };
+  }
   return {
     end() {
       client.off("message", msgHandler);
+      heatingCleanup == null ? void 0 : heatingCleanup();
       client.end();
     },
     async waitForStart() {
@@ -32940,7 +33008,8 @@ function makeMqttSession(client, mqttConfig, _publisher, clock) {
       }
     },
     driver,
-    wattsSource
+    wattsSource,
+    holdSource
   };
 }
 
@@ -32959,6 +33028,7 @@ var STATUS = {
   charging: (until) => `Charging until ${until}`,
   chargingFinished: (kwh) => kwh !== void 0 && kwh > 0 ? `Charging finished at ${kwh.toFixed(1)} kWh` : "Charging finished",
   chargePaused: (next) => `Charge paused, next slot at ${next}`,
+  heatingHold: "Charging paused (heating peak)",
   error: (msg) => msg
 };
 var DEVICE_ID = "evchargeboss";
@@ -33289,6 +33359,7 @@ async function runSlot({
   publisher,
   signal,
   wattsSource,
+  holdSource,
   prevChargedKwh,
   powerThresholdW,
   powerKw,
@@ -33303,6 +33374,8 @@ async function runSlot({
   let chargeActive = false;
   let carFinished = false;
   let lastSessionKwh = void 0;
+  let isHeld = false;
+  let relayOn = false;
   const unsubWatts = slot.charge ? wattsSource == null ? void 0 : wattsSource.subscribe(({ watts, energyKwh }) => {
     if (energyKwh !== void 0) {
       if (startEnergy === null) startEnergy = energyKwh;
@@ -33315,23 +33388,43 @@ async function runSlot({
     if (watts > powerThresholdW) {
       chargeActive = true;
       publisher.setStatus(STATUS.charging(localTimeShort(runEnd)));
-    } else if (chargeActive) {
+    } else if (chargeActive && !isHeld) {
       carFinished = true;
       publisher.setStatus(STATUS.chargingFinished(lastSessionKwh));
     }
   }) : void 0;
-  if (slot.charge && publisher) {
-    publisher.setStatus(
-      wattsSource ? STATUS.waitingForChargingToStart : STATUS.charging(localTimeShort(chargeRunEnd != null ? chargeRunEnd : slot.end))
-    );
+  let unsubHold;
+  if (slot.charge && holdSource) {
+    unsubHold = holdSource.subscribe((held) => {
+      isHeld = held;
+      if (held) {
+        relayOn = false;
+        driver.send(false).catch((err) => log(`[HOLD] relay OFF error: ${err}`));
+        publisher == null ? void 0 : publisher.setStatus(STATUS.heatingHold);
+      } else {
+        relayOn = true;
+        driver.send(true).catch((err) => log(`[HOLD] relay ON error: ${err}`));
+        publisher == null ? void 0 : publisher.setStatus(
+          wattsSource ? STATUS.waitingForChargingToStart : STATUS.charging(localTimeShort(chargeRunEnd != null ? chargeRunEnd : slot.end))
+        );
+      }
+    });
+  } else {
+    if (slot.charge && publisher) {
+      publisher.setStatus(
+        wattsSource ? STATUS.waitingForChargingToStart : STATUS.charging(localTimeShort(chargeRunEnd != null ? chargeRunEnd : slot.end))
+      );
+    }
+    await driver.send(slot.charge);
+    if (slot.charge) relayOn = true;
   }
-  await driver.send(slot.charge);
   const msUntilEnd = slot.end.getTime() - clock.now().getTime();
   if (msUntilEnd > 0) await clock.sleep(msUntilEnd, signal);
-  if ((signal == null ? void 0 : signal.aborted) && slot.charge) {
+  if ((signal == null ? void 0 : signal.aborted) && relayOn) {
     await driver.send(false);
   }
   unsubWatts == null ? void 0 : unsubWatts();
+  unsubHold == null ? void 0 : unsubHold();
   if (startEnergy !== null && lastEnergy !== null) {
     return { kwh: lastEnergy - startEnergy, carFinished };
   }
@@ -33573,6 +33666,7 @@ async function runSession(session, publisher, config3, from, clock, onSessionEnd
       publisher,
       signal: replanController.signal,
       wattsSource: session.wattsSource,
+      holdSource: session.holdSource,
       prevChargedKwh: chargedKwh,
       powerThresholdW: (_e = (_d = config3.evCharging.mqtt) == null ? void 0 : _d.powerThresholdW) != null ? _e : 10,
       powerKw,
@@ -33668,7 +33762,13 @@ async function runEvCharging(config3) {
   const mqttClient = await connectMqtt(config3.mqtt);
   const publisher = createPublisher(config3.evCharging, mqttClient);
   const clock = makeClock((_b = (_a7 = config3.test) == null ? void 0 : _a7.timeSpeedupFactor) != null ? _b : 1, initialFrom);
-  const session = makeMqttSession(mqttClient, config3.evCharging.mqtt, publisher, clock);
+  const session = makeMqttSession(
+    mqttClient,
+    config3.evCharging.mqtt,
+    publisher,
+    clock,
+    config3.evCharging.holdWhenHeating
+  );
   if (config3.influx) await checkInfluxHealth(config3.influx);
   const onSessionEnd = config3.influx ? (summary) => writeSessionSummary(config3.influx, summary) : void 0;
   let from = initialFrom;

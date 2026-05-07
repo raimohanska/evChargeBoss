@@ -17,6 +17,13 @@
       "chargerTopic": "zigbee2mqtt/ev-relay/set",
       "onPayload": "{\"state\":\"ON\"}",
       "offPayload": "{\"state\":\"OFF\"}"
+    },
+    "holdWhenHeating": {
+      "thresholdW": 3000,
+      "mqtt": {
+        "powerTopic": "zigbee2mqtt/heating-relay",
+        "powerField": "power"
+      }
     }
   },
   "solar": {

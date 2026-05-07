@@ -59,7 +59,13 @@ export async function runEvCharging(config: Config): Promise<void> {
   const mqttClient = await connectMqtt(config.mqtt);
   const publisher = createPublisher(config.evCharging, mqttClient);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
-  const session = makeMqttSession(mqttClient, config.evCharging.mqtt, publisher, clock);
+  const session = makeMqttSession(
+    mqttClient,
+    config.evCharging.mqtt,
+    publisher,
+    clock,
+    config.evCharging.holdWhenHeating,
+  );
 
   if (config.influx) await checkInfluxHealth(config.influx);
 
