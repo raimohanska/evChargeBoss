@@ -163,7 +163,8 @@ export async function runSetpointControl(
         getTemperature,
         publisher.isEnabled.bind(publisher),
         (slot, setpoint) => {
-          publisher.setCurrentSlot(slot.costTier, setpoint, localTimeShort(slot.start));
+          const until = localTimeShort(new Date(slot.start.getTime() + 15 * 60 * 1000));
+          publisher.setCurrentSlot(slot.costTier, slot.setpoint, setpoint, until);
         },
       );
     } catch (err) {

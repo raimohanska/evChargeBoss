@@ -268,9 +268,19 @@ export class SetpointStatusPublisher {
     this.pub(this.stateTopic("status"), text);
   }
 
-  setCurrentSlot(tier: CostTier, setpoint: number, until: string): void {
+  setCurrentSlot(
+    tier: CostTier,
+    plannedSetpoint: number,
+    actualSetpoint: number,
+    until: string,
+  ): void {
     const tierLabel = tier === "cheap" ? "cheap" : tier === "expensive" ? "expensive" : "normal";
-    this.setStatus(`Current slot: ${tierLabel} – setpoint ${setpoint} (until ${until})`);
+    const delta = Math.round((actualSetpoint - plannedSetpoint) * 10) / 10;
+    const adjustment =
+      delta !== 0 ? ` (planned ${plannedSetpoint}, ${delta > 0 ? "+" : ""}${delta} room temp)` : "";
+    this.setStatus(
+      `Current slot: ${tierLabel} – setpoint ${actualSetpoint}${adjustment} (until ${until})`,
+    );
   }
 
   // ─── Discovery initialisation ─────────────────────────────────────────────
@@ -302,7 +312,6 @@ export class SetpointStatusPublisher {
         payload_on: "ON",
         payload_off: "OFF",
         icon: "mdi:auto-mode",
-        entity_category: "config",
         device: this.device,
       }),
     );
@@ -336,7 +345,6 @@ export class SetpointStatusPublisher {
         max: def.max,
         step: def.step,
         icon: def.icon,
-        entity_category: "config",
         device: this.device,
       };
       if (def.unit) payload.unit_of_measurement = def.unit;
