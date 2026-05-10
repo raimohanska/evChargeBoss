@@ -22,6 +22,12 @@ export interface MqttTestSession {
   relay: MqttRelaySimulator;
   /** Publish a target-time change (HH:MM) via MQTT, triggering an immediate replan. */
   publishTargetTime(time: string): void;
+  /**
+   * Publish a heating power reading (watts) to the holdWhenHeating topic.
+   * Use this to trigger or release a hold during tests.
+   * No-op when holdWhenHeating is not configured in chargingOverrides.
+   */
+  publishHeatingPower(watts: number): void;
   /** Last charged energy (kWh) received from MQTT — 0 if none yet. */
   chargedEnergy(): number;
   /** Session summary captured from onSessionEnd — null until session completes. */
@@ -45,14 +51,35 @@ export async function startMqttSession(
   sessionOptions: { suppressPower?: boolean } = {},
 ): Promise<MqttTestSession> {
   // Isolate plan files per test session so tests don't interfere with each other.
-  process.env.PLANS_DIR = path.join(
-    os.tmpdir(),
-    `evchargeboss-test-plans-${process.pid}-${++_sessionCounter}`,
-  );
+  const sessionId = `${process.pid}-${++_sessionCounter}`;
+  process.env.PLANS_DIR = path.join(os.tmpdir(), `evchargeboss-test-plans-${sessionId}`);
   if (initialPlanData !== undefined) {
     writePlanFile(planFilePath("ev-charging", "2026-04-18T17-00-00"), initialPlanData);
   }
-  const config = makeTestConfig(chargingOverrides, mqttOverrides);
+
+  // Give every session its own unique MQTT topics for the charger relay and
+  // power readings.  This prevents zombie loops from failed/slow tests from
+  // bleeding relay commands into the next test's relay simulator.
+  const sessionMqttOverrides: Partial<MqttConfig> = {
+    powerTopic: `evchargeboss-test/power-${sessionId}`,
+    chargerTopic: `evchargeboss-test/charger-${sessionId}`,
+    ...mqttOverrides,
+  };
+  // Also unique-ify the holdWhenHeating topic when configured, for the same reason.
+  let sessionChargingOverrides = chargingOverrides;
+  if (chargingOverrides.holdWhenHeating) {
+    sessionChargingOverrides = {
+      ...chargingOverrides,
+      holdWhenHeating: {
+        ...chargingOverrides.holdWhenHeating,
+        mqtt: {
+          ...chargingOverrides.holdWhenHeating.mqtt,
+          powerTopic: `${chargingOverrides.holdWhenHeating.mqtt.powerTopic}-${sessionId}`,
+        },
+      },
+    };
+  }
+  const config = makeTestConfig(sessionChargingOverrides, sessionMqttOverrides);
 
   // Connect all three MQTT clients in parallel.
   const [sessionClient, relayClient, controlClient] = await Promise.all([
@@ -136,6 +163,14 @@ export async function startMqttSession(
     relay,
     publishTargetTime(time: string) {
       controlClient.publish(TARGET_TIME_SET_TOPIC, time);
+    },
+    publishHeatingPower(watts: number) {
+      const h = config.evCharging.holdWhenHeating;
+      if (!h) return;
+      const { powerTopic, powerField } = h.mqtt;
+      const payload =
+        powerField !== undefined ? JSON.stringify({ [powerField]: watts }) : String(watts);
+      controlClient.publish(powerTopic, payload);
     },
     chargedEnergy: () => _lastChargedEnergy,
     sessionSummary: () => _sessionSummary,
