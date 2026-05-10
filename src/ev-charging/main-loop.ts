@@ -2,7 +2,8 @@ import type { Config } from "../config.ts";
 import type { Slot } from "./types.ts";
 import type { SessionSummary } from "../influx.ts";
 import { z } from "zod";
-import { plan } from "./planner.ts";
+import { plan, planFallbackSlot } from "./planner.ts";
+import type { FallbackReason } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
 import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
 import { runSlot } from "./charger.ts";
@@ -99,6 +100,7 @@ export async function runSession(
 ): Promise<void> {
   cleanOldPlanFiles();
   let prevSlots: Slot[] | undefined;
+  let prevFallbackReason: FallbackReason | undefined;
   let sessionFile: string;
   let powerKw: number;
 
@@ -163,6 +165,7 @@ export async function runSession(
     let slots: Slot[];
     try {
       slots = await plan(now, targetDate, remainingKwh, powerKw, config, prevSlots === undefined);
+      prevFallbackReason = undefined; // plan succeeded — clear fallback state
       try {
         writePlanFile(sessionFile, {
           version: 1 as const,
@@ -182,6 +185,39 @@ export async function runSession(
       if (err instanceof IncompleteDataError && prevSlots !== undefined) {
         log(`Re-plan failed (${err.message}) — keeping current plan`);
         slots = prevSlots;
+      } else if (err instanceof IncompleteDataError) {
+        // No previous plan and spot prices are missing — run per-slot fallback.
+        const fallback = await planFallbackSlot(
+          clock.now(),
+          targetDate,
+          remainingKwh,
+          powerKw,
+          config,
+        );
+        if (fallback.reason !== prevFallbackReason) {
+          log(`[Fallback] ${fallback.details}`);
+          prevFallbackReason = fallback.reason;
+        }
+        if (fallback.charge && fallback.reason === "solar") {
+          publisher.setStatus(STATUS.chargingFreeSolar);
+          await session.driver.send(true);
+        } else if (fallback.charge && fallback.reason === "mustCharge") {
+          publisher.setStatus(STATUS.chargingNoSpotPrices);
+          await session.driver.send(true);
+        } else {
+          publisher.setStatus(STATUS.waitingForSpot);
+          await session.driver.send(false);
+        }
+        const msToSlotEnd = Math.max(0, fallback.slotEnd.getTime() - clock.now().getTime());
+        await clock.sleep(msToSlotEnd, replanController.signal);
+        if (fallback.charge && !replanController.signal.aborted) {
+          const kwh = powerKw * (msToSlotEnd / 3_600_000);
+          chargedKwh += kwh;
+          log(
+            `[Fallback] Charged ${kwh.toFixed(3)} kWh (${chargedKwh.toFixed(3)} kWh total so far)`,
+          );
+        }
+        continue;
       } else {
         throw err;
       }

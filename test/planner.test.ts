@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { plan } from "../src/ev-charging/planner.ts";
+import { plan, planFallbackSlot } from "../src/ev-charging/planner.ts";
 import { localDateTimeString } from "../src/utils/date-time-format.ts";
 import { loadConfig } from "../src/config.ts";
 import { parseTargetTime } from "../src/ev-charging/main-loop.ts";
@@ -108,4 +108,44 @@ test("17:00 session, target=21:00 tonight → 7 cheap evening slots starting at 
     "all slots on Apr 18",
   );
   assert.equal(chargeSlots[0].start.getHours(), 17, "first slot at 17:00 (session start)");
+});
+
+// ── planFallbackSlot tests ────────────────────────────────────────────────────
+//
+// Uses the same CACHE_DIR fixture. 2026-04-19 solar fixture: 3537 W at 10:00,
+// 96 W at 06:00. Charger power = 3 kW. treeShadingSchedule starts at 13:00,
+// so at 10:00 shading factor = 1.0.
+
+test("fallback: solar covers load → reason 'solar'", async () => {
+  // 10:00 on Apr 19: solar 3537 W >> 3 kW charger → gridFraction = 0
+  const now = new Date("2026-04-19T10:00:00");
+  const targetDate = new Date("2026-04-19T12:00:00");
+  const decision = await planFallbackSlot(now, targetDate, 3, POWER_KW, CONFIG);
+  assert.equal(decision.reason, "solar");
+  assert.equal(decision.charge, true);
+  assert.equal(decision.slotEnd.getTime(), new Date("2026-04-19T10:15:00").getTime());
+});
+
+test("fallback: not enough time to reach target → reason 'mustCharge'", async () => {
+  // 14:00 on Apr 18 (solar 2125 W but that only shifts the grid fraction; with only
+  // 2 slots to a 14:30 target and needing 4 slots for 3 kWh → mustCharge).
+  // Use 06:00 Apr 18 where solar is 0 W to keep gridFraction = 1 (pure grid).
+  const now = new Date("2026-04-18T06:00:00");
+  const targetDate = new Date("2026-04-18T06:30:00"); // only 2 slots ahead
+  const remainingKwh = 3; // needs ceil(3/0.75) = 4 slots, only 2 available
+  const decision = await planFallbackSlot(now, targetDate, remainingKwh, POWER_KW, CONFIG);
+  assert.equal(decision.reason, "mustCharge");
+  assert.equal(decision.charge, true);
+});
+
+test("fallback: spot prices missing but plenty of time → reason 'waiting'", async () => {
+  // 06:00 on Apr 18: solar = 0 W, gridFraction = 1.
+  // Target is 12:00 next day → 120 slots to target, need 4 for 3 kWh → waiting.
+  const now = new Date("2026-04-18T06:00:00");
+  const targetDate = new Date("2026-04-19T12:00:00");
+  const remainingKwh = 3; // needs 4 slots, 120 available → plenty of slack
+  const decision = await planFallbackSlot(now, targetDate, remainingKwh, POWER_KW, CONFIG);
+  assert.equal(decision.reason, "waiting");
+  assert.equal(decision.charge, false);
+  assert.ok(typeof decision.details === "string" && decision.details.length > 0);
 });

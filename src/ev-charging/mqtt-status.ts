@@ -12,6 +12,8 @@ export const STATUS = {
   mqttError: "MQTT connection error",
   idle: "Idle",
   replanning: "Re-planning...",
+  chargingFreeSolar: "Charging while waiting for spot prices. 100% solar.",
+  chargingNoSpotPrices: "WARNING: Charging while spot prices unavailable",
   plannedChargeStart: (time: string) => `Planned charge start at ${time}`,
   waitingForChargingToStart: "Waiting for charging to start",
   charging: (until: string) => `Charging until ${until}`,
