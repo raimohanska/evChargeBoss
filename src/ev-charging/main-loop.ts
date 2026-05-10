@@ -202,7 +202,31 @@ export async function runSession(
           log(`[Fallback] ${fallback.details}`);
           prevFallbackReason = fallback.reason;
         }
-        if (fallback.charge && fallback.reason === "solar") {
+
+        let fallbackHeld = false;
+        let unsubFallbackHold: (() => void) | undefined;
+        if (fallback.charge && session.holdSource) {
+          // Subscribe to hold source; callback fires immediately with current state,
+          // then on every change, so the relay is kept in sync throughout the slot.
+          unsubFallbackHold = session.holdSource.subscribe((held) => {
+            fallbackHeld = held;
+            if (held) {
+              session.driver
+                .send(false)
+                .catch((err) => log(`[HOLD] fallback relay OFF error: ${err}`));
+              publisher.setStatus(STATUS.heatingHold);
+            } else {
+              session.driver
+                .send(true)
+                .catch((err) => log(`[HOLD] fallback relay ON error: ${err}`));
+              publisher.setStatus(
+                fallback.reason === "solar"
+                  ? STATUS.chargingFreeSolar
+                  : STATUS.chargingNoSpotPrices,
+              );
+            }
+          });
+        } else if (fallback.charge && fallback.reason === "solar") {
           publisher.setStatus(STATUS.chargingFreeSolar);
           await session.driver.send(true);
         } else if (fallback.charge && fallback.reason === "mustCharge") {
@@ -213,8 +237,12 @@ export async function runSession(
           await session.driver.send(false);
         }
         const msToSlotEnd = Math.max(0, fallback.slotEnd.getTime() - clock.now().getTime());
-        await clock.sleep(msToSlotEnd, replanController.signal);
-        if (fallback.charge && !replanController.signal.aborted) {
+        try {
+          await clock.sleep(msToSlotEnd, replanController.signal);
+        } finally {
+          unsubFallbackHold?.();
+        }
+        if (fallback.charge && !replanController.signal.aborted && !fallbackHeld) {
           const kwh = powerKw * (msToSlotEnd / 3_600_000);
           chargedKwh += kwh;
           log(
