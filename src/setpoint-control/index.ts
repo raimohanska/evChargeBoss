@@ -159,7 +159,12 @@ export async function runSetpointControlLoop(
 
   const { commandTopic } = spConfig.mqtt;
 
+  let lastTempAdjustmentMsg: string | null = null;
+
   for (const slot of slots) {
+    // Skip slots that have already ended (relevant when resuming a persisted plan).
+    if (clock.now().getTime() >= slot.end.getTime()) continue;
+
     // Poll every 1 second while waiting for slot start — allows immediate cancellation.
     const slotStartMs = slot.start.getTime();
     while (clock.now().getTime() < slotStartMs) {
@@ -177,26 +182,23 @@ export async function runSetpointControlLoop(
       const low = rtConfig.targetTemperature - rtConfig.allowedDeviationDown;
       const high = rtConfig.targetTemperature + rtConfig.allowedDeviationUp;
 
+      let tempAdjustmentMsg: string | null = null;
       if (temp === undefined) {
-        log(
-          `[${spConfig.name}] Room temperature unavailable at ${localTimeShort(slot.start)}, using planned setpoint ${setpoint}`,
-        );
+        tempAdjustmentMsg = `[${spConfig.name}] Room temperature unavailable at ${localTimeShort(slot.start)}, using planned setpoint ${setpoint}`;
       } else if (temp < low) {
         const adjusted = setpoint + rtConfig.influence;
-        log(
-          `[${spConfig.name}] Room ${temp.toFixed(1)}°C below range (${low.toFixed(1)}–${high.toFixed(1)}°C), raising setpoint by ${rtConfig.influence}: ${setpoint} → ${adjusted}`,
-        );
+        tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C below range (${low.toFixed(1)}–${high.toFixed(1)}°C), raising setpoint by ${rtConfig.influence}: ${setpoint} → ${adjusted}`;
         setpoint = adjusted;
       } else if (temp > high) {
         const adjusted = setpoint - rtConfig.influence;
-        log(
-          `[${spConfig.name}] Room ${temp.toFixed(1)}°C above range (${low.toFixed(1)}–${high.toFixed(1)}°C), lowering setpoint by ${rtConfig.influence}: ${setpoint} → ${adjusted}`,
-        );
+        tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C above range (${low.toFixed(1)}–${high.toFixed(1)}°C), lowering setpoint by ${rtConfig.influence}: ${setpoint} → ${adjusted}`;
         setpoint = adjusted;
       } else {
-        log(
-          `[${spConfig.name}] Room ${temp.toFixed(1)}°C within range (${low.toFixed(1)}–${high.toFixed(1)}°C), no adjustment to planned setpoint ${setpoint}`,
-        );
+        tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C within range (${low.toFixed(1)}–${high.toFixed(1)}°C), no adjustment to planned setpoint ${setpoint}`;
+      }
+      if (tempAdjustmentMsg !== lastTempAdjustmentMsg) {
+        log(tempAdjustmentMsg);
+        lastTempAdjustmentMsg = tempAdjustmentMsg;
       }
 
       if (spConfig.setpointMin !== undefined && setpoint < spConfig.setpointMin) {
