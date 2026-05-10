@@ -62,6 +62,79 @@ export interface RunSlotParams {
 }
 
 /**
+ * Wraps a ChargerDriver with heating-hold logic.
+ *
+ * When the holdSource fires held=true while charging is requested the relay is
+ * turned OFF (or kept OFF) with a log message.  When heating releases the
+ * relay is turned back ON.  No relay commands are emitted when the relay was
+ * already off and charging had not been requested.
+ *
+ * Call dispose() when the slot ends to unsubscribe from the holdSource.
+ */
+export function makeHoldAwareDriver(
+  inner: ChargerDriver,
+  holdSource: HoldSource,
+  callbacks: {
+    /** Called when heating blocks or pauses a charge (relay goes/stays OFF). */
+    onHeld(): void;
+    /** Called when heating releases and the relay is turned back ON. */
+    onReleased(): void;
+  },
+): { driver: ChargerDriver; readonly isHeld: boolean; dispose(): void } {
+  let requestedOn = false;
+  let isHeld = false;
+  let actuallyOn = false;
+
+  const dispose = holdSource.subscribe((held) => {
+    isHeld = held;
+    if (held) {
+      if (actuallyOn) {
+        log(`[HOLD] Heating — charging paused`);
+        actuallyOn = false;
+        inner.send(false).catch((err) => log(`[HOLD] relay OFF error: ${err}`));
+        callbacks.onHeld();
+      }
+      // Relay already off and not requested — no command, no log.
+    } else {
+      if (requestedOn) {
+        log(`[HOLD] Heating released — resuming charge`);
+        actuallyOn = true;
+        inner.send(true).catch((err) => log(`[HOLD] relay ON error: ${err}`));
+        callbacks.onReleased();
+      }
+    }
+  });
+
+  const driver: ChargerDriver = {
+    async send(on: boolean): Promise<void> {
+      requestedOn = on;
+      if (!on) {
+        if (actuallyOn) {
+          actuallyOn = false;
+          await inner.send(false);
+        }
+      } else {
+        if (isHeld) {
+          log(`[HOLD] Would start charging, but heating is on — pausing`);
+          callbacks.onHeld();
+        } else {
+          actuallyOn = true;
+          await inner.send(true);
+        }
+      }
+    },
+  };
+
+  return {
+    driver,
+    get isHeld() {
+      return isHeld;
+    },
+    dispose,
+  };
+}
+
+/**
  * Executes a single slot in the charging schedule.
  *
  * The caller is responsible for sleeping to the slot start time before
@@ -100,8 +173,28 @@ export async function runSlot({
   let chargeActive = false;
   let carFinished = false;
   let lastSessionKwh: number | undefined = undefined;
-  let isHeld = false;
   let relayOn = false;
+
+  // For charge slots with a holdSource, wrap the driver so that heating hold
+  // is handled centrally with correct logging in all transitions.
+  const holdHandle =
+    slot.charge && holdSource
+      ? makeHoldAwareDriver(driver, holdSource, {
+          onHeld() {
+            relayOn = false;
+            publisher?.setStatus(STATUS.heatingHold);
+          },
+          onReleased() {
+            relayOn = true;
+            publisher?.setStatus(
+              wattsSource
+                ? STATUS.waitingForChargingToStart
+                : STATUS.charging(localTimeShort(chargeRunEnd ?? slot.end)),
+            );
+          },
+        })
+      : undefined;
+  const effectiveDriver = holdHandle ? holdHandle.driver : driver;
 
   const unsubWatts = slot.charge
     ? wattsSource?.subscribe(({ watts, energyKwh }) => {
@@ -116,58 +209,42 @@ export async function runSlot({
         if (watts > powerThresholdW) {
           chargeActive = true;
           publisher.setStatus(STATUS.charging(localTimeShort(runEnd)));
-        } else if (chargeActive && !isHeld) {
+        } else if (chargeActive && !(holdHandle?.isHeld ?? false)) {
           carFinished = true;
           publisher.setStatus(STATUS.chargingFinished(lastSessionKwh));
         }
       })
     : undefined;
 
-  // When holdSource is present for a charge slot, it fires immediately with the
-  // current held state, driving both the initial relay command and any mid-slot
-  // hold/resume transitions.  Without holdSource the original await-send path
-  // is used.
-  let unsubHold: (() => void) | undefined;
-  if (slot.charge && holdSource) {
-    unsubHold = holdSource.subscribe((held) => {
-      isHeld = held;
-      if (held) {
-        relayOn = false;
-        driver.send(false).catch((err) => log(`[HOLD] relay OFF error: ${err}`));
-        publisher?.setStatus(STATUS.heatingHold);
-      } else {
-        relayOn = true;
-        driver.send(true).catch((err) => log(`[HOLD] relay ON error: ${err}`));
-        publisher?.setStatus(
+  if (slot.charge) {
+    // Send ON through the effective driver (hold-aware when holdSource is present).
+    // The hold-aware driver blocks the relay and logs when heating is active;
+    // mid-slot hold/resume is handled by the holdSource subscription inside it.
+    // A retained MQTT message on powerTopic is not required: the persistent
+    // msgHandler in makeMqttSession() ensures live updates reach wattsListeners
+    // without relying on broker retain.  Between consecutive charge slots the
+    // relay is always sent OFF first, so the retained reading will already be
+    // 0 W and the status correctly starts as waitingForChargingToStart.
+    await effectiveDriver.send(true);
+    if (!(holdHandle?.isHeld ?? false)) {
+      relayOn = true;
+      if (publisher) {
+        publisher.setStatus(
           wattsSource
             ? STATUS.waitingForChargingToStart
             : STATUS.charging(localTimeShort(chargeRunEnd ?? slot.end)),
         );
       }
-    });
-  } else {
-    // Set initial status before sending the relay command.  A retained MQTT
-    // message on powerTopic is not required: the persistent msgHandler in
-    // makeMqttSession() ensures live updates reach wattsListeners without
-    // relying on broker retain.  Between consecutive charge slots the relay is
-    // always sent OFF first, so the retained reading (if any) will already be
-    // 0 W and the status correctly starts as waitingForChargingToStart.
-    if (slot.charge && publisher) {
-      publisher.setStatus(
-        wattsSource
-          ? STATUS.waitingForChargingToStart
-          : STATUS.charging(localTimeShort(chargeRunEnd ?? slot.end)),
-      );
     }
-    await driver.send(slot.charge);
-    if (slot.charge) relayOn = true;
+  } else {
+    await driver.send(false);
   }
 
   const msUntilEnd = slot.end.getTime() - clock.now().getTime();
   if (msUntilEnd > 0) await clock.sleep(msUntilEnd, signal);
 
   if (signal?.aborted && relayOn) {
-    await driver.send(false);
+    await effectiveDriver.send(false);
   }
 
   try {
@@ -185,6 +262,6 @@ export async function runSlot({
     return { kwh: powerKw * (elapsedMs / 3_600_000), carFinished };
   } finally {
     unsubWatts?.();
-    unsubHold?.();
+    holdHandle?.dispose();
   }
 }

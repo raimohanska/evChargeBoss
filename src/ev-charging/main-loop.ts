@@ -6,7 +6,7 @@ import { plan, planFallbackSlot } from "./planner.ts";
 import type { FallbackReason } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
 import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
-import { runSlot } from "./charger.ts";
+import { runSlot, makeHoldAwareDriver } from "./charger.ts";
 import { STATUS } from "./mqtt-status.ts";
 import type { Publisher } from "./mqtt-status.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
@@ -204,34 +204,31 @@ export async function runSession(
         }
 
         let fallbackHeld = false;
-        let unsubFallbackHold: (() => void) | undefined;
-        if (fallback.charge && session.holdSource) {
-          // Subscribe to hold source; callback fires immediately with current state,
-          // then on every change, so the relay is kept in sync throughout the slot.
-          unsubFallbackHold = session.holdSource.subscribe((held) => {
-            fallbackHeld = held;
-            if (held) {
-              session.driver
-                .send(false)
-                .catch((err) => log(`[HOLD] fallback relay OFF error: ${err}`));
-              publisher.setStatus(STATUS.heatingHold);
-            } else {
-              session.driver
-                .send(true)
-                .catch((err) => log(`[HOLD] fallback relay ON error: ${err}`));
-              publisher.setStatus(
-                fallback.reason === "solar"
-                  ? STATUS.chargingFreeSolar
-                  : STATUS.chargingNoSpotPrices,
-              );
+        let fallbackHoldHandle: ReturnType<typeof makeHoldAwareDriver> | undefined;
+        const chargeStatus =
+          fallback.reason === "solar" ? STATUS.chargingFreeSolar : STATUS.chargingNoSpotPrices;
+        if (fallback.charge) {
+          if (session.holdSource) {
+            // Use the hold-aware driver so that logging and relay management
+            // are handled the same way as in regular charge slots.
+            fallbackHoldHandle = makeHoldAwareDriver(session.driver, session.holdSource, {
+              onHeld() {
+                fallbackHeld = true;
+                publisher.setStatus(STATUS.heatingHold);
+              },
+              onReleased() {
+                fallbackHeld = false;
+                publisher.setStatus(chargeStatus);
+              },
+            });
+            await fallbackHoldHandle.driver.send(true);
+            if (!fallbackHoldHandle.isHeld) {
+              publisher.setStatus(chargeStatus);
             }
-          });
-        } else if (fallback.charge && fallback.reason === "solar") {
-          publisher.setStatus(STATUS.chargingFreeSolar);
-          await session.driver.send(true);
-        } else if (fallback.charge && fallback.reason === "mustCharge") {
-          publisher.setStatus(STATUS.chargingNoSpotPrices);
-          await session.driver.send(true);
+          } else {
+            publisher.setStatus(chargeStatus);
+            await session.driver.send(true);
+          }
         } else {
           publisher.setStatus(STATUS.waitingForSpot);
           await session.driver.send(false);
@@ -240,7 +237,7 @@ export async function runSession(
         try {
           await clock.sleep(msToSlotEnd, replanController.signal);
         } finally {
-          unsubFallbackHold?.();
+          fallbackHoldHandle?.dispose();
         }
         if (fallback.charge && !replanController.signal.aborted && !fallbackHeld) {
           const kwh = powerKw * (msToSlotEnd / 3_600_000);

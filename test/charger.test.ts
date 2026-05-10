@@ -4,8 +4,8 @@
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { runSlot } from "../src/ev-charging/charger.ts";
-import type { HoldSource } from "../src/ev-charging/charger.ts";
+import { runSlot, makeHoldAwareDriver } from "../src/ev-charging/charger.ts";
+import type { HoldSource, ChargerDriver } from "../src/ev-charging/charger.ts";
 import type { Slot } from "../src/ev-charging/types.ts";
 import { STATUS, shouldSuppressStatus } from "../src/ev-charging/mqtt-status.ts";
 import { makeClock, Canceller } from "../src/utils/timing-utils.ts";
@@ -74,7 +74,7 @@ function makeSlot(overrides: Partial<Slot> = {}): Slot {
 }
 
 describe("runSlot — heating hold", () => {
-  test("hold pauses relay even when canHold=false (heating active from slot start)", async () => {
+  test("hold active from start: relay never turns ON and no spurious OFF command either", async () => {
     const slot = makeSlot({ canHold: false });
     const clock = makeClock(SPEEDUP, slot.start);
 
@@ -107,13 +107,11 @@ describe("runSlot — heating hold", () => {
       clock,
     });
 
-    assert.ok(
-      commands.includes(false),
-      `Expected relay OFF during heating hold (canHold=false). Commands: ${JSON.stringify(commands)}`,
-    );
-    assert.ok(
-      !commands.includes(true),
-      `Relay should NOT have been turned ON (heating was on the whole slot). Commands: ${JSON.stringify(commands)}`,
+    // Relay was never on, so no commands should have been sent at all.
+    assert.deepEqual(
+      commands,
+      [],
+      `Expected no relay commands (relay was never on). Got: ${JSON.stringify(commands)}`,
     );
   });
 
@@ -197,10 +195,160 @@ describe("runSlot — heating hold", () => {
       clock,
     });
 
-    assert.ok(
-      commands.includes(false),
-      `Expected relay OFF for canHold=true slot too. Commands: ${JSON.stringify(commands)}`,
+    // Relay was never on, so no commands should have been sent.
+    assert.deepEqual(
+      commands,
+      [],
+      `Expected no relay commands (relay was never on). Got: ${JSON.stringify(commands)}`,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// makeHoldAwareDriver — unit tests
+// ---------------------------------------------------------------------------
+
+function makeDriver(): { commands: boolean[]; driver: ChargerDriver } {
+  const commands: boolean[] = [];
+  return {
+    commands,
+    driver: {
+      async send(on: boolean) {
+        commands.push(on);
+      },
+    },
+  };
+}
+
+function makeHoldSource(initialHeld: boolean): {
+  holdSource: HoldSource;
+  fire(held: boolean): void;
+} {
+  let cb: ((held: boolean) => void) | null = null;
+  const holdSource: HoldSource = {
+    subscribe(callback) {
+      cb = callback;
+      callback(initialHeld);
+      return () => {
+        cb = null;
+      };
+    },
+  };
+  return { holdSource, fire: (held) => cb?.(held) };
+}
+
+describe("makeHoldAwareDriver", () => {
+  test("send(true) when not held: relay turns ON", async () => {
+    const { commands, driver } = makeDriver();
+    const { holdSource } = makeHoldSource(false);
+    const h = makeHoldAwareDriver(driver, holdSource, { onHeld() {}, onReleased() {} });
+    await h.driver.send(true);
+    assert.deepEqual(commands, [true]);
+    h.dispose();
+  });
+
+  test("send(true) when held from start: no relay command at all", async () => {
+    const { commands, driver } = makeDriver();
+    const { holdSource } = makeHoldSource(true);
+    const h = makeHoldAwareDriver(driver, holdSource, { onHeld() {}, onReleased() {} });
+    await h.driver.send(true);
+    // Relay was never on — no ON command and no spurious OFF command.
+    assert.deepEqual(commands, [], `Expected no relay commands, got: ${JSON.stringify(commands)}`);
+    h.dispose();
+  });
+
+  test("send(false) when held: no relay command (relay already off)", async () => {
+    const { commands, driver } = makeDriver();
+    const { holdSource } = makeHoldSource(true);
+    const h = makeHoldAwareDriver(driver, holdSource, { onHeld() {}, onReleased() {} });
+    await h.driver.send(false);
+    assert.deepEqual(commands, [], `Expected no relay command, got: ${JSON.stringify(commands)}`);
+    h.dispose();
+  });
+
+  test("hold fires while relay not requested: no relay command, no callback", () => {
+    const { commands, driver } = makeDriver();
+    const { holdSource, fire } = makeHoldSource(false);
+    let heldCalls = 0;
+    const h = makeHoldAwareDriver(driver, holdSource, {
+      onHeld() {
+        heldCalls++;
+      },
+      onReleased() {},
+    });
+    fire(true); // heating on, but send(true) was never called
+    assert.deepEqual(commands, [], "Expected no relay command when not charging");
+    assert.equal(heldCalls, 0, "Expected no onHeld callback when not charging");
+    h.dispose();
+  });
+
+  test("hold starts mid-charge: relay turns OFF and onHeld is called", async () => {
+    const { commands, driver } = makeDriver();
+    const { holdSource, fire } = makeHoldSource(false);
+    let heldCalls = 0;
+    const h = makeHoldAwareDriver(driver, holdSource, {
+      onHeld() {
+        heldCalls++;
+      },
+      onReleased() {},
+    });
+    await h.driver.send(true); // relay ON
+    fire(true); // heating starts
+    assert.deepEqual(
+      commands,
+      [true, false],
+      `Expected ON then OFF, got: ${JSON.stringify(commands)}`,
+    );
+    assert.equal(heldCalls, 1);
+    h.dispose();
+  });
+
+  test("hold releases after pause: relay turns back ON and onReleased is called", async () => {
+    const { commands, driver } = makeDriver();
+    const { holdSource, fire } = makeHoldSource(false);
+    let releasedCalls = 0;
+    const h = makeHoldAwareDriver(driver, holdSource, {
+      onHeld() {},
+      onReleased() {
+        releasedCalls++;
+      },
+    });
+    await h.driver.send(true); // relay ON
+    fire(true); // heating starts → relay OFF
+    fire(false); // heating ends → relay back ON
+    assert.deepEqual(
+      commands,
+      [true, false, true],
+      `Expected ON→OFF→ON, got: ${JSON.stringify(commands)}`,
+    );
+    assert.equal(releasedCalls, 1);
+    h.dispose();
+  });
+
+  test("hold fires while held from start, then releases: relay turns ON", async () => {
+    const { commands, driver } = makeDriver();
+    const { holdSource, fire } = makeHoldSource(true);
+    const h = makeHoldAwareDriver(driver, holdSource, { onHeld() {}, onReleased() {} });
+    await h.driver.send(true); // heating on → no ON sent
+    fire(false); // heating ends → relay should turn ON
+    assert.deepEqual(
+      commands,
+      [true],
+      `Expected ON after release, got: ${JSON.stringify(commands)}`,
+    );
+    h.dispose();
+  });
+
+  test("isHeld getter reflects current state", () => {
+    const { driver } = makeDriver();
+    const { holdSource, fire } = makeHoldSource(false);
+    const h = makeHoldAwareDriver(driver, holdSource, { onHeld() {}, onReleased() {} });
+    assert.equal(h.isHeld, false);
+    fire(true);
+    assert.equal(h.isHeld, true);
+    fire(false);
+    assert.equal(h.isHeld, false);
+    h.dispose();
   });
 });
 

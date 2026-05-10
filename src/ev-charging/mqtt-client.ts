@@ -197,7 +197,6 @@ export function makeMqttSession(
       const held = w > thresholdW;
       if (held === heatingHeld) return;
       heatingHeld = held;
-      log(`[HOLD] Heating power ${w} W — charging ${held ? "paused" : "resumed"}`);
       for (const l of holdListeners) l(held);
     };
     client.on("message", heatingMsgHandler);
