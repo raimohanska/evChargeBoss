@@ -3,7 +3,9 @@ import type { Config } from "../config.ts";
 import type { SetpointControlConfig } from "./config.ts";
 import type { CostTier } from "./types.ts";
 import { writeConfigAtomically } from "../config.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("setpoint-control");
 
 const DISCOVERY = "homeassistant";
 const BASE = "evchargeboss";

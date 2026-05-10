@@ -5,7 +5,9 @@ import type { PricedSlot } from "../electricity/types.ts";
 import { fetchSlots } from "../electricity/index.ts";
 import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("setpoint-control");
 
 /** Energy cost of one 15-min slot in euros: (device kWh − solar kWh) × rate */
 function slotCostEur(

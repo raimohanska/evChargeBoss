@@ -1,7 +1,9 @@
 import type { MqttClient } from "./mqtt-client.ts";
 import type { EvChargingConfig } from "./config.ts";
 import type { Slot } from "./types.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("ev-charging");
 
 // All possible status values. Static states are plain strings; dynamic ones are functions.
 export const STATUS = {

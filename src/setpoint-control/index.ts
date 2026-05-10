@@ -7,7 +7,9 @@ import { planSetpoint } from "./planner.ts";
 import { printSetpointPlan } from "./print-plan.ts";
 import { connectMqtt } from "../ev-charging/mqtt-client.ts";
 import { makeClock } from "../utils/timing-utils.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("setpoint-control");
 import { localTimeShort } from "../utils/date-time-format.ts";
 import { SetpointStatusPublisher } from "./ha-status.ts";
 import {
@@ -224,9 +226,7 @@ export async function runSetpointControl(
   configPath: string,
 ): Promise<void> {
   if (!config.mqtt) {
-    console.error(
-      `ERROR: setpointControl["${id}"] requires mqtt broker to be configured in config.json`,
-    );
+    log(`ERROR: setpointControl["${id}"] requires mqtt broker to be configured in config.json`);
     process.exit(1);
   }
 

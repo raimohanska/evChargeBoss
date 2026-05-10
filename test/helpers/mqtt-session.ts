@@ -9,6 +9,7 @@ import type { Config, MqttConfig } from "../../src/config.ts";
 import type { SessionSummary } from "../../src/influx.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
 import { makeTestConfig } from "./config.ts";
+import { writePlanFile, planFilePath } from "../../src/utils/plan-store.ts";
 
 // Use a unique plans directory per session to prevent cross-test interference.
 let _sessionCounter = 0;
@@ -38,12 +39,16 @@ export async function startMqttSession(
   chargingOverrides: Partial<Omit<Config["evCharging"], "mode" | "mqtt">> = {},
   mqttOverrides: Partial<MqttConfig> = {},
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
+  initialPlanData?: object,
 ): Promise<MqttTestSession> {
   // Isolate plan files per test session so tests don't interfere with each other.
   process.env.PLANS_DIR = path.join(
     os.tmpdir(),
     `evchargeboss-test-plans-${process.pid}-${++_sessionCounter}`,
   );
+  if (initialPlanData !== undefined) {
+    writePlanFile(planFilePath("ev-charging", "2026-04-18T17-00-00"), initialPlanData);
+  }
   const config = makeTestConfig(chargingOverrides, mqttOverrides);
   const [sessionClient, relayClient] = await Promise.all([
     connectMqtt(config.mqtt!),

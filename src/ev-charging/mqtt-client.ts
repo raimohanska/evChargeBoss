@@ -4,7 +4,9 @@ import type { BrokerConfig } from "../config.ts";
 import type { ChargingSession, WattsSource, WattsUpdate, HoldSource } from "./charger.ts";
 import type { Publisher } from "./mqtt-status.ts";
 import type { Clock } from "../utils/timing-utils.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("ev-charging");
 
 export type MqttClient = mqtt.MqttClient;
 

@@ -5,6 +5,13 @@ import { ElectricityConfig, SolarConfig } from "./electricity/config.ts";
 import { SetpointControlConfig } from "./setpoint-control/config.ts";
 import { MqttToInfluxConfig } from "./mqtt-to-influx/config.ts";
 
+// Stderr logger for startup-time config errors (no date prefix needed — these
+// happen before the main loop starts and process.exit follows shortly after).
+const configError = (msg: string) =>
+  msg.split("\n").forEach((line) => console.error(`[config] ${line}`));
+const configWarn = (msg: string) =>
+  msg.split("\n").forEach((line) => console.error(`[config] ${line}`));
+
 const InfluxConfig = z.strictObject({
   url: z.string(),
   token: z.string(),
@@ -53,11 +60,11 @@ export function getConfigPath(): string {
   if (idx !== -1 && process.argv[idx + 1]) return process.argv[idx + 1];
   if (existsSync("config.json")) return "config.json";
   const tty = process.stdout.isTTY === true;
-  console.warn(
-    `\n${tty ? "\u26a0\ufe0f  WARNING:" : "WARNING:"} config.json not found` +
+  configWarn(
+    `${tty ? "\u26a0\ufe0f  WARNING:" : "WARNING:"} config.json not found` +
       ` ${tty ? "\u2014" : "-"} falling back to config-example.json.` +
       "\n   This uses placeholder values. Copy config-example.json to config.json" +
-      "\n   and edit it to configure your system before running for real.\n",
+      "\n   and edit it to configure your system before running for real.",
   );
   return "config-example.json";
 }
@@ -68,7 +75,7 @@ export function getConfigPath(): string {
  */
 export function writeConfigAtomically(configPath: string, config: Config): void {
   if (configPath.endsWith("config-example.json")) {
-    console.warn("[Config] Refusing to overwrite config-example.json — changes not persisted.");
+    configWarn("Refusing to overwrite config-example.json — changes not persisted.");
     return;
   }
   const tmp = `${configPath}.tmp`;
@@ -93,9 +100,9 @@ export function loadConfig(): Config {
       const before = source.slice(0, pos);
       const line = before.split("\n").length;
       const col = pos - before.lastIndexOf("\n");
-      console.error(`ERROR: Invalid JSON in "${path}" at line ${line}, column ${col}: ${msg}`);
+      configError(`ERROR: Invalid JSON in "${path}" at line ${line}, column ${col}: ${msg}`);
     } else {
-      console.error(`ERROR: Failed to read config file "${path}": ${msg}`);
+      configError(`ERROR: Failed to read config file "${path}": ${msg}`);
     }
     process.exit(1);
   }
@@ -103,11 +110,11 @@ export function loadConfig(): Config {
   const result = Config.safeParse(raw);
   if (result.success) return result.data;
 
-  console.error(`ERROR: Invalid config file "${path}":\n`);
+  configError(`ERROR: Invalid config file "${path}":`);
   for (const issue of result.error.issues) {
     const field = issue.path.join(".");
-    console.error(`  ${field ? field + ": " : ""}${issue.message}`);
+    configError(`  ${field ? field + ": " : ""}${issue.message}`);
   }
-  console.error();
+  configError("");
   process.exit(1);
 }

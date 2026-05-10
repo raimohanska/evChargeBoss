@@ -68,6 +68,6 @@ if (config.influx) loops.push(runElectricityPoller(config));
 
 Promise.all(loops).catch((err) => {
   const msg = err instanceof Error ? err.message : String(err);
-  console.error(`[${new Date().toISOString()}] Fatal: ${msg}`);
+  console.error(`[main] Fatal: ${msg}`);
   process.exit(1);
 });

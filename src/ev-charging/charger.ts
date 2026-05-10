@@ -3,7 +3,9 @@ import { STATUS } from "./mqtt-status.ts";
 import type { Publisher } from "./mqtt-status.ts";
 import type { CancelSignal } from "../utils/timing-utils.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("ev-charging");
 import type { Clock } from "../utils/timing-utils.ts";
 
 export interface ChargerDriver {

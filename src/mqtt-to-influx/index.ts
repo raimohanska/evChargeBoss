@@ -3,7 +3,9 @@ import type { SensorConfig } from "./config.ts";
 import { connectMqtt } from "../ev-charging/mqtt-client.ts";
 import { writeLine, escapeTagKeyValue } from "../influx.ts";
 import type { InfluxConfig } from "../influx.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("mqtt-to-influx");
 
 export function parseValue(payload: string, sensor: SensorConfig): number | null {
   let raw: unknown;
@@ -100,7 +102,7 @@ export async function runMqttToInflux(config: Config): Promise<void> {
   }
 
   if (!config.mqtt) {
-    console.error("ERROR: mqtt-to-influx requires mqtt broker configured in config.json");
+    log("ERROR: mqtt-to-influx requires mqtt broker configured in config.json");
     process.exit(1);
   }
 

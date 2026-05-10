@@ -1,7 +1,9 @@
 import { request as httpRequest } from "http";
 import { request as httpsRequest } from "https";
 import { URL } from "url";
-import { log } from "./utils/log.ts";
+import { makeLogger } from "./utils/log.ts";
+
+const log = makeLogger("influx");
 
 export interface InfluxConfig {
   url: string;

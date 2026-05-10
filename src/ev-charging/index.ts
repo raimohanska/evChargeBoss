@@ -4,7 +4,9 @@ import { plan } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
 import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
 import { STATUS, createPublisher } from "./mqtt-status.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("ev-charging");
 import { makeClock } from "../utils/timing-utils.ts";
 import { parseArgs } from "./parse-args.ts";
 import { runSession, parseTargetTime } from "./main-loop.ts";

@@ -3,7 +3,9 @@ import type { Slot } from "./types.ts";
 import { fetchSlots } from "../electricity/index.ts";
 import { fetchSolarForecast, lookupSolarW, treeShadingFactor } from "../electricity/solar.ts";
 import { localTimeShort, localDateTimeString, localDateString } from "../utils/date-time-format.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("ev-charging");
 
 export async function plan(
   from: Date,

@@ -6,7 +6,9 @@ import { fetchSlots } from "./index.ts";
 import { datesInRange } from "./dates.ts";
 import { IncompleteDataError } from "./IncompleteDataError.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("electricity");
 
 const POLL_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const WINDOW_DAYS = 2; // today + tomorrow

@@ -300,3 +300,51 @@ describe("main-loop MQTT integration — status history", { concurrency: false }
     }
   });
 }); // describe "main-loop MQTT integration — status history"
+
+describe("main-loop MQTT integration — plan resume", { concurrency: false }, () => {
+  /**
+   * Verifies that chargedKwh persisted in a plan file is honoured on resume.
+   *
+   * Setup: pre-write a plan file with chargedKwh=3.75 (half of targetKwh=5).
+   *
+   * Expected relay commands when the session resumes at FROM=17:00 Apr 18:
+   *   OFF — gap sleep until the first charge slot at 10:00 Apr 19
+   *   ON  — first slot  (10:00–10:15, kwh += 0.75 → chargedKwh = 4.50)
+   *   ON  — second slot (10:15–10:30, kwh += 0.75 → chargedKwh = 5.25 ≥ 5.0)
+   *   OFF — target reached, session done
+   *
+   * Without the fix chargedKwh would be reset to 0 on resume, the planner
+   * would schedule all 7 solar-free slots (10:00–11:45), the third assertOn
+   * below would be followed by 4 more ONs, and the final assertOff would fail
+   * because it would receive an ON instead.
+   */
+  test("Resumed session uses persisted chargedKwh — only remaining slots are charged", async () => {
+    const planFile = {
+      version: 1,
+      createdAt: new Date("2026-04-18T14:00:00.000Z").toISOString(), // 17:00 Helsinki
+      detectedPowerKw: 3,
+      chargedKwh: 3.75,
+      config: { targetKwh: 5, targetTime: "12:00", powerKw: 3 },
+      slots: [],
+    };
+
+    const { loopPromise, relay, teardown } = await startMqttSession(
+      FROM,
+      SPEEDUP,
+      { targetKwh: 5 },
+      {},
+      undefined,
+      planFile,
+    );
+    try {
+      // No plug-in detection ON — the session resumes directly without waitForStart().
+      await relay.assertOff("2026-04-19T10:00"); // gap OFF before first charge slot
+      await relay.assertOn("2026-04-19T10:00"); // first slot
+      await relay.assertOnBefore("2026-04-19T10:30"); // second (consecutive) slot
+      await relay.assertOff("2026-04-19T10:30"); // target reached
+      await loopPromise;
+    } finally {
+      teardown();
+    }
+  });
+}); // describe "main-loop MQTT integration — plan resume"

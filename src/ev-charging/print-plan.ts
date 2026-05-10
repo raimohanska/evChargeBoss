@@ -1,6 +1,8 @@
 import type { Slot } from "./types.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("ev-charging");
 
 export function printPlan(slots: Slot[]): void {
   const chargeSlots = slots.filter((s) => s.charge);

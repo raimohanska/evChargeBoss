@@ -1,5 +1,7 @@
 import type { SolarConfig } from "./config.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("electricity");
 
 // Uses Open-Meteo shortwave radiation (horizontal plane) as a PV proxy.
 // Less accurate than forecast.solar (no tilt/azimuth correction) but

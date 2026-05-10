@@ -1,7 +1,9 @@
 import type { SetpointSlot } from "./types.ts";
 import type { SetpointControlConfig } from "./config.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("setpoint-control");
 import { IS_TTY } from "../ev-charging/print-plan.ts";
 
 const COST_WIDTH = 9; // width of "expensive"

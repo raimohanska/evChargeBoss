@@ -2,7 +2,9 @@ import { readFileSync, writeFileSync, readdirSync, statSync, unlinkSync, mkdirSy
 import path from "path";
 import { z } from "zod";
 import { localDateTimeString } from "./date-time-format.ts";
-import { log } from "./log.ts";
+import { makeLogger } from "./log.ts";
+
+const log = makeLogger("plan-store");
 
 function getPlansDir(): string {
   return path.join(process.env.PLANS_DIR ?? ".", ".plans");

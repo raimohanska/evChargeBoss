@@ -2,7 +2,9 @@ import type { PricedSlot } from "./types.ts";
 import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
 import { fetchSolarForecast, persistSolarCache, lookupSolarW, treeShadingFactor } from "./solar.ts";
 import { datesInRange, slotsBetween } from "./dates.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("electricity");
 import { assertNotNull } from "../utils/assertNotNull.ts";
 import { IncompleteDataError } from "./IncompleteDataError.ts";
 import { type ElectricityConfig, type SolarConfig } from "./config.ts";

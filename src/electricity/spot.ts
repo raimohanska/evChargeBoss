@@ -1,6 +1,8 @@
 import { readCache, writeCache } from "./cache.ts";
 import { localDateString, localDateTimeString } from "../utils/date-time-format.ts";
-import { log } from "../utils/log.ts";
+import { makeLogger } from "../utils/log.ts";
+
+const log = makeLogger("electricity");
 
 const CACHE_DIR = process.env.CACHE_DIR ?? ".";
 
