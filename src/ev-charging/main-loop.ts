@@ -40,6 +40,7 @@ const EvChargingPlanFileSchema = z.object({
   version: z.literal(1),
   createdAt: z.string(),
   detectedPowerKw: z.number().optional(),
+  chargedKwh: z.number().default(0),
   config: z.object({
     targetKwh: z.number(),
     targetTime: z.string(),
@@ -129,7 +130,7 @@ export async function runSession(
   }
 
   let planFrom: Date | undefined = from;
-  let chargedKwh = 0;
+  let chargedKwh = resumedPlan?.chargedKwh ?? 0;
   let chargedCostEur = 0;
   let solarFractionAccum = 0;
   let chargeSlotsDone = 0;
@@ -171,6 +172,7 @@ export async function runSession(
           version: 1 as const,
           createdAt: clock.now().toISOString(),
           detectedPowerKw: powerKw,
+          chargedKwh,
           config: {
             targetKwh: config.evCharging.targetKwh,
             targetTime: config.evCharging.targetTime,
