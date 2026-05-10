@@ -185,13 +185,12 @@ describe("main-loop MQTT integration — energy field", { concurrency: false }, 
    *   accumulatedSolarPct === 100 (100% solar for every slot)
    */
   test("Session end: accumulated cost is 0 and solar% is 100 for all-solar session", async () => {
-    const { loopPromise, relay, accumulatedCost, accumulatedSolarPct, teardown } =
-      await startMqttSession(FROM, SPEEDUP);
+    const { loopPromise, relay, sessionSummary, teardown } = await startMqttSession(FROM, SPEEDUP);
     try {
       await advanceToSolarWindow(relay);
       await loopPromise;
-      assert.equal(accumulatedCost(), 0, "all solar-free slots → zero cost");
-      assert.equal(accumulatedSolarPct(), 100, "solar forecast exceeds charger power → 100%");
+      assert.equal(sessionSummary()?.totalCostEur, 0, "all solar-free slots → zero cost");
+      assert.equal(sessionSummary()?.solarPct, 100, "solar forecast exceeds charger power → 100%");
     } finally {
       teardown();
     }
@@ -218,6 +217,8 @@ describe("main-loop MQTT integration — status history", { concurrency: false }
     try {
       await advanceToSolarWindow(relay);
       await loopPromise;
+      // "Idle" is published via MQTT after loopPromise resolves; wait for delivery.
+      await waitUntilStatus(statusHistory, (s) => s === STATUS.idle);
 
       const history = statusHistory();
 
@@ -240,6 +241,7 @@ describe("main-loop MQTT integration — status history", { concurrency: false }
       );
 
       assert.deepEqual(history, [
+        "Starting...",
         "Waiting for car to be plugged in",
         "Planned charge start at 10:00",
         "Waiting for charging to start",

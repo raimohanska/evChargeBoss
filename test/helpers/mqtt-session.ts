@@ -1,8 +1,7 @@
 import os from "os";
 import path from "path";
 import { connectMqtt, makeMqttSession } from "../../src/ev-charging/mqtt-client.ts";
-import type { Publisher } from "../../src/ev-charging/mqtt-status.ts";
-import { createPublisher, shouldSuppressStatus } from "../../src/ev-charging/mqtt-status.ts";
+import { createPublisher, STATUS } from "../../src/ev-charging/mqtt-status.ts";
 import { makeClock } from "../../src/utils/timing-utils.ts";
 import { runSession } from "../../src/ev-charging/main-loop.ts";
 import type { Config, MqttConfig } from "../../src/config.ts";
@@ -14,20 +13,23 @@ import { writePlanFile, planFilePath } from "../../src/utils/plan-store.ts";
 // Use a unique plans directory per session to prevent cross-test interference.
 let _sessionCounter = 0;
 
+const STATUS_TOPIC = "evchargeboss/status";
+const CHARGED_ENERGY_TOPIC = "evchargeboss/charged_energy";
+const TARGET_TIME_SET_TOPIC = "evchargeboss/target_time/set";
+
 export interface MqttTestSession {
   loopPromise: Promise<void>;
   relay: MqttRelaySimulator;
-  /** Simulate a target-time change (HH:MM), triggering an immediate replan. */
+  /** Publish a target-time change (HH:MM) via MQTT, triggering an immediate replan. */
   publishTargetTime(time: string): void;
-  /** Last value passed to publisher.setChargedEnergy() — 0 if never called. */
+  /** Last charged energy (kWh) received from MQTT — 0 if none yet. */
   chargedEnergy(): number;
-  /** Last value passed to publisher.setAccumulatedCost() — 0 if never called. */
-  accumulatedCost(): number;
-  /** Last value passed to publisher.setAccumulatedSolarPct() — 0 if never called. */
-  accumulatedSolarPct(): number;
+  /** Session summary captured from onSessionEnd — null until session completes. */
+  sessionSummary(): SessionSummary | null;
   /**
-   * Deduplicated sequence of status values that were actually published
-   * (suppressed flicker entries excluded, consecutive duplicates collapsed).
+   * Deduplicated sequence of status values received via MQTT.
+   * Recording starts from the first "Starting…" message emitted by StatusPublisher,
+   * discarding any retained values left by a previous test session.
    */
   statusHistory(): readonly string[];
   teardown(): void;
@@ -50,59 +52,59 @@ export async function startMqttSession(
     writePlanFile(planFilePath("ev-charging", "2026-04-18T17-00-00"), initialPlanData);
   }
   const config = makeTestConfig(chargingOverrides, mqttOverrides);
-  const [sessionClient, relayClient] = await Promise.all([
+
+  // Connect all three MQTT clients in parallel.
+  const [sessionClient, relayClient, controlClient] = await Promise.all([
+    connectMqtt(config.mqtt!),
     connectMqtt(config.mqtt!),
     connectMqtt(config.mqtt!),
   ]);
 
-  // Wrap LoggingPublisher to intercept target-time override and replan callback.
-  // publishTargetTime() can then trigger a replan directly without an extra MQTT
-  // connection — the full MQTT target-time path is exercised by StatusPublisher
-  // in production; here we test the replan logic itself.
-  let targetTimeOverride: string | null = null;
-  let replanCb: (() => void) | null = null;
-  let lastChargedEnergy = 0;
-  let lastAccumulatedCost = 0;
-  let lastAccumulatedSolarPct = 0;
-  // Track the effective (post-suppression, deduplicated) status sequence.
+  // Track status history from MQTT messages.
+  // Only start recording after "Starting…" to discard retained values from previous sessions.
   const _statusHistory: string[] = [];
   let _lastStatus = "";
-  const base = createPublisher(config.evCharging);
-  const publisher: Publisher = {
-    setReplanCallback: (cb) => {
-      replanCb = cb;
-    },
-    getTargetTimeOverride: () => targetTimeOverride,
-    resetTargetTime: () => {
-      targetTimeOverride = null;
-      base.resetTargetTime();
-    },
-    setStatus: (s) => {
-      if (!shouldSuppressStatus(_lastStatus, s)) {
-        _lastStatus = s;
-        if (_statusHistory.length === 0 || _statusHistory[_statusHistory.length - 1] !== s) {
-          _statusHistory.push(s);
+  let _recording = false;
+  let _lastChargedEnergy = 0;
+  let _sessionSummary: SessionSummary | null = null;
+
+  // Subscribe controlClient to observable topics BEFORE creating StatusPublisher so we
+  // don't miss the "Starting…" retained message from initializeDiscovery().
+  await Promise.all([
+    new Promise<void>((resolve, reject) => {
+      controlClient.subscribe(STATUS_TOPIC, (err) => (err ? reject(err) : resolve()));
+    }),
+    new Promise<void>((resolve, reject) => {
+      controlClient.subscribe(CHARGED_ENERGY_TOPIC, (err) => (err ? reject(err) : resolve()));
+    }),
+  ]);
+
+  controlClient.on("message", (topic: string, payload: Buffer) => {
+    const value = payload.toString();
+    if (topic === STATUS_TOPIC) {
+      if (!_recording) {
+        // Discard any retained messages from a previous session; begin on "Starting…".
+        if (value === STATUS.starting) {
+          _recording = true;
+          _lastStatus = value;
+          _statusHistory.push(value);
         }
+      } else if (value !== _lastStatus) {
+        _lastStatus = value;
+        _statusHistory.push(value);
       }
-      base.setStatus(s);
-    },
-    setError: (m) => base.setError(m),
-    setPlan: (s) => base.setPlan(s),
-    setChargedEnergy: (k) => {
-      lastChargedEnergy = k;
-      base.setChargedEnergy(k);
-    },
-    setAccumulatedCost: (e) => {
-      lastAccumulatedCost = e;
-      base.setAccumulatedCost(e);
-    },
-    setAccumulatedSolarPct: (p) => {
-      lastAccumulatedSolarPct = p;
-      base.setAccumulatedSolarPct(p);
-    },
-  };
+    } else if (topic === CHARGED_ENERGY_TOPIC) {
+      const n = parseFloat(value);
+      if (!isNaN(n)) _lastChargedEnergy = n;
+    }
+  });
 
   const clock = makeClock(speedup, from);
+
+  // Real StatusPublisher — initializeDiscovery() publishes "Starting…" (retained) which
+  // wakes the controlClient subscription above.
+  const publisher = createPublisher(config.evCharging, sessionClient);
+
   const session = makeMqttSession(
     sessionClient,
     config.evCharging.mqtt!,
@@ -117,24 +119,29 @@ export async function startMqttSession(
   // relay has subscribed, causing the relay to miss the command permanently.
   await relay.ready;
 
-  const loopPromise = runSession(session, publisher, config, from, clock, onSessionEnd);
+  // Wrap onSessionEnd to capture the last SessionSummary.
+  const wrappedOnSessionEnd = async (summary: SessionSummary) => {
+    _sessionSummary = summary;
+    await onSessionEnd?.(summary);
+  };
+
+  const loopPromise = runSession(session, publisher, config, from, clock, wrappedOnSessionEnd);
 
   return {
     loopPromise,
     relay,
     publishTargetTime(time: string) {
-      targetTimeOverride = time;
-      replanCb?.();
+      controlClient.publish(TARGET_TIME_SET_TOPIC, time);
     },
-    chargedEnergy: () => lastChargedEnergy,
-    accumulatedCost: () => lastAccumulatedCost,
-    accumulatedSolarPct: () => lastAccumulatedSolarPct,
+    chargedEnergy: () => _lastChargedEnergy,
+    sessionSummary: () => _sessionSummary,
     statusHistory: () => _statusHistory,
     teardown() {
       relay.cleanup();
       // Force-close so the TCP socket is gone before the next test creates new connections.
       sessionClient.end(true);
       relayClient.end(true);
+      controlClient.end(true);
     },
   };
 }
