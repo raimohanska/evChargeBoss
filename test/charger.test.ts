@@ -8,7 +8,7 @@ import { runSlot } from "../src/ev-charging/charger.ts";
 import type { HoldSource } from "../src/ev-charging/charger.ts";
 import type { Slot } from "../src/ev-charging/types.ts";
 import { STATUS, shouldSuppressStatus } from "../src/ev-charging/mqtt-status.ts";
-import { makeClock } from "../src/utils/timing-utils.ts";
+import { makeClock, Canceller } from "../src/utils/timing-utils.ts";
 
 // ---------------------------------------------------------------------------
 // shouldSuppressStatus — tests for the status-stuck-after-gap bug
@@ -201,5 +201,64 @@ describe("runSlot — heating hold", () => {
       commands.includes(false),
       `Expected relay OFF for canHold=true slot too. Commands: ${JSON.stringify(commands)}`,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runSlot — energy-on-abort (prorated estimate when no energyField)
+// ---------------------------------------------------------------------------
+
+describe("runSlot — energy on abort", () => {
+  test("returns prorated kWh (not zero) when slot is aborted mid-way (no energyField)", async () => {
+    const slot = makeSlot({ charge: true });
+    const clock = makeClock(SPEEDUP, slot.start);
+
+    const driver = { async send(_on: boolean) {} };
+    const canceller = new Canceller();
+
+    // Abort after ~50 % of the 15-minute slot: 450 000 ms virtual = 4.5 ms real at 100 000×.
+    // Use 5 ms real to give a comfortable margin above the MQTT roundtrip noise floor.
+    setTimeout(() => canceller.abort(), 5);
+
+    const result = await runSlot({
+      slot,
+      chargeRunEnd: slot.end,
+      driver,
+      publisher: undefined,
+      signal: canceller.signal,
+      wattsSource: undefined,
+      holdSource: undefined,
+      prevChargedKwh: 0,
+      powerThresholdW: 10,
+      powerKw: 3,
+      clock,
+    });
+
+    // kwh must reflect elapsed time, not be zeroed on abort.
+    assert.ok(result.kwh > 0, `Expected kwh > 0 on abort, got ${result.kwh}`);
+    assert.ok(result.kwh < 0.75, `Expected kwh < full-slot 0.75 kWh, got ${result.kwh}`);
+  });
+
+  test("returns full 0.75 kWh when slot runs to completion (no energyField)", async () => {
+    const slot = makeSlot({ charge: true });
+    const clock = makeClock(SPEEDUP, slot.start);
+
+    const driver = { async send(_on: boolean) {} };
+
+    const result = await runSlot({
+      slot,
+      chargeRunEnd: slot.end,
+      driver,
+      publisher: undefined,
+      signal: undefined,
+      wattsSource: undefined,
+      holdSource: undefined,
+      prevChargedKwh: 0,
+      powerThresholdW: 10,
+      powerKw: 3,
+      clock,
+    });
+
+    assert.ok(Math.abs(result.kwh - 0.75) < 0.01, `Expected kwh ≈ 0.75, got ${result.kwh}`);
   });
 });

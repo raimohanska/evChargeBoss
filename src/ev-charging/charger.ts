@@ -170,13 +170,21 @@ export async function runSlot({
     await driver.send(false);
   }
 
-  unsubWatts?.();
-  unsubHold?.();
-
-  // Prefer relay-measured energy; fall back to a plan-based estimate.
-  if (startEnergy !== null && lastEnergy !== null) {
-    return { kwh: lastEnergy - startEnergy, carFinished };
+  try {
+    // Prefer relay-measured energy; fall back to a plan-based estimate.
+    if (startEnergy !== null && lastEnergy !== null) {
+      return { kwh: lastEnergy - startEnergy, carFinished };
+    }
+    if (!slot.charge) return { kwh: 0, carFinished };
+    // No relay energy field: estimate from elapsed time (prorated on abort).
+    const slotDurationMs = slot.end.getTime() - slot.start.getTime();
+    const elapsedMs = Math.min(
+      Math.max(0, clock.now().getTime() - slot.start.getTime()),
+      slotDurationMs,
+    );
+    return { kwh: powerKw * (elapsedMs / 3_600_000), carFinished };
+  } finally {
+    unsubWatts?.();
+    unsubHold?.();
   }
-  if (signal?.aborted || !slot.charge) return { kwh: 0, carFinished };
-  return { kwh: powerKw * 0.25, carFinished };
 }
