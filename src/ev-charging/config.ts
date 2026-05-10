@@ -28,6 +28,7 @@ export const EvChargingConfig = z.strictObject({
   powerKw: z.number().positive().optional(),
   targetTime: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
   chargeNowHours: z.number().positive().optional(),
+  plugInTimeoutMs: z.number().positive().optional(),
   mqtt: EvChargingMqttConfig.optional(),
   holdWhenHeating: HoldWhenHeatingConfig.optional(),
 });

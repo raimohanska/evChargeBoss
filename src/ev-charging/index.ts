@@ -67,6 +67,7 @@ export async function runEvCharging(config: Config): Promise<void> {
     publisher,
     clock,
     config.evCharging.holdWhenHeating,
+    config.evCharging.plugInTimeoutMs,
   );
 
   if (config.influx) await checkInfluxHealth(config.influx);

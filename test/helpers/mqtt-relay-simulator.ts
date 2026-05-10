@@ -47,13 +47,21 @@ export class MqttRelaySimulator {
   private readonly mqttConfig: MqttConfig;
   private readonly clock: Clock;
 
+  private readonly suppressPower: boolean;
+
   /** Resolves when the charger-topic subscription is confirmed (SUBACK received). */
   readonly ready: Promise<void>;
 
-  constructor(client: MqttClient, mqttConfig: MqttConfig, clock: Clock = realClock) {
+  constructor(
+    client: MqttClient,
+    mqttConfig: MqttConfig,
+    clock: Clock = realClock,
+    options: { suppressPower?: boolean } = {},
+  ) {
     this.client = client;
     this.mqttConfig = mqttConfig;
     this.clock = clock;
+    this.suppressPower = options.suppressPower ?? false;
     this.ready = new Promise<void>((resolve, reject) => {
       client.subscribe(mqttConfig.chargerTopic, (err) => {
         if (err) reject(new Error(`Relay simulator subscribe failed: ${err.message}`));
@@ -83,6 +91,7 @@ export class MqttRelaySimulator {
   }
 
   private startEmittingPower(): void {
+    if (this.suppressPower) return; // simulating no car connected
     if (this.powerTimer) return; // already running
     this.relayOnSince = this.clock.now();
     const { powerTopic, powerField, energyField } = this.mqttConfig;

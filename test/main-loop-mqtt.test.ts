@@ -350,3 +350,35 @@ describe("main-loop MQTT integration — plan resume", { concurrency: false }, (
     }
   });
 }); // describe "main-loop MQTT integration — plan resume"
+
+describe("main-loop MQTT integration — plug-in timeout", { concurrency: false }, () => {
+  /**
+   * Verifies that waitForStart() throws IncompleteDataError when no power is
+   * detected within plugInTimeoutMs.
+   *
+   * suppressPower: true — relay receives the ON command but does NOT publish
+   *   power readings, simulating a car that never draws power (broken relay,
+   *   misconfigured power topic, or no car connected).
+   *
+   * plugInTimeoutMs: 60 000 ms virtual = 6 ms real at 10 000× speedup.
+   *   The ON command arrives within ~2 ms real, assertOn() resolves first,
+   *   then the timeout fires and loopPromise rejects.
+   */
+  test("waitForStart times out and rejects when no car power is detected", async () => {
+    const { loopPromise, relay, teardown } = await startMqttSession(
+      FROM,
+      SPEEDUP,
+      { plugInTimeoutMs: 60_000 }, // 60 s virtual → 6 ms real
+      {},
+      undefined,
+      undefined,
+      { suppressPower: true },
+    );
+    try {
+      await relay.assertOn("2026-04-18T17:00"); // waitForStart sends ON before waiting
+      await assert.rejects(loopPromise, /No car detected within timeout/);
+    } finally {
+      teardown();
+    }
+  });
+}); // describe "main-loop MQTT integration — plug-in timeout"

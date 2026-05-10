@@ -42,6 +42,7 @@ export async function startMqttSession(
   mqttOverrides: Partial<MqttConfig> = {},
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
   initialPlanData?: object,
+  sessionOptions: { suppressPower?: boolean } = {},
 ): Promise<MqttTestSession> {
   // Isolate plan files per test session so tests don't interfere with each other.
   process.env.PLANS_DIR = path.join(
@@ -111,8 +112,11 @@ export async function startMqttSession(
     publisher,
     clock,
     config.evCharging.holdWhenHeating,
+    config.evCharging.plugInTimeoutMs,
   );
-  const relay = new MqttRelaySimulator(relayClient, config.evCharging.mqtt!, clock);
+  const relay = new MqttRelaySimulator(relayClient, config.evCharging.mqtt!, clock, {
+    suppressPower: sessionOptions.suppressPower,
+  });
 
   // Wait for the relay's charger-topic subscription to be confirmed (SUBACK) before
   // starting the main loop.  Without this, waitForStart() can publish ON before the
