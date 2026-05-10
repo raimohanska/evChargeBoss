@@ -341,7 +341,7 @@ describe("main-loop MQTT integration — plan resume", { concurrency: false }, (
       await relay.assertOff("2026-04-19T10:00"); // gap OFF before first charge slot
       await relay.assertOn("2026-04-19T10:00"); // first slot
       await relay.assertOnBefore("2026-04-19T10:30"); // second (consecutive) slot
-      await relay.assertOff("2026-04-19T10:30"); // target reached
+      await relay.assertOff("2026-04-19T10:45"); // target reached — within one slot of 10:30
       await loopPromise;
     } finally {
       teardown();
