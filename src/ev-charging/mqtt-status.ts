@@ -81,10 +81,11 @@ function discoveryTopic(id: string) {
 // Returns true when transitioning from `current` to `next` status would create
 // noisy/misleading history entries.  Extracted so tests can import it directly.
 export function shouldSuppressStatus(current: string, next: string): boolean {
-  // Keep "Charging until X" stable across re-plan cycles — suppress transient
-  // intermediate states that appear between back-to-back charge slots.
+  // Keep "Charging until X" stable across re-plan cycles — suppress the
+  // transient "Waiting for charging to start" that appears between back-to-back
+  // charge slots (where the relay is never turned off).
   if (current.startsWith("Charging until ")) {
-    if (next === STATUS.waitingForChargingToStart || next.startsWith("Planned charge start at ")) {
+    if (next === STATUS.waitingForChargingToStart) {
       return true;
     }
   }

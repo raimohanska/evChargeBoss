@@ -121,14 +121,12 @@ export async function runSlot({
       })
     : undefined;
 
-  // When holdSource is present for a charge slot AND the plan allows holding
-  // (slot.canHold), it fires immediately with the current held state, driving
-  // both the initial relay command and any mid-slot hold/resume transitions.
-  // If canHold is false (every slot is required to reach targetKwh), the hold
-  // is ignored so the goal is not compromised.  Without holdSource the
-  // original await-send path is used.
+  // When holdSource is present for a charge slot, it fires immediately with the
+  // current held state, driving both the initial relay command and any mid-slot
+  // hold/resume transitions.  Without holdSource the original await-send path
+  // is used.
   let unsubHold: (() => void) | undefined;
-  if (slot.charge && slot.canHold && holdSource) {
+  if (slot.charge && holdSource) {
     unsubHold = holdSource.subscribe((held) => {
       isHeld = held;
       if (held) {
