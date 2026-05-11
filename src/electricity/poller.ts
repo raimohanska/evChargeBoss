@@ -93,9 +93,7 @@ export async function runElectricityPoller(config: Config): Promise<void> {
       await runElectricityPollOnce(config, clock);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log(`[ElectricityPoller] Fetch failed: ${msg} — retrying in 60s`);
-      await clock.sleep(60_000);
-      continue;
+      log(`[ElectricityPoller] Fetch failed: ${msg} — retrying in 1h`);
     }
     await clock.sleep(POLL_INTERVAL_MS);
   }
