@@ -20,7 +20,6 @@ export async function plan(
     targetTime,
     config.electricity,
     config.solar,
-    verbose,
     config.influx,
   );
 
@@ -104,7 +103,7 @@ export async function planFallbackSlot(
 
   // Fetch solar for this slot's date (served from cache if available).
   const dateStr = localDateString(slotStart);
-  const { map: solarMap } = await fetchSolarForecast([dateStr], config.solar, false);
+  const { map: solarMap } = await fetchSolarForecast([dateStr], config.solar);
   const solarEpochsDesc = [...solarMap.keys()].sort((a, b) => b - a);
   const rawSolarW = lookupSolarW(slotStart.getTime(), solarMap, solarEpochsDesc);
   const effectiveSolarW =

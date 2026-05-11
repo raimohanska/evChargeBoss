@@ -29,7 +29,7 @@ async function fetchAvailableSlots(
   config: Config,
 ): Promise<PricedSlot[]> {
   try {
-    return await fetchSlots(from, to, config.electricity, config.solar, undefined, config.influx);
+    return await fetchSlots(from, to, config.electricity, config.solar, config.influx);
   } catch (err) {
     if (!(err instanceof IncompleteDataError) || err.missingSlots.length === 0) throw err;
     const firstMissing = err.missingSlots[0];
@@ -42,7 +42,6 @@ async function fetchAvailableSlots(
       firstMissing,
       config.electricity,
       config.solar,
-      undefined,
       config.influx,
     );
   }

@@ -15,12 +15,11 @@ interface OpenMeteoResponse {
 }
 
 export async function fetchSolarForecastOpenMeteo(
-  solarConfig: SolarConfig,
-  verbose?: boolean,
+  solarConfig: SolarConfig
 ): Promise<Map<number, number>> {
   const { lat, lon, kwp } = solarConfig;
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&forecast_days=2&timezone=auto`;
-  if (verbose !== false) log("Fetching solar forecast from " + url);
+  log("Fetching solar forecast from " + url);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`open-meteo HTTP ${res.status}`);
   const json = (await res.json()) as OpenMeteoResponse;
@@ -35,6 +34,6 @@ export async function fetchSolarForecastOpenMeteo(
     }
   }
 
-  if (verbose !== false) log(`  Got ${map.size} solar forecast slots from Open-Meteo`);
+  log(`  Got ${map.size} solar forecast slots from Open-Meteo`);
   return map;
 }

@@ -153,7 +153,7 @@ after(() => {
 test("writes electricity and solar forecast to InfluxDB when data is fresh", async () => {
   const restoreFetch = installFetchMock();
   try {
-    const slots = await fetchSlots(FROM, TO, elConfigFresh, solConfigFresh, false, INFLUX);
+    const slots = await fetchSlots(FROM, TO, elConfigFresh, solConfigFresh, INFLUX);
     assert.equal(slots.length, 2, "should return 2 slots");
   } finally {
     restoreFetch();
@@ -180,7 +180,7 @@ test("does not write to InfluxDB when data is served from cache", async () => {
   assert.ok(existsSync(SPOT_CACHE), "spot cache should exist from previous test");
 
   // Use distinct measurement names that have never been written to.
-  await fetchSlots(FROM, TO, elConfigCached, solConfigCached, false, INFLUX);
+  await fetchSlots(FROM, TO, elConfigCached, solConfigCached, INFLUX);
 
   // Allow async fire-and-forget to settle before querying.
   await new Promise<void>((r) => setTimeout(r, 500));

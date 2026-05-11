@@ -51,7 +51,6 @@ export async function runElectricityPollOnce(config: Config, clock: Clock): Prom
       to,
       config.electricity,
       config.solar,
-      false,
       config.influx,
     );
     log(`[ElectricityPoller] Fetched ${slots.length} slots`);
@@ -65,7 +64,6 @@ export async function runElectricityPollOnce(config: Config, clock: Clock): Prom
           firstMissing,
           config.electricity,
           config.solar,
-          false,
           config.influx,
         );
         log(

@@ -15,30 +15,27 @@ interface ForecastSolarResult {
 
 export async function fetchSolarForecast(
   dates: string[],
-  solarConfig: SolarConfig,
-  verbose?: boolean,
+  solarConfig: SolarConfig
 ): Promise<{ map: Map<number, number>; fresh: boolean }> {
   const missingDates = dates.filter(
     (d) => readCache(`${CACHE_DIR}/.solar-cache-${d}.json`) === null,
   );
 
   if (missingDates.length > 0) {
-    if (verbose !== false) log(`Fetching solar forecast... (missing: ${missingDates.join(", ")})`);
     const { lat, lon, declination, azimuth, kwp } = solarConfig;
     const url = `https://api.forecast.solar/estimate/${lat}/${lon}/${declination}/${azimuth}/${kwp}`;
-    if (verbose !== false) log("Fetching solar forecast from " + url);
+    log("Fetching solar forecast from " + url);
     const res = await fetch(url);
     if (!res.ok) {
-      if (verbose !== false)
-        log(`  forecast.solar HTTP ${res.status} — falling back to Open-Meteo`);
-      return { map: await fetchSolarForecastOpenMeteo(solarConfig, verbose), fresh: true };
+      log(`  forecast.solar HTTP ${res.status} — falling back to Open-Meteo`);
+      return { map: await fetchSolarForecastOpenMeteo(solarConfig), fresh: true };
     }
     const json = (await res.json()) as { result: ForecastSolarResult };
     const map = new Map<number, number>();
     for (const [tsStr, w] of Object.entries(json.result.watts)) {
       map.set(new Date(tsStr.replace(" ", "T")).getTime(), w);
     }
-    if (verbose !== false) log(`  Got ${map.size} solar forecast slots`);
+    log(`  Got ${map.size} solar forecast slots`);
     return { map, fresh: true };
   }
 
@@ -49,11 +46,10 @@ export async function fetchSolarForecast(
       map.set(new Date(k).getTime(), v);
     }
   }
-  if (verbose !== false) log(`  Solar forecast loaded from cache (${map.size} slots)`);
   return { map, fresh: false };
 }
 
-export function persistSolarCache(map: Map<number, number>, verbose?: boolean): void {
+export function persistSolarCache(map: Map<number, number>): void {
   const byDate = new Map<string, Record<string, number>>();
   for (const [epoch, watts] of map) {
     const date = localDateString(new Date(epoch));
@@ -62,8 +58,7 @@ export function persistSolarCache(map: Map<number, number>, verbose?: boolean): 
   }
   for (const [date, data] of byDate) {
     writeCache(`${CACHE_DIR}/.solar-cache-${date}.json`, data);
-  }
-  if (verbose !== false) log(`  Solar forecast cached (${byDate.size} day file(s)).`);
+  }  
 }
 
 /**
