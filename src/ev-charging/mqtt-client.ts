@@ -216,7 +216,7 @@ export function makeMqttSession(
       client.end();
     },
     async waitForStart(): Promise<number> {
-      const timeoutMs = plugInTimeoutMs ?? 15 * 60 * 1000;
+      const timeoutMs = plugInTimeoutMs ?? 24 * 60 * 60 * 1000;
       const plugInCanceller = new Canceller();
       const timeoutCanceller = new Canceller();
 
