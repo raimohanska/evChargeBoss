@@ -1,7 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { planSetpoint } from "../src/setpoint-control/planner.ts";
+import { planSetpoint, makeFallbackSlots } from "../src/setpoint-control/planner.ts";
+import { IncompleteDataError } from "../src/electricity/IncompleteDataError.ts";
 import { runSetpointControlLoop } from "../src/setpoint-control/index.ts";
 import { loadConfig } from "../src/config.ts";
 import { makeClock } from "../src/utils/timing-utils.ts";
@@ -303,5 +304,71 @@ describe("runSetpointControlLoop room temperature adjustment", () => {
     }
     const clampedCount = fixedPlan.filter((s) => s.setpoint + 5 > 68).length;
     assert.ok(clampedCount > 0, "expected at least one slot clamped to max");
+  });
+});
+
+// ── Fallback mode tests ───────────────────────────────────────────────────────────────────
+
+describe("fallback mode (IncompleteDataError)", () => {
+  const failPlan = async (): Promise<never> => {
+    throw new IncompleteDataError("no spot prices", [FROM]);
+  };
+
+  test("makeFallbackSlots produces 96 slots for 24h with default setpoint", () => {
+    const slots = makeFallbackSlots(FROM, TO, SP_CONFIG);
+    assert.equal(slots.length, 96);
+    assert.ok(slots.every((s) => s.setpoint === SP_CONFIG.setpointDefault));
+    assert.ok(slots.every((s) => s.costTier === "average"));
+  });
+
+  test("IncompleteDataError falls back to default setpoint for all 96 slots", async () => {
+    const clock = makeClock(100_000, FROM);
+    const published: string[] = [];
+    const publish = (_topic: string, payload: string) => published.push(payload);
+
+    await runSetpointControlLoop(FROM, SP_CONFIG, CONFIG, publish, clock, failPlan);
+
+    assert.equal(published.length, 96, "one publish per 15-min fallback slot");
+    assert.ok(
+      published.every((p) => p === String(SP_CONFIG.setpointDefault)),
+      "every fallback slot uses setpointDefault",
+    );
+  });
+
+  test("fallback mode still applies room-temperature adjustment", async () => {
+    const clock = makeClock(100_000, FROM);
+    const published: string[] = [];
+    const publish = (_topic: string, payload: string) => published.push(payload);
+
+    const RT_CONFIG = {
+      targetTemperature: 21,
+      allowedDeviationUp: 1,
+      allowedDeviationDown: 1,
+      influence: 5,
+      mqtt: { temperatureTopic: "test/room/temperature" },
+    };
+    const spConfig = { ...SP_CONFIG, roomTemperature: RT_CONFIG };
+
+    // 18°C < 21 − 1 = 20 → below range → setpoint raised by influence
+    await runSetpointControlLoop(FROM, spConfig, CONFIG, publish, clock, failPlan, () => 18);
+
+    assert.equal(published.length, 96);
+    assert.ok(
+      published.every((p) => p === String(SP_CONFIG.setpointDefault + RT_CONFIG.influence)),
+      "room-temperature adjustment applied on top of default setpoint",
+    );
+  });
+
+  test("non-IncompleteDataError is not swallowed by fallback", async () => {
+    const clock = makeClock(100_000, FROM);
+    const fatalError = new Error("network failure");
+    const failWithFatal = async (): Promise<never> => {
+      throw fatalError;
+    };
+
+    await assert.rejects(
+      () => runSetpointControlLoop(FROM, SP_CONFIG, CONFIG, () => {}, clock, failWithFatal),
+      (err: unknown) => err === fatalError,
+    );
   });
 });

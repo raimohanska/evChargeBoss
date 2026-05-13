@@ -3,7 +3,8 @@ import type { SetpointControlConfig } from "./config.ts";
 import type { SetpointSlot } from "./types.ts";
 import { z } from "zod";
 import type { Clock } from "../utils/timing-utils.ts";
-import { planSetpoint } from "./planner.ts";
+import { planSetpoint, makeFallbackSlots } from "./planner.ts";
+import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
 import { printSetpointPlan } from "./print-plan.ts";
 import { connectMqtt } from "../ev-charging/mqtt-client.ts";
 import { makeClock } from "../utils/timing-utils.ts";
@@ -103,20 +104,40 @@ export async function runSetpointControlLoop(
 ): Promise<void> {
   const to = new Date(from.getTime() + WINDOW_MS);
 
+  // Attempt to plan; on IncompleteDataError fall back to default-setpoint slots so
+  // the loop keeps running and room-temperature adjustments still apply.
+  async function planOrFallback(): Promise<{ slots: SetpointSlot[]; isFallback: boolean }> {
+    try {
+      return { slots: await planFn(from, to, spConfig, config), isFallback: false };
+    } catch (err) {
+      if (!(err instanceof IncompleteDataError)) throw err;
+      log(
+        `[${spConfig.name}] No price data available — running in fallback mode` +
+          ` (default setpoint: ${spConfig.setpointDefault})`,
+      );
+      return { slots: makeFallbackSlots(from, to, spConfig), isFallback: true };
+    }
+  }
+
   let slots: SetpointSlot[];
 
   // Try to resume a persisted plan when an id is provided.
   if (id !== undefined) {
     const prefix = `setpoint-${id}`;
     const newestPlanPath = findNewestPlanFile(prefix);
-    if (newestPlanPath !== null) {
-      const savedPlan = readPlanFile<SetpointPlanFile>(newestPlanPath, SetpointPlanFileSchema);
-      if (savedPlan !== null && isSetpointPlanApplicable(savedPlan, from, spConfig)) {
-        log(`[${spConfig.name}] Resuming plan from ${newestPlanPath}`);
-        slots = deserializeSetpointSlots(savedPlan.slots);
-        printSetpointPlan(slots, spConfig);
-      } else {
-        slots = await planFn(from, to, spConfig, config);
+    const savedPlan =
+      newestPlanPath !== null
+        ? readPlanFile<SetpointPlanFile>(newestPlanPath, SetpointPlanFileSchema)
+        : null;
+
+    if (savedPlan !== null && isSetpointPlanApplicable(savedPlan, from, spConfig)) {
+      log(`[${spConfig.name}] Resuming plan from ${newestPlanPath}`);
+      slots = deserializeSetpointSlots(savedPlan.slots);
+      printSetpointPlan(slots, spConfig);
+    } else {
+      const result = await planOrFallback();
+      slots = result.slots;
+      if (!result.isFallback) {
         printSetpointPlan(slots, spConfig);
         try {
           writePlanFile(planFilePath(prefix, timestampForFilename(from)), {
@@ -134,29 +155,12 @@ export async function runSetpointControlLoop(
           log(`[${spConfig.name}] Warning: could not write plan file: ${writeErr}`);
         }
       }
-    } else {
-      slots = await planFn(from, to, spConfig, config);
-      printSetpointPlan(slots, spConfig);
-      try {
-        writePlanFile(planFilePath(prefix, timestampForFilename(from)), {
-          version: 1 as const,
-          createdAt: from.toISOString(),
-          config: {
-            setpointCheap: spConfig.setpointCheap,
-            setpointDefault: spConfig.setpointDefault,
-            setpointExpensive: spConfig.setpointExpensive,
-            expensiveFactor: spConfig.expensiveFactor,
-          },
-          slots: serializeSetpointSlots(slots),
-        });
-      } catch (writeErr) {
-        log(`[${spConfig.name}] Warning: could not write plan file: ${writeErr}`);
-      }
     }
   } else {
-    // Plan once — propagate errors to the outer retry loop.
-    slots = await planFn(from, to, spConfig, config);
-    printSetpointPlan(slots, spConfig);
+    // Plan once; fall back to defaults on missing data (no persistence).
+    const result = await planOrFallback();
+    slots = result.slots;
+    if (!result.isFallback) printSetpointPlan(slots, spConfig);
   }
 
   const { commandTopic } = spConfig.mqtt;
