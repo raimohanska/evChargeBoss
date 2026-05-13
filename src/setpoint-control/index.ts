@@ -3,7 +3,7 @@ import type { SetpointControlConfig } from "./config.ts";
 import type { SetpointSlot } from "./types.ts";
 import { z } from "zod";
 import type { Clock } from "../utils/timing-utils.ts";
-import { planSetpoint, makeFallbackSlots } from "./planner.ts";
+import { planSetpoint } from "./planner.ts";
 import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
 import { printSetpointPlan } from "./print-plan.ts";
 import { connectMqtt } from "../ev-charging/mqtt-client.ts";
@@ -77,6 +77,7 @@ function isSetpointPlanApplicable(
 }
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
+const SLOT_MS = 15 * 60 * 1000;
 
 type PlanFn = (
   from: Date,
@@ -104,18 +105,32 @@ export async function runSetpointControlLoop(
 ): Promise<void> {
   const to = new Date(from.getTime() + WINDOW_MS);
 
-  // Attempt to plan; on IncompleteDataError fall back to default-setpoint slots so
-  // the loop keeps running and room-temperature adjustments still apply.
-  async function planOrFallback(): Promise<{ slots: SetpointSlot[]; isFallback: boolean }> {
+  // Attempt to plan; on IncompleteDataError yield a single fallback slot covering
+  // the current 15-min window, so the outer loop retries planning next slot.
+  async function planOrFallbackSlot(): Promise<{ slots: SetpointSlot[]; isFallback: boolean }> {
     try {
       return { slots: await planFn(from, to, spConfig, config), isFallback: false };
     } catch (err) {
       if (!(err instanceof IncompleteDataError)) throw err;
       log(
-        `[${spConfig.name}] No price data available — running in fallback mode` +
-          ` (default setpoint: ${spConfig.setpointDefault})`,
+        `[${spConfig.name}] No price data — applying fallback setpoint` +
+          ` (${spConfig.setpointDefault}) for this slot, will retry next slot`,
       );
-      return { slots: makeFallbackSlots(from, to, spConfig), isFallback: true };
+      const slotStart = new Date(Math.floor(from.getTime() / SLOT_MS) * SLOT_MS);
+      return {
+        slots: [
+          {
+            start: slotStart,
+            end: new Date(slotStart.getTime() + SLOT_MS),
+            spotPriceEurPerKwh: 0,
+            transportCostEurPerKwh: 0,
+            solarForecastW: 0,
+            setpoint: spConfig.setpointDefault,
+            costTier: "average",
+          },
+        ],
+        isFallback: true,
+      };
     }
   }
 
@@ -135,7 +150,7 @@ export async function runSetpointControlLoop(
       slots = deserializeSetpointSlots(savedPlan.slots);
       printSetpointPlan(slots, spConfig);
     } else {
-      const result = await planOrFallback();
+      const result = await planOrFallbackSlot();
       slots = result.slots;
       if (!result.isFallback) {
         printSetpointPlan(slots, spConfig);
@@ -157,8 +172,8 @@ export async function runSetpointControlLoop(
       }
     }
   } else {
-    // Plan once; fall back to defaults on missing data (no persistence).
-    const result = await planOrFallback();
+    // Plan once; fall back to a single slot on missing data (no persistence).
+    const result = await planOrFallbackSlot();
     slots = result.slots;
     if (!result.isFallback) printSetpointPlan(slots, spConfig);
   }

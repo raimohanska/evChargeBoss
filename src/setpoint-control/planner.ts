@@ -100,34 +100,3 @@ export async function planSetpoint(
     return { ...s, setpoint, costTier };
   });
 }
-
-const SLOT_MS = 15 * 60 * 1000;
-
-/**
- * Generates 15-minute slots from `from` to `to`, each with `setpointDefault`
- * and zeroed price/solar data. Used when spot-price data is unavailable so
- * the loop can keep running and still apply the room-temperature adjustment.
- */
-export function makeFallbackSlots(
-  from: Date,
-  to: Date,
-  spConfig: SetpointControlConfig,
-): SetpointSlot[] {
-  const slots: SetpointSlot[] = [];
-  let t = from.getTime();
-  const end = to.getTime();
-  while (t < end) {
-    const slotEnd = Math.min(t + SLOT_MS, end);
-    slots.push({
-      start: new Date(t),
-      end: new Date(slotEnd),
-      spotPriceEurPerKwh: 0,
-      transportCostEurPerKwh: 0,
-      solarForecastW: 0,
-      setpoint: spConfig.setpointDefault,
-      costTier: "average",
-    });
-    t = slotEnd;
-  }
-  return slots;
-}

@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { planSetpoint, makeFallbackSlots } from "../src/setpoint-control/planner.ts";
+import { planSetpoint } from "../src/setpoint-control/planner.ts";
 import { IncompleteDataError } from "../src/electricity/IncompleteDataError.ts";
 import { runSetpointControlLoop } from "../src/setpoint-control/index.ts";
 import { loadConfig } from "../src/config.ts";
@@ -314,24 +314,18 @@ describe("fallback mode (IncompleteDataError)", () => {
     throw new IncompleteDataError("no spot prices", [FROM]);
   };
 
-  test("makeFallbackSlots produces 96 slots for 24h with default setpoint", () => {
-    const slots = makeFallbackSlots(FROM, TO, SP_CONFIG);
-    assert.equal(slots.length, 96);
-    assert.ok(slots.every((s) => s.setpoint === SP_CONFIG.setpointDefault));
-    assert.ok(slots.every((s) => s.costTier === "average"));
-  });
-
-  test("IncompleteDataError falls back to default setpoint for all 96 slots", async () => {
+  test("IncompleteDataError publishes default setpoint for one slot then returns", async () => {
     const clock = makeClock(100_000, FROM);
     const published: string[] = [];
     const publish = (_topic: string, payload: string) => published.push(payload);
 
     await runSetpointControlLoop(FROM, SP_CONFIG, CONFIG, publish, clock, failPlan);
 
-    assert.equal(published.length, 96, "one publish per 15-min fallback slot");
-    assert.ok(
-      published.every((p) => p === String(SP_CONFIG.setpointDefault)),
-      "every fallback slot uses setpointDefault",
+    assert.equal(published.length, 1, "only one slot executed before returning to retry");
+    assert.equal(
+      published[0],
+      String(SP_CONFIG.setpointDefault),
+      "fallback slot uses setpointDefault",
     );
   });
 
@@ -352,9 +346,10 @@ describe("fallback mode (IncompleteDataError)", () => {
     // 18°C < 21 − 1 = 20 → below range → setpoint raised by influence
     await runSetpointControlLoop(FROM, spConfig, CONFIG, publish, clock, failPlan, () => 18);
 
-    assert.equal(published.length, 96);
-    assert.ok(
-      published.every((p) => p === String(SP_CONFIG.setpointDefault + RT_CONFIG.influence)),
+    assert.equal(published.length, 1);
+    assert.equal(
+      published[0],
+      String(SP_CONFIG.setpointDefault + RT_CONFIG.influence),
       "room-temperature adjustment applied on top of default setpoint",
     );
   });
