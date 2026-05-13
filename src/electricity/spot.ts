@@ -1,6 +1,7 @@
 import { readCache, writeCache } from "./cache.ts";
 import { localDateString, localDateTimeString } from "../utils/date-time-format.ts";
 import { makeLogger } from "../utils/log.ts";
+import { fetchSpotPricesElering } from "./spot-elering.ts";
 
 const log = makeLogger("electricity");
 
@@ -14,7 +15,7 @@ interface SpotHintaEntry {
 }
 
 export async function fetchSpotPrices(
-  dates: string[]
+  dates: string[],
 ): Promise<{ map: Map<number, number>; fresh: boolean }> {
   const SLOTS_PER_DAY = 96; // 24 hours × 4 quarter-hours
   const missingDates = dates.filter((d) => {
@@ -25,7 +26,10 @@ export async function fetchSpotPrices(
   if (missingDates.length > 0) {
     log(`Fetching spot prices from api.spot-hinta.fi...`);
     const res = await fetch("https://api.spot-hinta.fi/TodayAndDayForward");
-    if (!res.ok) throw new Error(`spot-hinta.fi HTTP ${res.status}`);
+    if (!res.ok) {
+      log(`  spot-hinta.fi HTTP ${res.status} — falling back to Elering`);
+      return { map: await fetchSpotPricesElering(dates), fresh: true };
+    }
     const data = (await res.json()) as SpotHintaEntry[];
     const map = new Map<number, number>();
     for (const entry of data) {
@@ -59,5 +63,4 @@ export function persistSpotCache(map: Map<number, number>): void {
     }
     writeCache(`${CACHE_DIR}/.spot-cache-${date}.json`, data);
   }
-  
 }
