@@ -216,6 +216,15 @@ export async function runSetpointControlLoop(
     publish(commandTopic, String(setpoint));
     log(`[${spConfig.name}] setpoint: ${setpoint} at ${localTimeShort(slot.start)}`);
     onSlot?.(slot, setpoint);
+
+    // Wait until this slot expires before advancing to the next one.
+    // Without this, the outer loop would resume the same plan immediately and
+    // re-publish the current slot in a tight loop.
+    const slotEndMs = slot.end.getTime();
+    while (clock.now().getTime() < slotEndMs) {
+      if (isEnabled?.() === false) return;
+      await clock.sleep(Math.min(1_000, slotEndMs - clock.now().getTime()));
+    }
   }
 }
 
