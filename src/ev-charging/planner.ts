@@ -1,11 +1,57 @@
 import type { Config } from "../config.ts";
 import type { Slot } from "./types.ts";
-import { fetchSlots } from "../electricity/index.ts";
+import { fetchSlots, type PricedSlot } from "../electricity/index.ts";
 import { fetchSolarForecast, lookupSolarW, treeShadingFactor } from "../electricity/solar.ts";
 import { localTimeShort, localDateTimeString, localDateString } from "../utils/date-time-format.ts";
 import { makeLogger } from "../utils/log.ts";
 
 const log = makeLogger("ev-charging");
+
+type PlanInputSlot = Omit<Slot, "effectiveCostEur" | "charge" | "canHold">;
+
+export function computePlan(
+  fetchedSlots: PlanInputSlot[],
+  remainingKwh: number,
+  powerKw: number,
+  targetTime: Date,
+): Slot[] {
+  const slots = fetchedSlots
+    .filter((slot) => slot.start < targetTime)
+    .map((slot) => {
+      // Fraction of charger power not covered by solar (clamped to [0, 1])
+      const gridFraction = Math.max(0, powerKw - slot.solarForecastW / 1000) / powerKw;
+      return {
+        ...slot,
+        effectiveCostEur:
+          gridFraction * (slot.spotPriceEurPerKwh + slot.transportCostEurPerKwh) * powerKw * 0.25,
+        charge: false,
+        canHold: false,
+      };
+    });
+
+  if (powerKw <= 0) return slots;
+
+  const slotsNeeded = Math.ceil(remainingKwh / (powerKw * 0.25));
+  const sorted = [...slots].sort(
+    (a, b) => a.effectiveCostEur - b.effectiveCostEur || a.start.getTime() - b.start.getTime(),
+  );
+  const selected = new Set(sorted.slice(0, slotsNeeded).map((s) => s.start.getTime()));
+  slots.forEach((s) => (s.charge = selected.has(s.start.getTime())));
+
+  // Also charge any solar-free slots beyond the required number.
+  slots.forEach((s) => {
+    if (!s.charge && s.effectiveCostEur === 0) s.charge = true;
+  });
+
+  const kwhPerSlot = powerKw * 0.25;
+  const chargeCount = slots.filter((s) => s.charge).length;
+  const spareKwh = (chargeCount - 1) * kwhPerSlot;
+  slots.forEach((s) => {
+    s.canHold = s.charge && spareKwh >= remainingKwh;
+  });
+
+  return slots;
+}
 
 export async function plan(
   from: Date,
@@ -15,11 +61,28 @@ export async function plan(
   config: Config,
   verbose?: boolean,
 ): Promise<Slot[]> {
+  const pricedSlots = await fetchPlanInputs(from, targetTime, config, verbose);
+
+  const slotsNeeded = Math.ceil(targetKwh / (powerKw * 0.25));
+  if (verbose !== false) {
+    log(`Need ${slotsNeeded} slots to deliver ${targetKwh} kWh at ${powerKw} kW`);
+  }
+
+  return computePlan(pricedSlots, targetKwh, powerKw, targetTime);
+}
+
+export async function fetchPlanInputs(
+  from: Date,
+  targetTime: Date,
+  config: Config,
+  verbose?: boolean,
+): Promise<PricedSlot[]> {
   const pricedSlots = await fetchSlots(
     from,
     targetTime,
     config.electricity,
     config.solar,
+    verbose,
     config.influx,
   );
 
@@ -28,49 +91,7 @@ export async function plan(
       `Planning ${pricedSlots.length} slots from ${localTimeShort(from)} to ${localDateTimeString(targetTime)}`,
     );
   }
-
-  const slots: Slot[] = pricedSlots.map((ps) => {
-    // Fraction of charger power not covered by solar (clamped to [0, 1])
-    const gridFraction = Math.max(0, powerKw - ps.solarForecastW / 1000) / powerKw;
-    return {
-      ...ps,
-      effectiveCostEur:
-        gridFraction * (ps.spotPriceEurPerKwh + ps.transportCostEurPerKwh) * powerKw * 0.25,
-      charge: false,
-      canHold: false,
-    };
-  });
-
-  // Select cheapest N slots
-  const slotsNeeded = Math.ceil(targetKwh / (powerKw * 0.25)); // 0.25h per slot
-  if (verbose !== false)
-    log(`Need ${slotsNeeded} slots to deliver ${targetKwh} kWh at ${powerKw} kW`);
-
-  const sorted = [...slots].sort(
-    (a, b) => a.effectiveCostEur - b.effectiveCostEur || a.start.getTime() - b.start.getTime(),
-  );
-  const selected = new Set(sorted.slice(0, slotsNeeded).map((s) => s.start.getTime()));
-  slots.forEach((s) => (s.charge = selected.has(s.start.getTime())));
-
-  // Also charge any solar-free slots beyond the required number — these are
-  // effectively free and can top up the battery if there is still capacity.
-  slots.forEach((s) => {
-    if (!s.charge && s.effectiveCostEur === 0) s.charge = true;
-  });
-
-  // Compute canHold for each slot: true when skipping this slot entirely still
-  // leaves enough future charge slots to reach targetKwh.
-  // Each charge slot delivers powerKw * 0.25 kWh; we need ceil(targetKwh /
-  // kwhPerSlot) slots minimum.  A slot can be held iff (chargeCount - 1) other
-  // slots cover targetKwh — i.e. there is at least one spare slot in the plan.
-  const kwhPerSlot = powerKw * 0.25;
-  const chargeCount = slots.filter((s) => s.charge).length;
-  const spareKwh = (chargeCount - 1) * kwhPerSlot;
-  slots.forEach((s) => {
-    s.canHold = s.charge && spareKwh >= targetKwh;
-  });
-
-  return slots;
+  return pricedSlots;
 }
 
 export type FallbackReason = "solar" | "mustCharge" | "waiting";
@@ -103,7 +124,7 @@ export async function planFallbackSlot(
 
   // Fetch solar for this slot's date (served from cache if available).
   const dateStr = localDateString(slotStart);
-  const { map: solarMap } = await fetchSolarForecast([dateStr], config.solar);
+  const { map: solarMap } = await fetchSolarForecast([dateStr], config.solar, false);
   const solarEpochsDesc = [...solarMap.keys()].sort((a, b) => b - a);
   const rawSolarW = lookupSolarW(slotStart.getTime(), solarMap, solarEpochsDesc);
   const effectiveSolarW =

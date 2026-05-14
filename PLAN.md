@@ -1,3 +1,4 @@
-# Next steps
+# TODO
 
-Each step needs careful planning and must result in a solid state where all tests pass, app can be built and run.
+✖ Mid-slot abort with later target: session replans and continues charging (6739.149708ms)
+✖ Status clears 'Charging until' immediately after mid-slot target-time change (9215.365292ms)

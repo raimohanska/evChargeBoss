@@ -5,42 +5,6 @@ import { makeLogger } from "../utils/log.ts";
 
 const log = makeLogger("ev-charging");
 
-// All possible status values. Static states are plain strings; dynamic ones are functions.
-export const STATUS = {
-  starting: "Starting...",
-  waitingForCar: "Waiting for car to be plugged in",
-  waitingForSpot: "Waiting for spot prices",
-  waitingForSolar: "Waiting for solar forecast",
-  mqttError: "MQTT connection error",
-  idle: "Idle",
-  replanning: "Re-planning...",
-  chargingFreeSolar: "Charging while waiting for spot prices. 100% solar.",
-  chargingNoSpotPrices: "WARNING: Charging while spot prices unavailable",
-  plannedChargeStart: (time: string) => `Planned charge start at ${time}`,
-  waitingForChargingToStart: "Waiting for charging to start",
-  charging: (until: string) => `Charging until ${until}`,
-  chargingFinished: (kwh?: number) =>
-    kwh !== undefined && kwh > 0
-      ? `Charging finished at ${kwh.toFixed(1)} kWh`
-      : "Charging finished",
-  chargePaused: (next: string) => `Charge paused, next slot at ${next}`,
-  heatingHold: "Charging paused (heating peak)",
-  error: (msg: string) => msg,
-} as const;
-
-// Common interface for publishers
-export interface Publisher {
-  setReplanCallback(cb: () => void): void;
-  resetTargetTime(): void;
-  getTargetTimeOverride(): string | null;
-  setStatus(status: string): void;
-  setError(message: string): void;
-  setPlan(slots: Slot[]): void;
-  setChargedEnergy(kwh: number): void;
-  setAccumulatedCost(eur: number): void;
-  setAccumulatedSolarPct(pct: number): void;
-}
-
 const DEVICE_ID = "evchargeboss";
 const BASE = "evchargeboss";
 const DISCOVERY = "homeassistant";
@@ -80,31 +44,10 @@ function discoveryTopic(id: string) {
   return `${DISCOVERY}/sensor/${DEVICE_ID}_${id}/config`;
 }
 
-// Returns true when transitioning from `current` to `next` status would create
-// noisy/misleading history entries.  Extracted so tests can import it directly.
-export function shouldSuppressStatus(current: string, next: string): boolean {
-  // Keep "Charging until X" stable across re-plan cycles — suppress the
-  // transient "Waiting for charging to start" that appears between back-to-back
-  // charge slots (where the relay is never turned off).
-  if (current.startsWith("Charging until ")) {
-    if (next === STATUS.waitingForChargingToStart) {
-      return true;
-    }
-  }
-  // Suppress the brief "Planned charge start at X" that can appear just
-  // before "Waiting for charging to start" when the same plan is re-evaluated.
-  if (current.startsWith("Planned charge start at ") && next === current) {
-    return true;
-  }
-  return false;
-}
-
-export class StatusPublisher implements Publisher {
+export class StatusPublisher {
   private client: MqttClient;
   private config: EvChargingConfig;
   private targetTimeOverride: string | null = null;
-  private lastLoggedStatus = "";
-  private accumulatedCostEur = 0;
 
   constructor(client: MqttClient, config: EvChargingConfig) {
     this.client = client;
@@ -112,10 +55,10 @@ export class StatusPublisher implements Publisher {
     this.initializeDiscovery();
   }
 
-  private replanCallback: (() => void) | null = null;
+  private wakeCallback: (() => void) | null = null;
 
-  setReplanCallback(cb: () => void): void {
-    this.replanCallback = cb;
+  setWakeCallback(cb: () => void): void {
+    this.wakeCallback = cb;
   }
 
   getTargetTimeOverride(): string | null {
@@ -128,7 +71,7 @@ export class StatusPublisher implements Publisher {
   }
 
   private state: Record<string, string> = {
-    status: STATUS.starting,
+    status: "Starting...",
     plan_cost: "-",
     solar_pct: "-",
     charged_energy: "-",
@@ -199,14 +142,14 @@ export class StatusPublisher implements Publisher {
         this.targetTimeOverride = newTime;
         log(`[MQTT] Target time updated to ${newTime}`);
         this.pub(timeStateTopic, newTime);
-        this.replanCallback?.();
+        this.wakeCallback?.();
       } else if (topic === chargeNowCmdTopic && payload.toString().trim() === "PRESS") {
         const target = new Date(Date.now() + chargeNowHours * 3_600_000);
         const newTime = `${String(target.getHours()).padStart(2, "0")}:${String(target.getMinutes()).padStart(2, "0")}`;
         this.targetTimeOverride = newTime;
         log(`[MQTT] Charge Now pressed -> target time set to ${newTime}`);
         this.pub(timeStateTopic, newTime);
-        this.replanCallback?.();
+        this.wakeCallback?.();
       }
     });
 
@@ -214,40 +157,14 @@ export class StatusPublisher implements Publisher {
   }
 
   setStatus(status: string): void {
-    const current = this.state.status;
-    if (shouldSuppressStatus(current, status)) return;
-
-    if (status !== this.lastLoggedStatus) {
-      if (status.startsWith("Charging until ")) {
-        const charged = parseFloat(this.state.charged_energy) || 0;
-        const remaining = Math.max(0, this.config.targetKwh - charged);
-        log(
-          `[Status] ${status} | ${charged.toFixed(2)} kWh charged, ${remaining.toFixed(2)} kWh remaining`,
-        );
-      } else {
-        log(`[Status] ${status}`);
-      }
-      this.lastLoggedStatus = status;
-    }
+    if (this.state.status === status) return;
+    log(`[Status] ${status}`);
     this.setState("status", status);
-    if (status === STATUS.waitingForCar) {
-      this.setState("plan_cost", "-");
-      this.setState("solar_pct", "-");
-      this.setState("charged_energy", "-");
-    }
-  }
-
-  setAccumulatedCost(eur: number): void {
-    this.accumulatedCostEur = eur;
-  }
-
-  setAccumulatedSolarPct(_pct: number): void {
-    // stored by main-loop; no separate MQTT state needed beyond solar_pct from setPlan
   }
 
   setError(message: string): void {
     log(`[Status] ${message}`);
-    this.setState("status", STATUS.error(message));
+    this.setState("status", message);
   }
 
   setPlan(slots: Slot[]): void {
@@ -278,77 +195,4 @@ export class StatusPublisher implements Publisher {
       if (err) log(`[MQTT status] publish error on ${topic}: ${err.message}`);
     });
   }
-}
-
-export class LoggingPublisher implements Publisher {
-  private config: EvChargingConfig;
-  private targetTimeOverride: string | null = null;
-  private replanCallback: (() => void) | null = null;
-  private lastLoggedStatus = "";
-  private chargedEnergyKwh = 0;
-  private accumulatedCostEur = 0;
-
-  constructor(config: EvChargingConfig) {
-    this.config = config;
-  }
-
-  setReplanCallback(cb: () => void): void {
-    this.replanCallback = cb;
-  }
-
-  getTargetTimeOverride(): string | null {
-    return this.targetTimeOverride;
-  }
-
-  resetTargetTime(): void {
-    this.targetTimeOverride = null;
-    log(`[Publisher] Target time reset to ${this.config.targetTime}`);
-  }
-
-  setStatus(status: string): void {
-    if (status !== this.lastLoggedStatus) {
-      if (status.startsWith("Charging until ")) {
-        const remaining = Math.max(0, this.config.targetKwh - this.chargedEnergyKwh);
-        log(
-          `[Status] ${status} | ${this.chargedEnergyKwh.toFixed(2)} kWh charged, ${remaining.toFixed(2)} kWh remaining`,
-        );
-      } else {
-        log(`[Status] ${status}`);
-      }
-      this.lastLoggedStatus = status;
-    }
-  }
-
-  setAccumulatedCost(eur: number): void {
-    this.accumulatedCostEur = eur;
-  }
-
-  setAccumulatedSolarPct(_pct: number): void {
-    // value is logged by main-loop directly
-  }
-
-  setError(message: string): void {
-    log(`[Error] ${message}`);
-  }
-
-  setPlan(slots: Slot[]): void {
-    const charge = slots.filter((s) => s.charge);
-    const cost = charge.reduce((sum, s) => sum + s.effectiveCostEur, 0);
-    const powerKw = this.config.powerKw ?? 1;
-    const totalSolarFraction = charge.reduce(
-      (sum, s) => sum + Math.min(1, s.solarForecastW / 1000 / powerKw),
-      0,
-    );
-    const pct = charge.length > 0 ? Math.round((totalSolarFraction / charge.length) * 100) : 0;
-    log(`[Plan] Cost: EUR ${cost.toFixed(2)}, Solar: ${pct}%`);
-  }
-
-  setChargedEnergy(kwh: number): void {
-    this.chargedEnergyKwh = kwh;
-  }
-}
-
-export function createPublisher(config: EvChargingConfig, client?: MqttClient): Publisher {
-  if (client) return new StatusPublisher(client, config);
-  return new LoggingPublisher(config);
 }

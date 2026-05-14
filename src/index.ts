@@ -56,14 +56,9 @@ import { runEvCharging } from "./ev-charging/index.ts";
 import { runSetpointControl } from "./setpoint-control/index.ts";
 import { runMqttToInflux } from "./mqtt-to-influx/index.ts";
 import { runElectricityPoller } from "./electricity/poller.ts";
-import { makeLogger } from "./utils/log.ts";
-
-const log = makeLogger("main");
 
 const configPath = getConfigPath();
 const config = loadConfig();
-
-log("*************************************\nStarting up\n*************************************");
 
 const loops: Promise<void>[] = [runEvCharging(config)];
 for (const [id, spConfig] of Object.entries(config.setpointControl ?? {}))

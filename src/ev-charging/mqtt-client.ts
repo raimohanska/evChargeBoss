@@ -2,10 +2,8 @@ import mqtt from "mqtt";
 import type { EvChargingMqttConfig, EvChargingConfig } from "./config.ts";
 import type { BrokerConfig } from "../config.ts";
 import type { ChargingSession, WattsSource, WattsUpdate, HoldSource } from "./charger.ts";
-import type { Publisher } from "./mqtt-status.ts";
-import { Canceller } from "../utils/timing-utils.ts";
-import type { CancelSignal, Clock } from "../utils/timing-utils.ts";
-import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
+import type { StatusPublisher } from "./mqtt-status.ts";
+import type { Clock } from "../utils/timing-utils.ts";
 import { makeLogger } from "../utils/log.ts";
 
 const log = makeLogger("ev-charging");
@@ -50,68 +48,15 @@ export async function connectMqtt(brokerConfig: BrokerConfig): Promise<MqttClien
   });
 }
 
-async function waitForPlugIn(
-  client: MqttClient,
-  mqttConfig: EvChargingMqttConfig,
-  signal?: CancelSignal,
-): Promise<number> {
-  const { powerTopic, powerField, powerThresholdW } = mqttConfig;
-  const topicLabel = powerField ? `${powerTopic}.${powerField}` : powerTopic;
-  log(`Waiting for car plug-in (${topicLabel} > ${powerThresholdW} W)...`);
-
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new IncompleteDataError("No car detected within timeout", []));
-      return;
-    }
-
-    function cleanup() {
-      client.off("message", onMessage);
-      client.off("error", onError);
-    }
-
-    function onMessage(topic: string, message: Buffer) {
-      if (topic !== powerTopic) return;
-      try {
-        const watts = parseWatts(message, powerField);
-        if (watts !== null && watts > powerThresholdW) {
-          log(`Car detected: ${watts} W on ${topic}`);
-          cleanup();
-          resolve(watts);
-        }
-      } catch (err) {
-        log(`MQTT parse error on ${topic}: ${err}`);
-      }
-    }
-
-    function onError(err: Error) {
-      cleanup();
-      reject(err);
-    }
-
-    signal?.addEventListener("abort", () => {
-      cleanup();
-      reject(new IncompleteDataError("No car detected within timeout", []));
-    });
-
-    client.on("message", onMessage);
-    client.once("error", onError);
-    client.subscribe(powerTopic, (err) => {
-      if (err) reject(err);
-    });
-  });
-}
-
 // Returns a ChargingSession that uses the provided MQTT client for charger commands
 // and listens to power readings on the power topic.
-// clock is used to run the 15-second power-detection window at the correct speed.
 export function makeMqttSession(
   client: MqttClient,
   mqttConfig: EvChargingMqttConfig,
-  _publisher: Publisher,
-  clock: Clock,
+  _publisher: StatusPublisher,
+  _clock: Clock,
   holdWhenHeating?: EvChargingConfig["holdWhenHeating"],
-  plugInTimeoutMs?: number,
+  _plugInTimeoutMs?: number,
 ): ChargingSession {
   const { chargerTopic, onPayload, offPayload, powerTopic, powerField, energyField } = mqttConfig;
 
@@ -129,7 +74,7 @@ export function makeMqttSession(
   };
 
   // Persistent MQTT handler — routes powerTopic messages to wattsListeners for
-  // the lifetime of the session.  Registered here so it survives waitForStart().
+  // the lifetime of the session.
   const msgHandler = (topic: string, message: Buffer) => {
     if (topic !== powerTopic) return;
     try {
@@ -154,6 +99,9 @@ export function makeMqttSession(
     }
   };
   client.on("message", msgHandler);
+  client.subscribe(powerTopic, (err) => {
+    if (err) log(`[MQTT] Failed to subscribe to ${powerTopic}: ${err}`);
+  });
 
   const driver = {
     async send(on: boolean): Promise<void> {
@@ -212,47 +160,9 @@ export function makeMqttSession(
   return {
     end() {
       client.off("message", msgHandler);
+      client.unsubscribe(powerTopic);
       heatingCleanup?.();
       client.end();
-    },
-    async waitForStart(): Promise<number> {
-      const timeoutMs = plugInTimeoutMs ?? 24 * 60 * 60 * 1000;
-      const plugInCanceller = new Canceller();
-      const timeoutCanceller = new Canceller();
-
-      // Race plug-in detection against a virtual-time-aware timeout.
-      clock.sleep(timeoutMs, timeoutCanceller.signal).then(() => {
-        plugInCanceller.abort();
-      });
-
-      try {
-        await driver.send(true);
-        let initialWatts: number;
-        try {
-          initialWatts = await waitForPlugIn(client, mqttConfig, plugInCanceller.signal);
-        } finally {
-          timeoutCanceller.abort(); // cancel timeout sleep whether detection succeeded or failed
-        }
-        // Measure charging power for 15 virtual seconds to get a stable reading.
-        // The initial detection reading is always included as a seed.
-        const readings: number[] = [initialWatts!];
-        const unsub = wattsSource.subscribe(({ watts }) => {
-          if (watts > 0) readings.push(watts);
-        });
-        await clock.sleep(15_000);
-        unsub();
-        const maxW = Math.max(...readings);
-        const powerKw = maxW / 1000;
-        log(
-          `Detected charging power: ${powerKw.toFixed(2)} kW (max of ${readings.length} samples)`,
-        );
-        return powerKw;
-      } catch (err) {
-        if (!(err instanceof IncompleteDataError)) {
-          client.end();
-        }
-        throw err;
-      }
     },
     driver,
     wattsSource,

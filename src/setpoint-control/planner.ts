@@ -29,7 +29,7 @@ async function fetchAvailableSlots(
   config: Config,
 ): Promise<PricedSlot[]> {
   try {
-    return await fetchSlots(from, to, config.electricity, config.solar, config.influx);
+    return await fetchSlots(from, to, config.electricity, config.solar, undefined, config.influx);
   } catch (err) {
     if (!(err instanceof IncompleteDataError) || err.missingSlots.length === 0) throw err;
     const firstMissing = err.missingSlots[0];
@@ -37,7 +37,14 @@ async function fetchAvailableSlots(
     log(
       `[${spConfig.name}] Spot prices only available until ${localTimeShort(firstMissing)} — using shorter plan`,
     );
-    return await fetchSlots(from, firstMissing, config.electricity, config.solar, config.influx);
+    return await fetchSlots(
+      from,
+      firstMissing,
+      config.electricity,
+      config.solar,
+      undefined,
+      config.influx,
+    );
   }
 }
 

@@ -11,6 +11,10 @@
     "/^node --experimental-strip-types --test test/influx\\.test\\.ts$/": {
       "approve": true,
       "matchCommandLine": true
-    }
+    },
+    "git checkout": true,
+    "cp": true,
+    "jobs": true,
+    "git symbolic-ref": true
   }
 }

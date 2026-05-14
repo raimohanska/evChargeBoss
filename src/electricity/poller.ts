@@ -51,6 +51,7 @@ export async function runElectricityPollOnce(config: Config, clock: Clock): Prom
       to,
       config.electricity,
       config.solar,
+      false,
       config.influx,
     );
     log(`[ElectricityPoller] Fetched ${slots.length} slots`);
@@ -64,6 +65,7 @@ export async function runElectricityPollOnce(config: Config, clock: Clock): Prom
           firstMissing,
           config.electricity,
           config.solar,
+          false,
           config.influx,
         );
         log(
@@ -91,7 +93,9 @@ export async function runElectricityPoller(config: Config): Promise<void> {
       await runElectricityPollOnce(config, clock);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log(`[ElectricityPoller] Fetch failed: ${msg} — retrying in 1h`);
+      log(`[ElectricityPoller] Fetch failed: ${msg} — retrying in 60s`);
+      await clock.sleep(60_000);
+      continue;
     }
     await clock.sleep(POLL_INTERVAL_MS);
   }

@@ -78,6 +78,18 @@ function fmtLocal(d: Date): string {
   );
 }
 
+/** Generate all 96 quarter-hour slot timestamps for a local-time date string "YYYY-MM-DD". */
+function fullDaySlots(dateStr: string): number[] {
+  const slots: number[] = [];
+  for (let i = 0; i < 96; i++) {
+    const h = Math.floor(i / 4);
+    const m = (i % 4) * 15;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    slots.push(new Date(`${dateStr}T${pad(h)}:${pad(m)}:00`).getTime());
+  }
+  return slots;
+}
+
 function installFetchMock(): () => void {
   const orig = globalThis.fetch;
   globalThis.fetch = async (
@@ -86,10 +98,13 @@ function installFetchMock(): () => void {
   ): Promise<Response> => {
     const s = String(input);
     if (s.includes("spot-hinta.fi")) {
-      const data = [
-        { Rank: 1, DateTime: new Date(T0).toISOString(), PriceNoTax: 0.05, PriceWithTax: 0.062 },
-        { Rank: 2, DateTime: new Date(T1).toISOString(), PriceNoTax: 0.044, PriceWithTax: 0.055 },
-      ];
+      // Return all 96 slots for DATE so persistSpotCache writes the cache file.
+      const data = fullDaySlots(DATE).map((epoch, i) => ({
+        Rank: i + 1,
+        DateTime: new Date(epoch).toISOString(),
+        PriceNoTax: 0.05,
+        PriceWithTax: epoch === T0 ? 0.062 : epoch === T1 ? 0.055 : 0.05,
+      }));
       return { ok: true, json: async () => data } as Response;
     }
     if (s.includes("forecast.solar")) {
@@ -153,7 +168,7 @@ after(() => {
 test("writes electricity and solar forecast to InfluxDB when data is fresh", async () => {
   const restoreFetch = installFetchMock();
   try {
-    const slots = await fetchSlots(FROM, TO, elConfigFresh, solConfigFresh, INFLUX);
+    const slots = await fetchSlots(FROM, TO, elConfigFresh, solConfigFresh, false, INFLUX);
     assert.equal(slots.length, 2, "should return 2 slots");
   } finally {
     restoreFetch();
@@ -180,7 +195,7 @@ test("does not write to InfluxDB when data is served from cache", async () => {
   assert.ok(existsSync(SPOT_CACHE), "spot cache should exist from previous test");
 
   // Use distinct measurement names that have never been written to.
-  await fetchSlots(FROM, TO, elConfigCached, solConfigCached, INFLUX);
+  await fetchSlots(FROM, TO, elConfigCached, solConfigCached, false, INFLUX);
 
   // Allow async fire-and-forget to settle before querying.
   await new Promise<void>((r) => setTimeout(r, 500));

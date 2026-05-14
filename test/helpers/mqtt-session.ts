@@ -1,9 +1,9 @@
 import os from "os";
 import path from "path";
 import { connectMqtt, makeMqttSession } from "../../src/ev-charging/mqtt-client.ts";
-import { createPublisher, STATUS } from "../../src/ev-charging/mqtt-status.ts";
+import { StatusPublisher } from "../../src/ev-charging/mqtt-status.ts";
 import { makeClock } from "../../src/utils/timing-utils.ts";
-import { runSession } from "../../src/ev-charging/main-loop.ts";
+import { runSession } from "../../src/ev-charging/coordinator.ts";
 import type { Config, MqttConfig } from "../../src/config.ts";
 import type { SessionSummary } from "../../src/influx.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
@@ -112,7 +112,7 @@ export async function startMqttSession(
     if (topic === STATUS_TOPIC) {
       if (!_recording) {
         // Discard any retained messages from a previous session; begin on "Starting…".
-        if (value === STATUS.starting) {
+        if (value === "Starting...") {
           _recording = true;
           _lastStatus = value;
           _statusHistory.push(value);
@@ -131,7 +131,7 @@ export async function startMqttSession(
 
   // Real StatusPublisher — initializeDiscovery() publishes "Starting…" (retained) which
   // wakes the controlClient subscription above.
-  const publisher = createPublisher(config.evCharging, sessionClient);
+  const publisher = new StatusPublisher(sessionClient, config.evCharging);
 
   const session = makeMqttSession(
     sessionClient,
@@ -146,8 +146,8 @@ export async function startMqttSession(
   });
 
   // Wait for the relay's charger-topic subscription to be confirmed (SUBACK) before
-  // starting the main loop.  Without this, waitForStart() can publish ON before the
-  // relay has subscribed, causing the relay to miss the command permanently.
+  // starting the main loop.  Without this, coordinator startup detection can publish
+  // ON before the relay has subscribed, causing the relay to miss the command.
   await relay.ready;
 
   // Wrap onSessionEnd to capture the last SessionSummary.

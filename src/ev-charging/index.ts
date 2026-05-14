@@ -3,27 +3,27 @@ import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
 import { plan } from "./planner.ts";
 import { printPlan } from "./print-plan.ts";
 import { connectMqtt, makeMqttSession } from "./mqtt-client.ts";
-import { STATUS, createPublisher } from "./mqtt-status.ts";
+import { StatusPublisher } from "./mqtt-status.ts";
 import { makeLogger } from "../utils/log.ts";
-
-const log = makeLogger("ev-charging");
 import { makeClock } from "../utils/timing-utils.ts";
 import { parseArgs } from "./parse-args.ts";
-import { runSession, parseTargetTime } from "./main-loop.ts";
+import { runSession, parseTargetTime } from "./coordinator.ts";
 import { writeSessionSummary, checkInfluxHealth } from "../influx.ts";
+
+const log = makeLogger("ev-charging");
 
 function errorStatus(err: unknown): string {
   if (err instanceof IncompleteDataError) {
     const m = err.message;
-    if (m.includes("spot price")) return STATUS.waitingForSpot;
-    if (m.includes("solar")) return STATUS.waitingForSolar;
+    if (m.includes("spot price")) return "Waiting for spot prices";
+    if (m.includes("solar")) return "Waiting for solar forecast";
   }
   const msg = err instanceof Error ? err.message : String(err);
-  if (msg.includes("spot-hinta")) return STATUS.waitingForSpot;
+  if (msg.includes("spot-hinta")) return "Waiting for spot prices";
   if (msg.includes("solar") || msg.includes("open-meteo") || msg.includes("forecast.solar"))
-    return STATUS.waitingForSolar;
-  if (msg.toLowerCase().includes("mqtt")) return STATUS.mqttError;
-  return STATUS.error(msg);
+    return "Waiting for solar forecast";
+  if (msg.toLowerCase().includes("mqtt")) return "MQTT connection error";
+  return msg;
 }
 
 export async function runEvCharging(config: Config): Promise<void> {
@@ -59,7 +59,7 @@ export async function runEvCharging(config: Config): Promise<void> {
   }
 
   const mqttClient = await connectMqtt(config.mqtt);
-  const publisher = createPublisher(config.evCharging, mqttClient);
+  const publisher = new StatusPublisher(mqttClient, config.evCharging);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
   const session = makeMqttSession(
     mqttClient,

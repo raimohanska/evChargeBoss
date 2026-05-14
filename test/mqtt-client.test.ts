@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { connectMqtt, makeMqttSession } from "../src/ev-charging/mqtt-client.ts";
-import { createPublisher } from "../src/ev-charging/mqtt-status.ts";
+import { StatusPublisher } from "../src/ev-charging/mqtt-status.ts";
 import type { WattsUpdate } from "../src/ev-charging/charger.ts";
 import { makeClock } from "../src/utils/timing-utils.ts";
 import { makeTestConfig } from "./helpers/config.ts";
@@ -18,15 +18,10 @@ process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
 
 /**
- * Regression: msgHandler was scoped inside waitForStart() and torn down in its
- * finally block.  After waitForStart() returned, no MQTT messages reached
- * wattsListeners, so wattsSource.subscribe() callbacks were never invoked.
- *
- * The test subscribes to wattsSource AFTER waitForStart() has resolved and
- * asserts that a subsequent power message is delivered.  With the old code the
- * receivedPromise would never resolve.
+ * Regression: watts message routing must remain active for the whole session.
+ * The test starts charging and then subscribes to wattsSource afterwards.
  */
-test("wattsSource delivers updates after waitForStart() resolves", async () => {
+test("wattsSource delivers updates after charging starts", async () => {
   const config = makeTestConfig();
   const mqtt = config.evCharging.mqtt!;
 
@@ -35,14 +30,13 @@ test("wattsSource delivers updates after waitForStart() resolves", async () => {
     connectMqtt(config.mqtt!),
   ]);
 
-  const publisher = createPublisher(config.evCharging);
+  const publisher = new StatusPublisher(sessionClient, config.evCharging);
   // Use a high-speedup clock so the 15-second power-measurement window
   // completes in ~1.5ms of real time.
   const clock = makeClock(10_000);
   const session = makeMqttSession(sessionClient, mqtt, publisher, clock);
 
-  // Helper client subscribes to the charger command topic so the ON publish
-  // inside waitForStart() doesn't fail due to no subscribers being present.
+  // Helper client subscribes to the charger command topic before sending ON.
   await new Promise<void>((res, rej) =>
     helperClient.subscribe(mqtt.chargerTopic, (e) => (e ? rej(e) : res())),
   );
@@ -50,19 +44,9 @@ test("wattsSource delivers updates after waitForStart() resolves", async () => {
   const publishPower = (w: number) =>
     helperClient.publish(mqtt.powerTopic, JSON.stringify({ [mqtt.powerField!]: w }));
 
-  // Continuously publish power so waitForPlugIn reliably receives a reading
-  // above threshold regardless of subscribe timing — same approach used by
-  // MqttRelaySimulator (setInterval + immediate publish).
-  const powerInterval = setInterval(() => publishPower(mqtt.powerThresholdW + 100), 50);
-  try {
-    await session.waitForStart();
-  } finally {
-    clearInterval(powerInterval);
-  }
+  await session.driver.send(true);
 
-  // Subscribe to wattsSource AFTER waitForStart() has returned.
-  // With the old bug the msgHandler was already torn down, so this callback
-  // would never fire.
+  // Subscribe after the session has already started.
   let received: WattsUpdate | null = null;
   const receivedPromise = new Promise<void>((resolve) => {
     session.wattsSource!.subscribe((u) => {
