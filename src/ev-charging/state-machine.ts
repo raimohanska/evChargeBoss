@@ -127,6 +127,15 @@ export function getStatus(machine: MachineState, env: Environment): string {
 }
 
 export function nextState(machine: MachineState, env: Environment): MachineState {
+  if (machine.id === "WaitingForCar" && !env.currentPowerW) {
+    return machine
+  }
+  if (env.currentPowerW / 1000 > machine.detectedChargerPowerKw) {
+    machine = {
+      ...machine,
+      detectedChargerPowerKw: env.currentPowerW / 1000
+    }
+  }
   if (env.forecast) {
     const remainingKwh = Math.max(0, env.targetKwh - machine.chargedKwh);
     const plan = computePlan(
