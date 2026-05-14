@@ -67,7 +67,7 @@ const states: Record<StateId, StateHandler> = {
     relayOn: true,
     getStatusMessage(machine, env) {
       const runEnd = findChargeRunEnd(machine.plan, floorToSlotStart(env.now));
-      return runEnd ? `Charging until ${localTimeShort(runEnd)}` : "Charging (end not known)";
+      return runEnd ? `Charging until ${localTimeShort(runEnd)}` : "Charging";
     },
   },
   ChargingPausedForHeat: {
@@ -136,7 +136,7 @@ export function nextState(machine: MachineState, env: Environment): MachineState
       env.targetTime,
     );
     if (machine.plan === null) {
-      log("New plan computed");
+      log("New plan computed for charging power " + machine.detectedChargerPowerKw + "kW");
       printPlan(plan);
     } else if (planChargeStatesChanged(machine.plan, plan)) {
       log("Plan updated (charge slots changed)");

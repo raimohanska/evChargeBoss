@@ -24,8 +24,7 @@ export async function fetchSpotPrices(
   });
 
   if (missingDates.length > 0) {
-    if (verbose !== false)
-      log(`Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(", ")})`);
+    log(`Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(", ")})`);
     const res = await fetch("https://api.spot-hinta.fi/TodayAndDayForward");
     if (!res.ok) throw new Error(`spot-hinta.fi HTTP ${res.status}`);
     const data = (await res.json()) as SpotHintaEntry[];
@@ -33,7 +32,7 @@ export async function fetchSpotPrices(
     for (const entry of data) {
       map.set(new Date(entry.DateTime).getTime(), entry.PriceWithTax);
     }
-    if (verbose !== false) log(`  Got ${map.size} quarter-hour price slots`);
+    if (verbose) log(`  Got ${map.size} quarter-hour price slots`);
     return { map, fresh: true };
   }
 
@@ -44,7 +43,7 @@ export async function fetchSpotPrices(
       map.set(new Date(k).getTime(), v);
     }
   }
-  if (verbose !== false) log(`  Spot prices loaded from cache (${map.size} slots)`);
+  if (verbose) log(`  Spot prices loaded from cache (${map.size} slots)`);
   return { map, fresh: false };
 }
 
@@ -59,7 +58,7 @@ export function persistSpotCache(map: Map<number, number>, verbose?: boolean): v
   for (const [date, data] of byDate) {
     const count = Object.keys(data).length;
     if (count < 96) {
-      if (verbose !== false)
+      if (verbose)
         log(
           `  Spot cache for ${date}: only ${count}/96 slots — skipping write to avoid partial cache`,
         );
@@ -68,5 +67,5 @@ export function persistSpotCache(map: Map<number, number>, verbose?: boolean): v
     writeCache(`${CACHE_DIR}/.spot-cache-${date}.json`, data);
     written++;
   }
-  if (verbose !== false) log(`  Spot prices cached (${written} day file(s)).`);
+  if (verbose) log(`  Spot prices cached (${written} day file(s)).`);
 }

@@ -23,13 +23,12 @@ export async function fetchSolarForecast(
   );
 
   if (missingDates.length > 0) {
-    if (verbose !== false) log(`Fetching solar forecast... (missing: ${missingDates.join(", ")})`);
+    if (verbose) log(`Fetching solar forecast... (missing: ${missingDates.join(", ")})`);
     const { lat, lon, declination, azimuth, kwp } = solarConfig;
     const url = `https://api.forecast.solar/estimate/${lat}/${lon}/${declination}/${azimuth}/${kwp}`;
-    if (verbose !== false) log("Fetching solar forecast from " + url);
+    log("Fetching solar forecast from " + url);
     const res = await fetch(url);
-    if (!res.ok) {
-      if (verbose !== false)
+    if (!res.ok) {      
         log(`  forecast.solar HTTP ${res.status} — falling back to Open-Meteo`);
       return { map: await fetchSolarForecastOpenMeteo(solarConfig, verbose), fresh: true };
     }
@@ -38,7 +37,7 @@ export async function fetchSolarForecast(
     for (const [tsStr, w] of Object.entries(json.result.watts)) {
       map.set(new Date(tsStr.replace(" ", "T")).getTime(), w);
     }
-    if (verbose !== false) log(`  Got ${map.size} solar forecast slots`);
+    if (verbose) log(`  Got ${map.size} solar forecast slots`);
     return { map, fresh: true };
   }
 
@@ -49,7 +48,7 @@ export async function fetchSolarForecast(
       map.set(new Date(k).getTime(), v);
     }
   }
-  if (verbose !== false) log(`  Solar forecast loaded from cache (${map.size} slots)`);
+  if (verbose) log(`  Solar forecast loaded from cache (${map.size} slots)`);
   return { map, fresh: false };
 }
 
@@ -63,7 +62,7 @@ export function persistSolarCache(map: Map<number, number>, verbose?: boolean): 
   for (const [date, data] of byDate) {
     writeCache(`${CACHE_DIR}/.solar-cache-${date}.json`, data);
   }
-  if (verbose !== false) log(`  Solar forecast cached (${byDate.size} day file(s)).`);
+  if (verbose) log(`  Solar forecast cached (${byDate.size} day file(s)).`);
 }
 
 /**
