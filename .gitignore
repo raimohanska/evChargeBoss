@@ -4,3 +4,4 @@ dist/
 node_modules/
 config.json
 test_run.log
+.worktrees/
