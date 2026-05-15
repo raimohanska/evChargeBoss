@@ -61,7 +61,17 @@ function getInitialState(config: Config, targetTime: Date): MachineState {
         detectedChargerPowerKw: saved.detectedPowerKw,
       };
     } else {
-      log(`Plan file found but not applicable (${planPath}) — starting fresh.`);
+      let reason: string;
+      if (!saved) {
+        reason = "plan file unreadable";
+      } else if (saved.config.targetKwh !== config.evCharging.targetKwh) {
+        reason = `targetKwh mismatch: saved=${saved.config.targetKwh}, config=${config.evCharging.targetKwh}`;
+      } else if (new Date(saved.config.targetDateTime).getTime() !== targetTime.getTime()) {
+        reason = `targetDateTime mismatch: saved=${saved.config.targetDateTime}, config=${localDateTimeString(targetTime)}`;
+      } else {
+        reason = `session already complete: chargedKwh=${saved.chargedKwh} >= targetKwh=${config.evCharging.targetKwh}`;
+      }
+      log(`Plan file found but not applicable (${planPath}): ${reason} — starting fresh.`);
     }
   }
 
@@ -86,13 +96,12 @@ export async function runSession(
   const powerKw = config.evCharging.powerKw ?? 0;
   const slotMs = 15 * 60 * 1000;
 
-  
   const getTargetTimeFromPublisher = () => {
     const targetTimeStr = publisher.getTargetTimeOverride() ?? config.evCharging.targetTime;
     return parseTargetTime(targetTimeStr, now);
-  }
+  };
 
-  let targetTime = getTargetTimeFromPublisher()
+  let targetTime = getTargetTimeFromPublisher();
   let currentPowerW = 0;
   let heatingHold = false;
   let relayOn: boolean | null = null;
@@ -101,7 +110,7 @@ export async function runSession(
   let chargedSlots = 0;
   let forecast: PricedSlot[] | null = null;
 
-  let machine: MachineState = getInitialState(config, targetTime)
+  let machine: MachineState = getInitialState(config, targetTime);
 
   const savePlan = () => {
     const filePath = planFilePath("ev-charging", timestampForFilename(now));
@@ -156,27 +165,23 @@ export async function runSession(
         if (slotKwh > 0) publisher.setChargedEnergy(machine.chargedKwh + slotKwh);
       }
     }
-    updateState().catch((err) =>
-      log(`CarPowerChange error: ${String(err)}`),
-    );
+    updateState().catch((err) => log(`CarPowerChange error: ${String(err)}`));
   });
 
   const unsubHold = session.holdSource?.subscribe((held) => {
     heatingHold = held;
-    updateState().catch((err) =>
-      log(`HeatingHoldChange error: ${String(err)}`),
-    );
+    updateState().catch((err) => log(`HeatingHoldChange error: ${String(err)}`));
   });
 
   try {
     // Main loop: fetch plan, sleep to slot, charge, repeat until target kWh reached.
     while (true) {
       // 1. Check for target time change
-      const newTargetTime = getTargetTimeFromPublisher()
+      const newTargetTime = getTargetTimeFromPublisher();
       if (newTargetTime.getTime() !== targetTime.getTime()) {
-        targetTime = newTargetTime
-        forecast = null
-      }      
+        targetTime = newTargetTime;
+        forecast = null;
+      }
 
       // 2. Check if target time reached
       if (clock.now() >= env().targetTime) {
@@ -187,10 +192,10 @@ export async function runSession(
       // 3. Fetch forecasts if not already fetched
       if (!forecast) {
         try {
-          forecast = await fetchPlanInputs(clock.now(), targetTime, config);          
+          forecast = await fetchPlanInputs(clock.now(), targetTime, config);
         } catch (err) {
           if (err instanceof IncompleteDataError) {
-            log(`Forecast unavailable: ${err.message} — retrying at next slot`);            
+            log(`Forecast unavailable: ${err.message} — retrying at next slot`);
             const msToNextSlot = slotMs - (clock.now().getTime() % slotMs);
             wakeCancel = new Canceller();
             publisher.setWakeCallback(() => wakeCancel.abort());
@@ -252,7 +257,7 @@ export async function runSession(
             break;
           }
         }
-        await updateState();        
+        await updateState();
       } else {
         // Nothing to do. Let's just sleep for a second.
         await clock.sleep(1000, wakeCancel.signal);
