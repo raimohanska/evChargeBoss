@@ -126,7 +126,7 @@ export function getStatus(machine: MachineState, env: Environment): string {
 }
 
 export function nextState(machine: MachineState, env: Environment): MachineState {
-  if (machine.id === "WaitingForCar" && !env.currentPowerW) {
+  if (machine.id === "WaitingForCar" && env.currentPowerW <= env.powerThresholdW) {
     return machine;
   }
   if (env.currentPowerW / 1000 > machine.detectedChargerPowerKw) {

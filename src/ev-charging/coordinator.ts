@@ -252,8 +252,6 @@ export async function runSession(
           };
           if (machine.chargedKwh >= config.evCharging.targetKwh) {
             log(`Charging complete: ${machine.chargedKwh.toFixed(2)} kWh delivered.`);
-            // Might consider having a final state in the state machine, but OTOH if the detection is in coordinator, the decision can also be
-            await session.driver.send(false);
             break;
           }
         }
@@ -262,6 +260,24 @@ export async function runSession(
         // Nothing to do. Let's just sleep for a second.
         await clock.sleep(1000, wakeCancel.signal);
       }
+    } // end while(true)
+
+    // After the session loop exits, keep the relay ON and wait until current
+    // power drops below the threshold. This guarantees the next WaitingForCar
+    // session starts from a clean slate — no stale high-power MQTT readings
+    // can slip through and cause a false car-detected transition.
+    // (When the battery is full the charger naturally stops drawing power, so
+    //  this wait is typically instantaneous. If power stays high beyond the
+    //  timeout we start the next session immediately — acceptable for the
+    //  target-time-reached-while-charging case.)
+    const POWER_DOWN_TIMEOUT_MS = 30_000;
+    const powerDownStart = clock.now();
+    while (currentPowerW > powerThresholdW) {
+      if (clock.now().getTime() - powerDownStart.getTime() >= POWER_DOWN_TIMEOUT_MS) {
+        log("Power still high after session end — starting next session immediately.");
+        break;
+      }
+      await clock.sleep(1_000);
     }
   } finally {
     unsubWatts?.();
