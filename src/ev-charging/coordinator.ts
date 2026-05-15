@@ -18,6 +18,7 @@ import {
   timestampForFilename,
 } from "../utils/plan-store.ts";
 import { localDateTimeString } from "../utils/date-time-format.ts";
+import { sessionSummaryLine } from "./print-plan.ts";
 import { type PricedSlot } from "../electricity/types.ts";
 const log = makeLogger("ev-charging");
 
@@ -53,7 +54,9 @@ function getInitialState(config: Config, targetTime: Date): MachineState {
       new Date(saved.config.targetDateTime).getTime() === targetTime.getTime() &&
       saved.chargedKwh < config.evCharging.targetKwh
     ) {
-      log(`Resuming: chargedKwh=${saved.chargedKwh}, detectedPowerKw=${saved.detectedPowerKw}`);
+      log(
+        `Resuming: ${sessionSummaryLine({ powerKw: saved.detectedPowerKw, targetTime, targetKwh: config.evCharging.targetKwh, chargedKwh: saved.chargedKwh })}`,
+      );
       return {
         plan: null,
         id: "Planning",

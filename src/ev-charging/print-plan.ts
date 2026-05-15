@@ -11,14 +11,18 @@ export interface PrintPlanOptions {
   chargedKwh: number;
 }
 
-export function printPlan(slots: Slot[], opts: PrintPlanOptions): void {
+export function sessionSummaryLine(opts: PrintPlanOptions): string {
   const { powerKw, targetTime, targetKwh, chargedKwh } = opts;
   const remainingKwh = Math.max(0, targetKwh - chargedKwh);
-  log(
+  return (
     `Power: ${powerKw} kW  Target: ${localTimeShort(targetTime)}` +
-      `  Charged: ${chargedKwh.toFixed(1)} / ${targetKwh.toFixed(1)} kWh` +
-      `  Remaining: ${remainingKwh.toFixed(1)} kWh`,
+    `  Charged: ${chargedKwh.toFixed(1)} / ${targetKwh.toFixed(1)} kWh` +
+    `  Remaining: ${remainingKwh.toFixed(1)} kWh`
   );
+}
+
+export function printPlan(slots: Slot[], opts: PrintPlanOptions): void {
+  log(sessionSummaryLine(opts));
 
   const chargeSlots = slots.filter((s) => s.charge);
   const totalCost = chargeSlots.reduce((sum, s) => sum + s.effectiveCostEur, 0);
