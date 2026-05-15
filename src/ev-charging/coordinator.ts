@@ -158,6 +158,9 @@ export async function runSession(
 
   let wakeCancel = new Canceller();
   publisher.setWakeCallback(() => wakeCancel.abort());
+  publisher.setChargeNowCallback(() => {
+    machine = { ...machine, chargedKwh: 0 };
+  });
 
   let latestEnergyKwh: number | undefined = undefined;
   let slotMeterStartKwh: number | undefined = undefined;

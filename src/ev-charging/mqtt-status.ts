@@ -58,9 +58,14 @@ export class StatusPublisher {
   }
 
   private wakeCallback: (() => void) | null = null;
+  private chargeNowCallback: (() => void) | null = null;
 
   setWakeCallback(cb: () => void): void {
     this.wakeCallback = cb;
+  }
+
+  setChargeNowCallback(cb: () => void): void {
+    this.chargeNowCallback = cb;
   }
 
   getTargetTimeOverride(): string | null {
@@ -187,6 +192,7 @@ export class StatusPublisher {
         this.targetTimeOverride = newTime;
         log(`[MQTT] Charge Now pressed -> target time set to ${newTime}`);
         this.pub(timeStateTopic, newTime);
+        this.chargeNowCallback?.();
         this.wakeCallback?.();
       }
     });
