@@ -55,7 +55,7 @@ function getInitialState(config: Config, targetTime: Date): MachineState {
       saved.chargedKwh < config.evCharging.targetKwh
     ) {
       log(
-        `Resuming: ${sessionSummaryLine({ powerKw: saved.detectedPowerKw, targetTime, targetKwh: config.evCharging.targetKwh, chargedKwh: saved.chargedKwh })}`,
+        `Resuming session: ${sessionSummaryLine({ powerKw: saved.detectedPowerKw, targetTime, targetKwh: config.evCharging.targetKwh, chargedKwh: saved.chargedKwh })}`,
       );
       return {
         plan: null,

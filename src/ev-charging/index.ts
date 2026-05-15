@@ -83,6 +83,7 @@ export async function runEvCharging(config: Config): Promise<void> {
 
   // Charge loop: run sessions indefinitely, retrying on error.
   let from: Date | undefined = initialFrom;
+  log("Starting charging loop")
   while (true) {
     if (from) log(`Planning from ${from.toISOString()}`);
     try {
