@@ -144,6 +144,30 @@ describe("runSetpointControlLoop", () => {
       assert.equal(published[i].payload, String(fixedPlan[i].setpoint));
     }
   });
+
+  test("does not return before plan end (prevents outer-loop spin)", async () => {
+    // Clock starts 5 minutes before the end of the window so almost all slots
+    // are already past. The function must still wait until planEnd before returning.
+    const fiveMinBeforeEnd = new Date(TO.getTime() - 5 * 60 * 1000);
+    const clock = makeClock(100_000, fiveMinBeforeEnd);
+
+    const fixedPlan = await planSetpoint(FROM, TO, SP_CONFIG, CONFIG);
+    const publish = () => {};
+    await runSetpointControlLoop(
+      fiveMinBeforeEnd,
+      SP_CONFIG,
+      CONFIG,
+      publish,
+      clock,
+      async () => fixedPlan,
+    );
+
+    const planEnd = fixedPlan[fixedPlan.length - 1].end;
+    assert.ok(
+      clock.now().getTime() >= planEnd.getTime(),
+      `expected clock to advance to planEnd (${planEnd.toISOString()}), got ${clock.now().toISOString()}`,
+    );
+  });
 });
 
 // ── Room temperature adjustment tests ────────────────────────────────────────

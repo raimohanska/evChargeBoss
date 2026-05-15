@@ -217,6 +217,17 @@ export async function runSetpointControlLoop(
     log(`[${spConfig.name}] setpoint: ${setpoint} at ${localTimeShort(slot.start)}`);
     onSlot?.(slot, setpoint);
   }
+
+  // Wait until the plan window expires before returning. This prevents the
+  // outer retry loop from spinning immediately after the last slot fires.
+  if (slots.length > 0) {
+    const planEndMs = slots[slots.length - 1].end.getTime();
+    while (clock.now().getTime() < planEndMs) {
+      if (isEnabled?.() === false) return;
+      const remaining = planEndMs - clock.now().getTime();
+      await clock.sleep(Math.min(1_000, remaining));
+    }
+  }
 }
 
 export async function runSetpointControl(
@@ -265,6 +276,7 @@ export async function runSetpointControl(
     );
   }
 
+  let isFirstRun = true;
   while (true) {
     if (!publisher.isEnabled()) {
       publisher.setStatus("Disabled");
@@ -286,8 +298,9 @@ export async function runSetpointControl(
           const until = localTimeShort(new Date(slot.start.getTime() + 15 * 60 * 1000));
           publisher.setCurrentSlot(slot.costTier, slot.setpoint, setpoint, until);
         },
-        id,
+        isFirstRun ? id : undefined,
       );
+      isFirstRun = false;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log(`[${spConfig.name}] ERROR: ${msg}`);
