@@ -575,3 +575,40 @@ describe("main-loop MQTT integration — Charge Now", { concurrency: false }, ()
     }
   });
 }); // describe "main-loop MQTT integration — Charge Now"
+
+describe("main-loop MQTT integration — detected charger power", { concurrency: false }, () => {
+  /**
+   * Verifies that the planner uses live-measured charger power when it exceeds
+   * the configured value, not just the config default.
+   *
+   * Setup: configure powerKw=2 but the relay simulator always emits 3000 W.
+   *   Detection condition: currentPowerW / 1000 = 3 > 2 → detectedChargerPowerKw updates to 3.
+   *
+   * With detected 3 kW:  slotsNeeded = ceil(0.75 / (3 × 0.25)) = 1 slot.
+   * Without detection:   slotsNeeded = ceil(0.75 / (2 × 0.25)) = 2 slots.
+   *
+   * Per-slot kWh accounting uses detectedChargerPowerKw × 0.25 (no energyField),
+   * so chargedKwh after the first slot = detectedChargerPowerKw × 0.25:
+   *   3 kW → 0.75 kWh (target reached; session ends after 1 slot)
+   *   2 kW → 0.50 kWh (target not reached; a second slot runs; chargedKwh = 1.0)
+   */
+  test("Plan and slot accounting use detected power, not configured powerKw", async () => {
+    const { loopPromise, relay, sessionSummary, teardown } = await startMqttSession(FROM, SPEEDUP, {
+      powerKw: 2,
+      targetKwh: 0.75,
+    });
+    try {
+      await advanceToSolarWindow(relay);
+      await loopPromise;
+      // With detection: chargedKwh = 3 kW × 0.25 h = 0.75 (target hit, done in 1 slot).
+      // Without detection: chargedKwh = 2 kW × 0.25 h × 2 slots = 1.0 (overcharged).
+      assert.equal(
+        sessionSummary()?.chargedKwh,
+        0.75,
+        "session must end after 1 slot using detected 3 kW, not configured 2 kW",
+      );
+    } finally {
+      teardown();
+    }
+  });
+}); // describe "main-loop MQTT integration — detected charger power"

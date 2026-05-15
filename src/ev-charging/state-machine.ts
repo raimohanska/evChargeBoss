@@ -105,6 +105,8 @@ export interface MachineState {
   readonly plan: Slot[] | null;
   readonly chargedKwh: number;
   readonly detectedChargerPowerKw: number;
+  /** true once a live power reading has exceeded the initial configured value */
+  readonly powerKwMeasured: boolean;
 }
 
 export interface Environment {
@@ -133,6 +135,7 @@ export function nextState(machine: MachineState, env: Environment): MachineState
     machine = {
       ...machine,
       detectedChargerPowerKw: env.currentPowerW / 1000,
+      powerKwMeasured: true,
     };
   }
   if (env.forecast) {
@@ -151,7 +154,13 @@ export function nextState(machine: MachineState, env: Environment): MachineState
       chargedKwh: machine.chargedKwh,
     };
     if (machine.plan === null) {
-      log("Plan computed");
+      if (machine.powerKwMeasured) {
+        log(`Plan computed using measured power ${machine.detectedChargerPowerKw} kW`);
+      } else {
+        log(
+          `Warning: planning with configured power ${machine.detectedChargerPowerKw} kW — no live measurement yet`,
+        );
+      }
       printPlan(plan, printOpts);
     } else if (planChargeStatesChanged(machine.plan, plan)) {
       log("Plan updated (charge slots changed)");
