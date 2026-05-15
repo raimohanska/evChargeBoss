@@ -74,8 +74,12 @@ export function findChargeRunEnd(plan: Slot[] | null, currentSlotStart: Date | n
 }
 
 export function planChargeStatesChanged(prev: Slot[] | null, next: Slot[]): boolean {
-  if (!prev || prev.length !== next.length) return true;
-  return prev.some((s, i) => s.charge !== next[i].charge);
+  if (!prev) return true;
+  const prevMap = new Map(prev.map((s) => [s.start.getTime(), s.charge]));
+  return next.some((s) => {
+    const prevCharge = prevMap.get(s.start.getTime());
+    return prevCharge === undefined || prevCharge !== s.charge;
+  });
 }
 
 export function isCurrentSlotSolarFree(machine: MachineState, env: Environment): boolean {

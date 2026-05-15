@@ -142,6 +142,7 @@ export function nextState(machine: MachineState, env: Environment): MachineState
       remainingKwh,
       machine.detectedChargerPowerKw,
       env.targetTime,
+      env.now,
     );
     const printOpts = {
       powerKw: machine.detectedChargerPowerKw,

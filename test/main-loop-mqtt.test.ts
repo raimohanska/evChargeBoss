@@ -131,7 +131,7 @@ describe("main-loop MQTT integration", { concurrency: false }, () => {
     );
     try {
       await advanceToSolarWindow(relay);
-      publishTargetTime("14:00"); // extend deadline while the 10:00 slot is running      
+      publishTargetTime("14:00"); // extend deadline while the 10:00 slot is running
       await relay.assertOff("2026-04-19T14:00");
       await loopPromise;
     } finally {
@@ -517,3 +517,65 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
     }
   });
 }); // describe "main-loop MQTT integration — heating hold"
+
+describe("main-loop MQTT integration — Charge Now", { concurrency: false }, () => {
+  /**
+   * Regression test for the past-slot relay-flicker bug.
+   *
+   * Scenario: user presses Charge Now at 17:00 → target set to 19:00.
+   * The planner selects 7 cheapest slots from the 8-slot 17:00–19:00 window:
+   *   17:00(1.17c), 17:15(2.96c), 17:30(4.76c), 17:45(6.65c),
+   *   18:00(4.98c), 18:15(5.97c), 18:30(7.45c)  — 18:45(8.51c) is skipped.
+   *
+   * Bug: at the 17:45 slot boundary, slotsNeeded drops to 4.  With the bug,
+   * the pool still contains past slots 17:00/17:15/17:30 (the three cheapest),
+   * which occupy 3 of the 4 seats → only 18:00 is selected as the 4th future
+   * slot → 17:45 (the CURRENT charging slot) gets charge=false → relay OFF.
+   *
+   * Fix: past slots are excluded from computePlan before sorting, so only
+   * 5 future slots compete for 4 seats.  17:45 remains selected and the relay
+   * stays ON throughout all 7 consecutive charge slots.
+   *
+   * Expected relay sequence (no flicker):
+   *   ON  (17:00) — WaitingForCar plug-in detection
+   *   OFF (17:xx) — Planning (while initial 12:00 plan is computed)
+   *   [Charge Now published → replan to 19:00]
+   *   ON  (≤18:00) — first charge slot begins
+   *   OFF (≈18:30) — chargedKwh ≥ 5 kWh → session.driver.send(false)
+   * Total OFFs: 2 (no slot-boundary flicker)
+   */
+  test("Charge Now: relay stays ON through all slot boundaries (no past-slot flicker)", async () => {
+    const { loopPromise, relay, publishTargetTime, teardown } = await startMqttSession(
+      FROM,
+      SPEEDUP,
+      { targetKwh: 5 },
+    );
+    try {
+      await relay.assertOn("2026-04-18T17:00"); // plug-in detection
+      await relay.assertOff("2026-04-18T17:10"); // enters overnight-gap sleep
+
+      // Simulate "Charge Now": override target to 2 hours from session start.
+      publishTargetTime("19:00");
+
+      // Charging must start in the near future (evening priced slots).
+      await relay.assertOnBefore("2026-04-18T18:00");
+
+      // Session completes when chargedKwh reaches targetKwh — no explicit
+      // target-time relay OFF expected (chargedKwh path calls send(false)).
+      await loopPromise;
+
+      // offCount must be exactly 2:
+      //   1. Planning state at session start (overnight-gap sleep)
+      //   2. session.driver.send(false) when chargedKwh ≥ 5 kWh
+      // With the bug, relay flickered OFF/ON at the 17:45 boundary (and later
+      // boundaries), so offCount would be ≥ 3.
+      assert.equal(
+        relay.offCount,
+        2,
+        "relay must not flicker at slot boundaries during Charge Now",
+      );
+    } finally {
+      teardown();
+    }
+  });
+}); // describe "main-loop MQTT integration — Charge Now"

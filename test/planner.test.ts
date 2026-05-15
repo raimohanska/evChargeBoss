@@ -8,8 +8,9 @@ import { loadConfig } from "../src/config.ts";
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
 
-const { plan, planFallbackSlot } = await import("../src/ev-charging/planner.ts");
+const { plan, planFallbackSlot, computePlan } = await import("../src/ev-charging/planner.ts");
 const { parseTargetTime } = await import("../src/ev-charging/coordinator.ts");
+const { planChargeStatesChanged } = await import("../src/ev-charging/helpers.ts");
 
 // Fixed planning start: 2026-04-18 14:00 local (Helsinki, UTC+3).
 // 12:00 has already passed, so target is next day → window: 2026-04-18T14:00 → 2026-04-19T12:00.
@@ -149,4 +150,86 @@ test("fallback: spot prices missing but plenty of time → reason 'waiting'", as
   assert.equal(decision.reason, "waiting");
   assert.equal(decision.charge, false);
   assert.ok(typeof decision.details === "string" && decision.details.length > 0);
+});
+
+// ── computePlan: past-slot exclusion ─────────────────────────────────────────
+//
+// Regression test for the Charge Now relay-flicker bug:
+// When a past slot is cheaper than the current slot, it must not displace the
+// current slot from the top-N selection (it should be excluded entirely).
+
+test("computePlan: past slot is excluded and cannot displace the current charging slot", () => {
+  const slotMs = 15 * 60 * 1000;
+  const makeSlot = (isoStart: string, spotCph: number) => {
+    const start = new Date(isoStart);
+    return {
+      start,
+      end: new Date(start.getTime() + slotMs),
+      spotPriceEurPerKwh: spotCph / 100,
+      transportCostEurPerKwh: 0,
+      solarForecastW: 0,
+    };
+  };
+
+  // now = start of 08:45 slot; 08:30 slot has just expired
+  const now = new Date("2026-04-19T08:45:00");
+  const targetTime = new Date("2026-04-19T10:00:00");
+  const fetchedSlots = [
+    makeSlot("2026-04-19T08:30:00", 1), // past (cheapest!) — would steal a seat
+    makeSlot("2026-04-19T08:45:00", 4), // current slot — most expensive of the rest
+    makeSlot("2026-04-19T09:00:00", 2), // future
+    makeSlot("2026-04-19T09:15:00", 3), // future
+    makeSlot("2026-04-19T09:30:00", 5), // future
+  ];
+
+  // 0.75 kWh at 1 kW → slotsNeeded = 3
+  // Bug: sorts all 5, picks cheapest 3 → {08:30, 09:00, 09:15}; 08:45 NOT charged
+  // Fix: 08:30 is past → excluded; sorts 4, picks cheapest 3 → {09:00, 09:15, 08:45}; 08:45 charged
+  const result = computePlan(fetchedSlots, 0.75, 1, targetTime, now);
+
+  assert.equal(result.length, 4, "past slot 08:30 is not in the output");
+  assert.ok(
+    !result.some((s) => s.start.getTime() === new Date("2026-04-19T08:30:00").getTime()),
+    "08:30 is excluded from the plan",
+  );
+  const current = result.find(
+    (s) => s.start.getTime() === new Date("2026-04-19T08:45:00").getTime(),
+  );
+  assert.ok(current !== undefined, "current slot 08:45 is present in the plan");
+  assert.ok(current!.charge, "current slot 08:45 is marked for charging");
+});
+
+// ── planChargeStatesChanged: slot expiry ──────────────────────────────────────
+
+test("planChargeStatesChanged: expired slot dropping from plan is not a change", () => {
+  const slotMs = 15 * 60 * 1000;
+  const makeSlot = (isoStart: string, charge: boolean) => {
+    const start = new Date(isoStart);
+    return {
+      start,
+      end: new Date(start.getTime() + slotMs),
+      spotPriceEurPerKwh: 0.05,
+      transportCostEurPerKwh: 0,
+      solarForecastW: 0,
+      effectiveCostEur: 0.01,
+      charge,
+      canHold: false,
+    };
+  };
+
+  const prev = [
+    makeSlot("2026-04-19T09:00:00", true), // was charging — about to expire
+    makeSlot("2026-04-19T09:15:00", true), // charging — still future
+    makeSlot("2026-04-19T09:30:00", false), // not charging
+  ];
+  // 09:00 slot expired → dropped from the next plan
+  const next = [makeSlot("2026-04-19T09:15:00", true), makeSlot("2026-04-19T09:30:00", false)];
+  assert.equal(planChargeStatesChanged(prev, next), false, "expiry alone is not a change");
+
+  // A real charge-state flip must still be detected
+  const nextWithChange = [
+    makeSlot("2026-04-19T09:15:00", false), // was charging, now not — CHANGE
+    makeSlot("2026-04-19T09:30:00", false),
+  ];
+  assert.equal(planChargeStatesChanged(prev, nextWithChange), true, "charge flip is detected");
 });

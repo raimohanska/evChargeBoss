@@ -14,9 +14,10 @@ export function computePlan(
   remainingKwh: number,
   powerKw: number,
   targetTime: Date,
+  now: Date,
 ): Slot[] {
   const slots = fetchedSlots
-    .filter((slot) => slot.start < targetTime)
+    .filter((slot) => slot.start < targetTime && slot.end.getTime() > now.getTime())
     .map((slot) => {
       // Fraction of charger power not covered by solar (clamped to [0, 1])
       const gridFraction = Math.max(0, powerKw - slot.solarForecastW / 1000) / powerKw;
@@ -68,7 +69,7 @@ export async function plan(
     log(`Need ${slotsNeeded} slots to deliver ${targetKwh} kWh at ${powerKw} kW`);
   }
 
-  return computePlan(pricedSlots, targetKwh, powerKw, targetTime);
+  return computePlan(pricedSlots, targetKwh, powerKw, targetTime, from);
 }
 
 export async function fetchPlanInputs(
