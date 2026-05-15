@@ -143,6 +143,7 @@ export async function runSession(
 
   const publishState = async () => {
     publisher.setStatus(getStatus(machine, env()));
+    publisher.setChargedEnergy(machine.chargedKwh);
     const want = getState(machine.id).relayOn;
     if (want === relayOn) return;
     relayOn = want;
@@ -249,8 +250,7 @@ export async function runSession(
             ...machine,
             chargedKwh: machine.chargedKwh + slotKwh,
           };
-          if (machine.chargedKwh + slotKwh >= config.evCharging.targetKwh) {
-            machine = { ...machine, chargedKwh: machine.chargedKwh + slotKwh };
+          if (machine.chargedKwh >= config.evCharging.targetKwh) {
             log(`Charging complete: ${machine.chargedKwh.toFixed(2)} kWh delivered.`);
             // Might consider having a final state in the state machine, but OTOH if the detection is in coordinator, the decision can also be
             await session.driver.send(false);
