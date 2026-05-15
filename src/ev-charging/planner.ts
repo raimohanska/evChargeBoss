@@ -86,9 +86,9 @@ export async function fetchPlanInputs(
     config.influx,
   );
 
-  if (verbose !== false) {
+  if (verbose) {
     log(
-      `Planning ${pricedSlots.length} slots from ${localTimeShort(from)} to ${localDateTimeString(targetTime)}`,
+      `Fetched data for ${pricedSlots.length} slots from ${localTimeShort(from)} to ${localDateTimeString(targetTime)}`,
     );
   }
   return pricedSlots;
