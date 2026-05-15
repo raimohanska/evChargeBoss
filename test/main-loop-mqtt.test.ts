@@ -122,14 +122,24 @@ describe("main-loop MQTT integration", { concurrency: false }, () => {
   });
 
   test("Mid-slot abort with later target: session replans and continues charging", async () => {
+    // Initial target 08:00 → plan selects cheap overnight slots (around 01:00 AM).
+    // By the time plan computation finishes (~17:31 virtual), the Apr 18 evening
+    // slots in the plan are already past, so the first active slot is overnight.
+    // Mid-slot we push the deadline out to 12:00, which replans to the solar-free
+    // window at 10:00–11:45.  The relay must turn OFF after the abort (overnight
+    // charging is no longer needed) and then back ON at the solar window.
     const { loopPromise, relay, publishTargetTime, teardown } = await startMqttSession(
       FROM,
       SPEEDUP,
+      { targetTime: "08:00" },
     );
     try {
-      await advanceToSolarWindow(relay);
-      publishTargetTime("14:00"); // extend deadline while the 10:00 slot is running
-      await relay.assertOff("2026-04-19T14:00");
+      await relay.assertOn("2026-04-18T17:00");  // plug-in detection
+      await relay.assertOff("2026-04-18T18:00"); // plan computed; sleeping until overnight slots
+      await relay.assertOn("2026-04-19T01:00");  // first overnight cheap slot
+      publishTargetTime("12:00");                // extend deadline mid-slot
+      await relay.assertOff("2026-04-19T02:00"); // mid-slot abort before slot ends
+      await relay.assertOn("2026-04-19T10:00");  // new plan: solar-free window
       await loopPromise;
     } finally {
       teardown();
@@ -157,6 +167,12 @@ describe("main-loop MQTT integration — energy field", { concurrency: false }, 
     try {
       await advanceToSolarWindow(relay);
       await loopPromise; // single slot suffices: measured kWh > 0.5 kWh target
+      // Poll briefly: the MQTT charged_energy publish is fire-and-forget so
+      // the broker may not have delivered it to controlClient yet.
+      const deadline = Date.now() + 500;
+      while (chargedEnergy() === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
       assert.ok(chargedEnergy() > 0, `Expected chargedEnergy > 0, got ${chargedEnergy()}`);
     } finally {
       teardown();
@@ -593,10 +609,11 @@ describe("main-loop MQTT integration — detected charger power", { concurrency:
    *   2 kW → 0.50 kWh (target not reached; a second slot runs; chargedKwh = 1.0)
    */
   test("Plan and slot accounting use detected power, not configured powerKw", async () => {
-    const { loopPromise, relay, sessionSummary, teardown } = await startMqttSession(FROM, SPEEDUP, {
-      powerKw: 2,
-      targetKwh: 0.75,
-    });
+    const { loopPromise, relay, sessionSummary, teardown } = await startMqttSession(
+      FROM,
+      SPEEDUP,
+      { powerKw: 2, targetKwh: 0.75 },
+    );
     try {
       await advanceToSolarWindow(relay);
       await loopPromise;
