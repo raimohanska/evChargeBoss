@@ -169,7 +169,6 @@ export class StatusPublisher {
         if (parts.length >= 2) {
           const override = `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
           this.targetTimeOverride = override;
-          log(`[MQTT] Recovered retained target time: ${override}`);
         }
         const resolve = this._resolveInitialTargetTime;
         this._resolveInitialTargetTime = null;

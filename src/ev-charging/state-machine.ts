@@ -151,7 +151,7 @@ export function nextState(machine: MachineState, env: Environment): MachineState
       chargedKwh: machine.chargedKwh,
     };
     if (machine.plan === null) {
-      log("New plan computed for charging power " + machine.detectedChargerPowerKw + "kW");
+      log("Plan computed");
       printPlan(plan, printOpts);
     } else if (planChargeStatesChanged(machine.plan, plan)) {
       log("Plan updated (charge slots changed)");

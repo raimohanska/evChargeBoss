@@ -28,10 +28,6 @@ function errorStatus(err: unknown): string {
 
 export async function runEvCharging(config: Config): Promise<void> {
   const { mode, from: initialFrom } = parseArgs(config.evCharging.mode);
-
-  const modeLabel = mode === "charge" ? "charging" : mode;
-  log(`=== EV Charger Planner [${modeLabel}] ===`);
-
   if (mode === "plan") {
     const powerKw = config.evCharging.powerKw;
     if (!powerKw) {
@@ -67,7 +63,6 @@ export async function runEvCharging(config: Config): Promise<void> {
   const publisher = new StatusPublisher(mqttClient, config.evCharging);
   // Wait for the broker to deliver any retained target-time override before
   // planning, so that a user-set target time survives a restart.
-  log("Waiting for retained MQTT target time...");
   await publisher.waitForInitialTargetTime(2000);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
   const session = makeMqttSession(
