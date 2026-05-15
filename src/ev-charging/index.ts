@@ -65,6 +65,10 @@ export async function runEvCharging(config: Config): Promise<void> {
 
   const mqttClient = await connectMqtt(config.mqtt);
   const publisher = new StatusPublisher(mqttClient, config.evCharging);
+  // Wait for the broker to deliver any retained target-time override before
+  // planning, so that a user-set target time survives a restart.
+  log("Waiting for retained MQTT target time...");
+  await publisher.waitForInitialTargetTime(2000);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
   const session = makeMqttSession(
     mqttClient,
