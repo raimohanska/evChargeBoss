@@ -177,6 +177,9 @@ export async function startMqttSession(
     statusHistory: () => _statusHistory,
     teardown() {
       relay.cleanup();
+      // Clear the retained target_time/state so a changed target time in this
+      // test cannot bleed into the next test's StatusPublisher startup.
+      controlClient.publish("evchargeboss/target_time/state", Buffer.alloc(0), { retain: true });
       // Force-close so the TCP socket is gone before the next test creates new connections.
       sessionClient.end(true);
       relayClient.end(true);

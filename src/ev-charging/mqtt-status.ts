@@ -48,6 +48,8 @@ export class StatusPublisher {
   private client: MqttClient;
   private config: EvChargingConfig;
   private targetTimeOverride: string | null = null;
+  private readonly timeStateTopic = `${BASE}/target_time/state`;
+  private _resolveInitialTargetTime: (() => void) | null = null;
 
   constructor(client: MqttClient, config: EvChargingConfig) {
     this.client = client;
@@ -67,7 +69,29 @@ export class StatusPublisher {
 
   resetTargetTime(): void {
     this.targetTimeOverride = null;
-    this.pub(`${BASE}/target_time/state`, this.config.targetTime);
+    this.pub(this.timeStateTopic, this.config.targetTime);
+  }
+
+  /**
+   * Waits up to `timeoutMs` for the broker to deliver a retained target-time
+   * override, then publishes the confirmed value to the state topic.
+   * Must be called once after construction and before runSession().
+   */
+  async waitForInitialTargetTime(timeoutMs = 2000): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this._resolveInitialTargetTime = resolve;
+      setTimeout(() => {
+        if (this._resolveInitialTargetTime !== null) {
+          this._resolveInitialTargetTime = null;
+          log(
+            `[MQTT] No retained target time within ${timeoutMs}ms — using ${this.config.targetTime}`,
+          );
+          resolve();
+        }
+      }, timeoutMs);
+    });
+    // Now publish the confirmed value (deferred from initializeDiscovery).
+    this.pub(this.timeStateTopic, this.targetTimeOverride ?? this.config.targetTime);
   }
 
   private state: Record<string, string> = {
@@ -96,7 +120,7 @@ export class StatusPublisher {
 
     // HA text entity for target charge time (HH:MM input with pattern validation)
     const timeCmdTopic = `${BASE}/target_time/set`;
-    const timeStateTopic = `${BASE}/target_time/state`;
+    const timeStateTopic = this.timeStateTopic;
     const timeDiscoveryTopic = `${DISCOVERY}/text/${DEVICE_ID}_target_time/config`;
     const timeDiscoveryPayload = JSON.stringify({
       unique_id: `${DEVICE_ID}_target_time`,
@@ -113,7 +137,6 @@ export class StatusPublisher {
     // Remove any previously-retained `time` discovery (old entity type, now replaced by `text`)
     this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time/config`, "", true);
     this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
-    this.pub(timeStateTopic, this.targetTimeOverride ?? this.config.targetTime);
 
     // HA button entity: "Charge Now" — sets target time to now + chargeNowHours
     const chargeNowCmdTopic = `${BASE}/charge_now/set`;
@@ -128,6 +151,11 @@ export class StatusPublisher {
     });
     this.pub(`${DISCOVERY}/button/${DEVICE_ID}_charge_now/config`, chargeNowDiscoveryPayload, true);
 
+    // Subscribe to our own state topic first so we can recover any retained override
+    // before publishing the initial state (see waitForInitialTargetTime).
+    this.client.subscribe(timeStateTopic, (err) => {
+      if (err) log(`[MQTT status] subscribe error: ${err.message}`);
+    });
     this.client.subscribe(timeCmdTopic, (err) => {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
     });
@@ -135,7 +163,18 @@ export class StatusPublisher {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
     });
     this.client.on("message", (topic: string, payload: Buffer) => {
-      if (topic === timeCmdTopic) {
+      if (topic === timeStateTopic && this._resolveInitialTargetTime !== null) {
+        // Retained startup value — recover the override before we publish ours.
+        const parts = payload.toString().trim().split(":");
+        if (parts.length >= 2) {
+          const override = `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
+          this.targetTimeOverride = override;
+          log(`[MQTT] Recovered retained target time: ${override}`);
+        }
+        const resolve = this._resolveInitialTargetTime;
+        this._resolveInitialTargetTime = null;
+        resolve();
+      } else if (topic === timeCmdTopic) {
         const parts = payload.toString().trim().split(":");
         if (parts.length < 2) return;
         const newTime = `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
