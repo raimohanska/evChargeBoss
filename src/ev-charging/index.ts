@@ -44,7 +44,12 @@ export async function runEvCharging(config: Config): Promise<void> {
     const now = initialFrom ?? new Date();
     const targetDate = parseTargetTime(targetTimeStr, now);
     const slots = await plan(now, targetDate, config.evCharging.targetKwh, powerKw, config);
-    printPlan(slots);
+    printPlan(slots, {
+      powerKw,
+      targetTime: targetDate,
+      targetKwh: config.evCharging.targetKwh,
+      chargedKwh: 0,
+    });
     return;
   }
 

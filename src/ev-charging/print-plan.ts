@@ -4,7 +4,22 @@ import { makeLogger } from "../utils/log.ts";
 
 const log = makeLogger("ev-charging");
 
-export function printPlan(slots: Slot[]): void {
+export interface PrintPlanOptions {
+  powerKw: number;
+  targetTime: Date;
+  targetKwh: number;
+  chargedKwh: number;
+}
+
+export function printPlan(slots: Slot[], opts: PrintPlanOptions): void {
+  const { powerKw, targetTime, targetKwh, chargedKwh } = opts;
+  const remainingKwh = Math.max(0, targetKwh - chargedKwh);
+  log(
+    `Power: ${powerKw} kW  Target: ${localTimeShort(targetTime)}` +
+      `  Charged: ${chargedKwh.toFixed(1)} / ${targetKwh.toFixed(1)} kWh` +
+      `  Remaining: ${remainingKwh.toFixed(1)} kWh`,
+  );
+
   const chargeSlots = slots.filter((s) => s.charge);
   const totalCost = chargeSlots.reduce((sum, s) => sum + s.effectiveCostEur, 0);
   const freeSlots = chargeSlots.filter((s) => s.effectiveCostEur === 0).length;

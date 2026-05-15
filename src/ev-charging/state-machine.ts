@@ -9,7 +9,7 @@ import {
   hasFutureChargeSlot,
   isCurrentSlotSolarFree,
   nextChargeSlotStart,
-  planChargeStatesChanged
+  planChargeStatesChanged,
 } from "./helpers.ts";
 import { computePlan } from "./planner.ts";
 import { makeLogger } from "../utils/log.ts";
@@ -28,7 +28,6 @@ export type StateId =
   | "ForcedToChargingWithoutPlan"
   | "SolarFreeChargingWithoutPlan"
   | "SleepingUntilSlot";
-
 
 export interface StateHandler {
   readonly id: StateId;
@@ -128,13 +127,13 @@ export function getStatus(machine: MachineState, env: Environment): string {
 
 export function nextState(machine: MachineState, env: Environment): MachineState {
   if (machine.id === "WaitingForCar" && !env.currentPowerW) {
-    return machine
+    return machine;
   }
   if (env.currentPowerW / 1000 > machine.detectedChargerPowerKw) {
     machine = {
       ...machine,
-      detectedChargerPowerKw: env.currentPowerW / 1000
-    }
+      detectedChargerPowerKw: env.currentPowerW / 1000,
+    };
   }
   if (env.forecast) {
     const remainingKwh = Math.max(0, env.targetKwh - machine.chargedKwh);
@@ -144,12 +143,18 @@ export function nextState(machine: MachineState, env: Environment): MachineState
       machine.detectedChargerPowerKw,
       env.targetTime,
     );
+    const printOpts = {
+      powerKw: machine.detectedChargerPowerKw,
+      targetTime: env.targetTime,
+      targetKwh: env.targetKwh,
+      chargedKwh: machine.chargedKwh,
+    };
     if (machine.plan === null) {
       log("New plan computed for charging power " + machine.detectedChargerPowerKw + "kW");
-      printPlan(plan);
+      printPlan(plan, printOpts);
     } else if (planChargeStatesChanged(machine.plan, plan)) {
       log("Plan updated (charge slots changed)");
-      printPlan(plan);
+      printPlan(plan, printOpts);
     }
     machine = {
       ...machine,
