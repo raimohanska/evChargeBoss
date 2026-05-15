@@ -11,14 +11,35 @@ Run `npm run build` before committing. Fix any TypeScript or build errors before
 ## Running the code
 
 ```sh
-node --experimental-strip-types src/index.ts --plan   # run from source (Node 22+)
+node --experimental-strip-types src/index.ts --plan    # run from source (Node 22+)
 npm run build                                          # produce dist/bundle.cjs
 npm test                                               # run unit tests
+npm test:integration                                   # run integration tests
 ```
 
-Tests use `TZ=Europe/Helsinki` and `CONFIG_FILE=test/fixtures/config.json`. Always run tests before committing a change that touches planning logic.
+
+## Testing conventions
+
+- Tests in `test/planner.test.ts` use Node's built-in `node:test` runner.
+- Fixed start date: `2026-04-18T10:00:00` (local Helsinki time).
+- Cache fixtures in `test/fixtures/` — frozen, never touched by tests.
+- Config fixture in `test/fixtures/config.json` — frozen copy of `config-example.json`.
+- Tests never hit the network. If a change would require new fixture data, update the fixtures and the expected values together.
+- `CACHE_DIR` env var points tests at `test/fixtures/` so they never read or write the working cache.
+
+Tests use `TZ=Europe/Helsinki` and `CONFIG_FILE=test/fixtures/config.json`. 
+
+Always run unit tests before committing a change.
 
 Test files are listed explicitly in `package.json` — add new test files there.
+
+## Integration tests
+
+Run also integation tests if touching core logic in coordinator.ts or state-machine.ts.
+
+- When working, prefer running just a single integration test at a time, since they are slow. Only before commit, run them all if necessary.
+- When you have failing integration tests, run them in isolation to iterate faster.
+
 
 ## Project layout
 
@@ -73,8 +94,7 @@ Startup detection and event orchestration are handled by `runSession()` in `src/
 - Any transition to `WaitingForCar` must reset session fields (`plan`, `currentSlotStart`, `chargedKwh`, `detectedChargerPowerKw`).
 - `SlotStart` is applied by coordinator-level event field handling before state logic.
 - Car-finished detection compares watts against configured threshold, never exact zero.
-- `SleepingUntilSlot` ignores `ForecastAvailable`; planning reacts to forecast updates.
-- `getStatus()` must avoid flicker for consecutive charge slots: same run end -> same `Charging until X` string.
+- `getStatusMessage()` must avoid flicker for consecutive charge slots: same run end -> same `Charging until X` string.
 
 ## Date / time rules
 
@@ -87,15 +107,6 @@ Spot price and solar data are cached per-day to `.spot-cache-YYYY-MM-DD.json` / 
 ## Error handling
 
 The main charge/simulate loop **never exits** on errors. All exceptions are caught, logged, and retried after 60 s. Use `IncompleteDataError` (`src/errors.ts`) for missing data so callers can handle it distinctly from unexpected errors. `--plan` mode is the only mode that exits on error.
-
-## Testing conventions
-
-- Tests in `test/planner.test.ts` use Node's built-in `node:test` runner.
-- Fixed start date: `2026-04-18T10:00:00` (local Helsinki time).
-- Cache fixtures in `test/fixtures/` — frozen, never touched by tests.
-- Config fixture in `test/fixtures/config.json` — frozen copy of `config-example.json`.
-- Tests never hit the network. If a change would require new fixture data, update the fixtures and the expected values together.
-- `CACHE_DIR` env var points tests at `test/fixtures/` so they never read or write the working cache.
 
 ## MQTT integration test conventions
 
