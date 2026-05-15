@@ -62,6 +62,7 @@ function getInitialState(config: Config, targetTime: Date): MachineState {
         id: "Planning",
         chargedKwh: saved.chargedKwh,
         detectedChargerPowerKw: saved.detectedPowerKw,
+        powerKwMeasured: true, // previous session measured this value
       };
     } else {
       let reason: string;
@@ -83,6 +84,7 @@ function getInitialState(config: Config, targetTime: Date): MachineState {
     plan: null,
     chargedKwh: 0,
     detectedChargerPowerKw: config.evCharging.powerKw ?? 0,
+    powerKwMeasured: false,
   };
 }
 
@@ -189,7 +191,12 @@ export async function runSession(
 
       // 2. Check if target time reached
       if (clock.now() >= env().targetTime) {
-        log("Target time passed — session complete.");
+        const remaining = config.evCharging.targetKwh - machine.chargedKwh;
+        log(
+          remaining > 0
+            ? `Target time passed — goal not reached. Charged ${machine.chargedKwh.toFixed(2)} / ${config.evCharging.targetKwh.toFixed(2)} kWh (${remaining.toFixed(2)} kWh short).`
+            : `Target time passed — session complete. ${machine.chargedKwh.toFixed(2)} kWh delivered.`,
+        );
         break;
       }
 
