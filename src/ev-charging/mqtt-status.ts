@@ -153,7 +153,7 @@ export class StatusPublisher {
       }
     });
 
-    log("MQTT discovery and initial state published.");
+    //log("MQTT discovery and initial state published.");
   }
 
   setStatus(status: string): void {

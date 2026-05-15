@@ -34,11 +34,11 @@ export async function connectMqtt(brokerConfig: BrokerConfig): Promise<MqttClien
     if (username) opts.username = username;
     if (password) opts.password = password;
 
-    log(`Connecting to MQTT broker at ${brokerUrl}...`);
+    //log(`Connecting to MQTT broker at ${brokerUrl}...`);
     const client = mqtt.connect(brokerUrl, opts);
 
     client.once("connect", () => {
-      log("MQTT connected.");
+      //log("MQTT connected.");
       resolve(client);
     });
     client.once("error", (err) => {
