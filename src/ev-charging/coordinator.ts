@@ -5,7 +5,6 @@ import type { ChargingSession } from "./charger.ts";
 import { makeDebouncedDriver } from "./charger.ts";
 import type { Clock } from "../utils/timing-utils.ts";
 import type { Environment, MachineState } from "./state-machine.ts";
-import type { WeeklySchedule } from "./config.ts";
 import { z } from "zod";
 import { fetchPlanInputs } from "./planner.ts";
 import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
@@ -22,6 +21,7 @@ import {
 import { localDateTimeString } from "../utils/date-time-format.ts";
 import { sessionSummaryLine } from "./print-plan.ts";
 import { type PricedSlot } from "../electricity/types.ts";
+import { parseTargetTime, resolveTargetTime } from "./helpers.ts";
 import type { HeatingTracker } from "./heating-tracker.ts";
 const log = makeLogger("ev-charging");
 
@@ -34,42 +34,6 @@ const EvChargingPlanSchema = z.object({
     targetDateTime: z.string(),
   }),
 });
-
-export function parseTargetTime(timeStr: string, from: Date): Date {
-  const [h, m] = timeStr.split(":").map(Number);
-  const today = new Date(from);
-  today.setHours(h, m, 0, 0);
-  if (today > from) return today;
-  const tomorrow = new Date(from);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(h, m, 0, 0);
-  return tomorrow;
-}
-
-const DOW_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
-
-function dowKey(d: Date): keyof WeeklySchedule {
-  return DOW_KEYS[d.getDay()];
-}
-
-export function resolveTargetTime(
-  globalTime: string,
-  schedule: WeeklySchedule | undefined,
-  from: Date,
-): Date {
-  const todayTime = schedule?.[dowKey(from)] ?? globalTime;
-  const [th, tm] = todayTime.split(":").map(Number);
-  const todayAt = new Date(from);
-  todayAt.setHours(th, tm, 0, 0);
-  if (todayAt > from) return todayAt;
-
-  const tomorrow = new Date(from);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowTime = schedule?.[dowKey(tomorrow)] ?? globalTime;
-  const [tmh, tmm] = tomorrowTime.split(":").map(Number);
-  tomorrow.setHours(tmh, tmm, 0, 0);
-  return tomorrow;
-}
 
 function getInitialState(config: Config, targetTime: Date): MachineState {
   // Try to resume from a persisted plan file.
@@ -337,7 +301,7 @@ export async function runSession(
   }
 
   publisher.setStatus("Idle");
-  publisher.resetTargetTime();
+  publisher.resetTargetTime(clock.now());
   const solarPct = chargedSlots > 0 ? Math.round((solarFractionSum / chargedSlots) * 100) : 0;
   await onSessionEnd?.({ chargedKwh: machine.chargedKwh, totalCostEur, solarPct });
 }

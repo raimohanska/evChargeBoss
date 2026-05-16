@@ -2,6 +2,7 @@ import type { MqttClient } from "./mqtt-client.ts";
 import type { EvChargingConfig } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { makeLogger } from "../utils/log.ts";
+import { resolveTargetTime, formatHHMM } from "./helpers.ts";
 
 const log = makeLogger("ev-charging");
 
@@ -72,13 +73,12 @@ export class StatusPublisher {
     return this.targetTimeOverride;
   }
 
-  resetTargetTime(): void {
+  resetTargetTime(now: Date): void {
     this.targetTimeOverride = null;
-    // Clear the retained override so the next startup uses resolveTargetTime
-    // (weekly schedule). An empty payload is safe: waitForInitialTargetTime's
-    // message handler skips setting the override for payloads without ':', but
-    // still resolves immediately so startup doesn't wait the full 2s timeout.
-    this.pub(this.timeStateTopic, "");
+    // Publish the schedule-aware default so HA shows the correct next target
+    // time instead of retaining the stale Charge Now override.
+    const resolved = resolveTargetTime(this.config.targetTime, this.config.weeklySchedule, now);
+    this.pub(this.timeStateTopic, formatHHMM(resolved));
   }
 
   /**
@@ -92,15 +92,25 @@ export class StatusPublisher {
       setTimeout(() => {
         if (this._resolveInitialTargetTime !== null) {
           this._resolveInitialTargetTime = null;
+          const defaultTime = resolveTargetTime(
+            this.config.targetTime,
+            this.config.weeklySchedule,
+            new Date(),
+          );
           log(
-            `[MQTT] No retained target time within ${timeoutMs}ms - using ${this.config.targetTime}`,
+            `[MQTT] No retained target time within ${timeoutMs}ms - using ${formatHHMM(defaultTime)}`,
           );
           resolve();
         }
       }, timeoutMs);
     });
     // Now publish the confirmed value (deferred from initializeDiscovery).
-    this.pub(this.timeStateTopic, this.targetTimeOverride ?? this.config.targetTime);
+    const fallback = resolveTargetTime(
+      this.config.targetTime,
+      this.config.weeklySchedule,
+      new Date(),
+    );
+    this.pub(this.timeStateTopic, this.targetTimeOverride ?? formatHHMM(fallback));
   }
 
   private state: Record<string, string> = {

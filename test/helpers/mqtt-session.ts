@@ -16,6 +16,7 @@ let _sessionCounter = 0;
 const STATUS_TOPIC = "evchargeboss/status";
 const CHARGED_ENERGY_TOPIC = "evchargeboss/charged_energy";
 const TARGET_TIME_SET_TOPIC = "evchargeboss/target_time/set";
+const TARGET_TIME_STATE_TOPIC = "evchargeboss/target_time/state";
 
 export interface MqttTestSession {
   loopPromise: Promise<void>;
@@ -32,6 +33,8 @@ export interface MqttTestSession {
   chargedEnergy(): number;
   /** Session summary captured from onSessionEnd — null until session completes. */
   sessionSummary(): SessionSummary | null;
+  /** Last value of evchargeboss/target_time/state received via MQTT — null if none yet. */
+  targetTimeState(): string | null;
   /**
    * Deduplicated sequence of status values received via MQTT.
    * Recording starts from the first "Starting…" message emitted by StatusPublisher,
@@ -95,6 +98,7 @@ export async function startMqttSession(
   let _recording = false;
   let _lastChargedEnergy = 0;
   let _sessionSummary: SessionSummary | null = null;
+  let _lastTargetTimeState: string | null = null;
 
   // Subscribe controlClient to observable topics BEFORE creating StatusPublisher so we
   // don't miss the "Starting…" retained message from initializeDiscovery().
@@ -104,6 +108,9 @@ export async function startMqttSession(
     }),
     new Promise<void>((resolve, reject) => {
       controlClient.subscribe(CHARGED_ENERGY_TOPIC, (err) => (err ? reject(err) : resolve()));
+    }),
+    new Promise<void>((resolve, reject) => {
+      controlClient.subscribe(TARGET_TIME_STATE_TOPIC, (err) => (err ? reject(err) : resolve()));
     }),
   ]);
 
@@ -124,6 +131,8 @@ export async function startMqttSession(
     } else if (topic === CHARGED_ENERGY_TOPIC) {
       const n = parseFloat(value);
       if (!isNaN(n)) _lastChargedEnergy = n;
+    } else if (topic === TARGET_TIME_STATE_TOPIC && value.length > 0) {
+      _lastTargetTimeState = value;
     }
   });
 
@@ -174,6 +183,7 @@ export async function startMqttSession(
     },
     chargedEnergy: () => _lastChargedEnergy,
     sessionSummary: () => _sessionSummary,
+    targetTimeState: () => _lastTargetTimeState,
     statusHistory: () => _statusHistory,
     teardown() {
       relay.cleanup();

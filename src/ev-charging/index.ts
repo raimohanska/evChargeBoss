@@ -7,7 +7,8 @@ import { StatusPublisher } from "./mqtt-status.ts";
 import { makeLogger } from "../utils/log.ts";
 import { makeClock } from "../utils/timing-utils.ts";
 import { parseArgs } from "./parse-args.ts";
-import { runSession, resolveTargetTime } from "./coordinator.ts";
+import { runSession } from "./coordinator.ts";
+import { resolveTargetTime } from "./helpers.ts";
 import { writeSessionSummary, checkInfluxHealth } from "../influx.ts";
 import { HeatingTracker, loadHeatingStatistics } from "./heating-tracker.ts";
 

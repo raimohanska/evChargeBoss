@@ -1,8 +1,49 @@
 import type { Slot } from "./types.ts";
 import type { MachineState, Environment } from "./state-machine.ts";
 import type { PricedSlot } from "../electricity/types.ts";
+import type { WeeklySchedule } from "./config.ts";
 
 const SLOT_MS = 15 * 60 * 1000;
+
+const DOW_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
+function dowKey(d: Date): keyof WeeklySchedule {
+  return DOW_KEYS[d.getDay()];
+}
+
+export function parseTargetTime(timeStr: string, from: Date): Date {
+  const [h, m] = timeStr.split(":").map(Number);
+  const today = new Date(from);
+  today.setHours(h, m, 0, 0);
+  if (today > from) return today;
+  const tomorrow = new Date(from);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(h, m, 0, 0);
+  return tomorrow;
+}
+
+export function resolveTargetTime(
+  globalTime: string,
+  schedule: WeeklySchedule | undefined,
+  from: Date,
+): Date {
+  const todayTime = schedule?.[dowKey(from)] ?? globalTime;
+  const [th, tm] = todayTime.split(":").map(Number);
+  const todayAt = new Date(from);
+  todayAt.setHours(th, tm, 0, 0);
+  if (todayAt > from) return todayAt;
+
+  const tomorrow = new Date(from);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowTime = schedule?.[dowKey(tomorrow)] ?? globalTime;
+  const [tmh, tmm] = tomorrowTime.split(":").map(Number);
+  tomorrow.setHours(tmh, tmm, 0, 0);
+  return tomorrow;
+}
+
+export function formatHHMM(d: Date): string {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 
 export function floorToSlotStart(date: Date): Date {
   const slot = new Date(date);

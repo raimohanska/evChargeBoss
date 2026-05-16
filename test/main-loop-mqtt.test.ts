@@ -134,12 +134,12 @@ describe("main-loop MQTT integration", { concurrency: false }, () => {
       { targetTime: "08:00" },
     );
     try {
-      await relay.assertOn("2026-04-18T17:00");  // plug-in detection
+      await relay.assertOn("2026-04-18T17:00"); // plug-in detection
       await relay.assertOff("2026-04-18T18:00"); // plan computed; sleeping until overnight slots
-      await relay.assertOn("2026-04-19T01:00");  // first overnight cheap slot
-      publishTargetTime("12:00");                // extend deadline mid-slot
+      await relay.assertOn("2026-04-19T01:00"); // first overnight cheap slot
+      publishTargetTime("12:00"); // extend deadline mid-slot
       await relay.assertOff("2026-04-19T02:00"); // mid-slot abort before slot ends
-      await relay.assertOn("2026-04-19T10:00");  // new plan: solar-free window
+      await relay.assertOn("2026-04-19T10:00"); // new plan: solar-free window
       await loopPromise;
     } finally {
       teardown();
@@ -609,11 +609,10 @@ describe("main-loop MQTT integration — detected charger power", { concurrency:
    *   2 kW → 0.50 kWh (target not reached; a second slot runs; chargedKwh = 1.0)
    */
   test("Plan and slot accounting use detected power, not configured powerKw", async () => {
-    const { loopPromise, relay, sessionSummary, teardown } = await startMqttSession(
-      FROM,
-      SPEEDUP,
-      { powerKw: 2, targetKwh: 0.75 },
-    );
+    const { loopPromise, relay, sessionSummary, teardown } = await startMqttSession(FROM, SPEEDUP, {
+      powerKw: 2,
+      targetKwh: 0.75,
+    });
     try {
       await advanceToSolarWindow(relay);
       await loopPromise;
@@ -629,3 +628,41 @@ describe("main-loop MQTT integration — detected charger power", { concurrency:
     }
   });
 }); // describe "main-loop MQTT integration — detected charger power"
+
+describe("main-loop MQTT integration — target time reset", { concurrency: false }, () => {
+  /**
+   * After a Charge Now session completes, resetTargetTime() must publish the
+   * schedule-aware default time (e.g. "12:00") to the target_time/state topic,
+   * overwriting the stale Charge Now override (e.g. "19:00").
+   *
+   * Regression: previously resetTargetTime() published an empty string, which
+   * Home Assistant ignores, leaving the stale "19:00" retained on the broker.
+   */
+  test("Charge Now: target_time/state reset to config default after session ends", async () => {
+    const { loopPromise, relay, publishTargetTime, targetTimeState, teardown } =
+      await startMqttSession(FROM, SPEEDUP, { targetKwh: 5 });
+    try {
+      await relay.assertOn("2026-04-18T17:00"); // plug-in detection
+      await relay.assertOff("2026-04-18T17:10"); // enters overnight-gap sleep
+
+      // Simulate Charge Now: charge for a 2-hour window this evening.
+      publishTargetTime("19:00");
+
+      await loopPromise;
+
+      // Wait up to 500 ms for the retained publish to reach the control client.
+      const deadline = Date.now() + 500;
+      while (targetTimeState() !== "12:00" && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+
+      assert.equal(
+        targetTimeState(),
+        "12:00",
+        "target_time/state must be reset to config default after Charge Now session ends",
+      );
+    } finally {
+      teardown();
+    }
+  });
+}); // describe "main-loop MQTT integration — target time reset"
