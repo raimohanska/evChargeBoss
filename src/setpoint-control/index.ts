@@ -184,7 +184,7 @@ export async function runSetpointControlLoop(
       const low = rtConfig.targetTemperature - rtConfig.allowedDeviationDown;
       const high = rtConfig.targetTemperature + rtConfig.allowedDeviationUp;
 
-      let tempAdjustmentMsg: string | null = null;
+      let tempAdjustmentMsg: string | null;
       if (temp === undefined) {
         tempAdjustmentMsg = `[${spConfig.name}] Room temperature unavailable at ${localTimeShort(slot.start)}, using planned setpoint ${setpoint}`;
       } else if (temp < low) {

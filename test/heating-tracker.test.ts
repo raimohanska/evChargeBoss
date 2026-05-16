@@ -1,13 +1,12 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 
 // MUST set PLANS_DIR before importing the module under test,
 // because getStatsFilePath() captures process.env.PLANS_DIR at call time.
-let tmpDir: string;
-tmpDir = mkdtempSync(path.join(tmpdir(), "heating-tracker-test-"));
+const tmpDir = mkdtempSync(path.join(tmpdir(), "heating-tracker-test-"));
 process.env.PLANS_DIR = tmpDir;
 
 import {

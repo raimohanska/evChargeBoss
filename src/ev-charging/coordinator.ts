@@ -4,7 +4,7 @@ import type { StatusPublisher } from "./mqtt-status.ts";
 import type { ChargingSession } from "./charger.ts";
 import { makeDebouncedDriver } from "./charger.ts";
 import type { Clock } from "../utils/timing-utils.ts";
-import type { Environment, MachineState, StateId } from "./state-machine.ts";
+import type { Environment, MachineState } from "./state-machine.ts";
 import type { WeeklySchedule } from "./config.ts";
 import { z } from "zod";
 import { fetchPlanInputs } from "./planner.ts";
