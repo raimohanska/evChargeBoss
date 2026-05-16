@@ -7,7 +7,7 @@ import { StatusPublisher } from "./mqtt-status.ts";
 import { makeLogger } from "../utils/log.ts";
 import { makeClock } from "../utils/timing-utils.ts";
 import { parseArgs } from "./parse-args.ts";
-import { runSession, parseTargetTime } from "./coordinator.ts";
+import { runSession, parseTargetTime, resolveTargetTime } from "./coordinator.ts";
 import { writeSessionSummary, checkInfluxHealth } from "../influx.ts";
 
 const log = makeLogger("ev-charging");
@@ -38,7 +38,7 @@ export async function runEvCharging(config: Config): Promise<void> {
     }
     const targetTimeStr = config.evCharging.targetTime;
     const now = initialFrom ?? new Date();
-    const targetDate = parseTargetTime(targetTimeStr, now);
+    const targetDate = resolveTargetTime(targetTimeStr, config.evCharging.weeklySchedule, now);
     const slots = await plan(now, targetDate, config.evCharging.targetKwh, powerKw, config);
     printPlan(slots, {
       powerKw,
@@ -83,7 +83,7 @@ export async function runEvCharging(config: Config): Promise<void> {
 
   // Charge loop: run sessions indefinitely, retrying on error.
   let from: Date | undefined = initialFrom;
-  log("Starting charging loop")
+  log("Starting charging loop");
   while (true) {
     if (from) log(`Planning from ${from.toISOString()}`);
     try {

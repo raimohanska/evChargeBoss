@@ -8,6 +8,10 @@
     "mode": "charge",
     "targetKwh": 7,
     "targetTime": "12:00",
+    "weeklySchedule": {
+      "sat": "10:00",
+      "sun": "10:00"
+    },
     "chargeNowHours": 2,
     "mqtt": {
       "powerTopic": "zigbee2mqtt/ev-relay",

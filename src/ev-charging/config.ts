@@ -3,6 +3,15 @@ import { z } from "zod";
 export const Mode = z.enum(["charge", "plan"]);
 export type Mode = z.infer<typeof Mode>;
 
+export const DayOfWeek = z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+export type DayOfWeek = z.infer<typeof DayOfWeek>;
+
+const TimeStrLoose = z.string().regex(/^\d{1,2}:\d{2}$/, 'must be "H:MM" or "HH:MM"');
+
+export const WeeklySchedule = z.record(DayOfWeek, TimeStrLoose);
+// z.record infers all keys as required; WeeklySchedule is intentionally partial
+export type WeeklySchedule = Partial<Record<DayOfWeek, string>>;
+
 export const EvChargingMqttConfig = z.strictObject({
   powerTopic: z.string(),
   powerField: z.string().optional(),
@@ -27,6 +36,7 @@ export const EvChargingConfig = z.strictObject({
   targetKwh: z.number().positive(),
   powerKw: z.number().positive().optional(),
   targetTime: z.string().regex(/^\d{2}:\d{2}$/, 'must be "HH:MM"'),
+  weeklySchedule: WeeklySchedule.optional(),
   chargeNowHours: z.number().positive().optional(),
   plugInTimeoutMs: z.number().positive().optional(),
   mqtt: EvChargingMqttConfig.optional(),

@@ -4,6 +4,7 @@ import type { StatusPublisher } from "./mqtt-status.ts";
 import type { ChargingSession } from "./charger.ts";
 import type { Clock } from "../utils/timing-utils.ts";
 import type { Environment, MachineState, StateId } from "./state-machine.ts";
+import type { WeeklySchedule } from "./config.ts";
 import { z } from "zod";
 import { fetchPlanInputs } from "./planner.ts";
 import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
@@ -40,6 +41,31 @@ export function parseTargetTime(timeStr: string, from: Date): Date {
   const tomorrow = new Date(from);
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setHours(h, m, 0, 0);
+  return tomorrow;
+}
+
+const DOW_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
+function dowKey(d: Date): keyof WeeklySchedule {
+  return DOW_KEYS[d.getDay()];
+}
+
+export function resolveTargetTime(
+  globalTime: string,
+  schedule: WeeklySchedule | undefined,
+  from: Date,
+): Date {
+  const todayTime = schedule?.[dowKey(from)] ?? globalTime;
+  const [th, tm] = todayTime.split(":").map(Number);
+  const todayAt = new Date(from);
+  todayAt.setHours(th, tm, 0, 0);
+  if (todayAt > from) return todayAt;
+
+  const tomorrow = new Date(from);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowTime = schedule?.[dowKey(tomorrow)] ?? globalTime;
+  const [tmh, tmm] = tomorrowTime.split(":").map(Number);
+  tomorrow.setHours(tmh, tmm, 0, 0);
   return tomorrow;
 }
 
@@ -102,8 +128,9 @@ export async function runSession(
   const slotMs = 15 * 60 * 1000;
 
   const getTargetTimeFromPublisher = () => {
-    const targetTimeStr = publisher.getTargetTimeOverride() ?? config.evCharging.targetTime;
-    return parseTargetTime(targetTimeStr, now);
+    const override = publisher.getTargetTimeOverride();
+    if (override) return parseTargetTime(override, now);
+    return resolveTargetTime(config.evCharging.targetTime, config.evCharging.weeklySchedule, now);
   };
 
   let targetTime = getTargetTimeFromPublisher();

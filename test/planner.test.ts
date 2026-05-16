@@ -10,6 +10,7 @@ process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import
 
 const { plan, planFallbackSlot, computePlan } = await import("../src/ev-charging/planner.ts");
 const { parseTargetTime } = await import("../src/ev-charging/coordinator.ts");
+const { resolveTargetTime } = await import("../src/ev-charging/coordinator.ts");
 const { planChargeStatesChanged } = await import("../src/ev-charging/helpers.ts");
 
 // Fixed planning start: 2026-04-18 14:00 local (Helsinki, UTC+3).
@@ -232,4 +233,65 @@ test("planChargeStatesChanged: expired slot dropping from plan is not a change",
     makeSlot("2026-04-19T09:30:00", false),
   ];
   assert.equal(planChargeStatesChanged(prev, nextWithChange), true, "charge flip is detected");
+});
+
+// ── resolveTargetTime ─────────────────────────────────────────────────────────
+// Fixed reference: 2026-04-18T14:00:00 = Saturday 14:00 Helsinki time.
+// Day indices: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+
+test("resolveTargetTime: no schedule falls back to global (same as parseTargetTime)", () => {
+  // Sat 14:00, global = 16:00 still ahead today → returns today 16:00
+  const result = resolveTargetTime("16:00", undefined, FROM);
+  const expected = parseTargetTime("16:00", FROM);
+  assert.equal(result.getTime(), expected.getTime());
+});
+
+test("resolveTargetTime: no schedule, global already passed → next day", () => {
+  // Sat 14:00, global = 12:00 already passed → returns Sun 12:00
+  const result = resolveTargetTime("12:00", undefined, FROM);
+  const expected = parseTargetTime("12:00", FROM);
+  assert.equal(result.getTime(), expected.getTime());
+});
+
+test("resolveTargetTime: schedule entry for today, time still ahead → uses schedule time today", () => {
+  // Sat 14:00, schedule has sat=16:00 → returns today (Sat) at 16:00
+  const result = resolveTargetTime("12:00", { sat: "16:00" }, FROM);
+  const expected = new Date(FROM);
+  expected.setHours(16, 0, 0, 0);
+  assert.equal(result.getTime(), expected.getTime());
+});
+
+test("resolveTargetTime: schedule entry for today but already passed → tomorrow's schedule", () => {
+  // Sat 14:00, schedule has sat=10:00 (passed) and sun=11:00 → returns Sun at 11:00
+  const result = resolveTargetTime("12:00", { sat: "10:00", sun: "11:00" }, FROM);
+  const expected = new Date(FROM);
+  expected.setDate(expected.getDate() + 1);
+  expected.setHours(11, 0, 0, 0);
+  assert.equal(result.getTime(), expected.getTime());
+});
+
+test("resolveTargetTime: schedule entry for today passed, no tomorrow entry → global on tomorrow", () => {
+  // Sat 14:00, schedule has sat=10:00 (passed), no sun entry → returns Sun at global 12:00
+  const result = resolveTargetTime("12:00", { sat: "10:00" }, FROM);
+  const expected = new Date(FROM);
+  expected.setDate(expected.getDate() + 1);
+  expected.setHours(12, 0, 0, 0);
+  assert.equal(result.getTime(), expected.getTime());
+});
+
+test("resolveTargetTime: only tomorrow has a schedule entry, today uses global (not passed)", () => {
+  // Sat 14:00, schedule has sun=9:00, today global=16:00 still ahead → returns today at 16:00
+  const result = resolveTargetTime("16:00", { sun: "9:00" }, FROM);
+  const expected = new Date(FROM);
+  expected.setHours(16, 0, 0, 0);
+  assert.equal(result.getTime(), expected.getTime());
+});
+
+test("resolveTargetTime: H:MM short format is accepted", () => {
+  // Sat 14:00, schedule has sat=9:00 short form (passed) → tomorrow sun uses global 12:00
+  const result = resolveTargetTime("12:00", { sat: "9:00" }, FROM);
+  const expected = new Date(FROM);
+  expected.setDate(expected.getDate() + 1);
+  expected.setHours(12, 0, 0, 0);
+  assert.equal(result.getTime(), expected.getTime());
 });
