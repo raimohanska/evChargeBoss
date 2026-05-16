@@ -158,7 +158,7 @@ export function nextState(machine: MachineState, env: Environment): MachineState
         log(`Plan computed using measured power ${machine.detectedChargerPowerKw} kW`);
       } else {
         log(
-          `Warning: planning with configured power ${machine.detectedChargerPowerKw} kW — no live measurement yet`,
+          `Warning: planning with configured power ${machine.detectedChargerPowerKw} kW - no live measurement yet`,
         );
       }
       printPlan(plan, printOpts);

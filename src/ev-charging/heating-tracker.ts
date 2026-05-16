@@ -34,7 +34,7 @@ export function loadHeatingStatistics(): HeatingStatistics | null {
   }
   const result = HeatingStatisticsSchema.safeParse(raw);
   if (!result.success) {
-    log(`Warning: heating statistics file failed validation — ignoring.`);
+    log(`Warning: heating statistics file failed validation - ignoring.`);
     return null;
   }
   return result.data;
@@ -108,7 +108,7 @@ export class HeatingTracker {
 
       saveHeatingStatistics(stats);
       log(
-        `Heating 24h cycle complete (${stats.cycleStart} → ${stats.cycleEnd}): ${heatingOnPercentage.toFixed(1)}% heating on`,
+        `Heating 24h cycle complete (${stats.cycleStart} -> ${stats.cycleEnd}): ${heatingOnPercentage.toFixed(1)}% heating on`,
       );
       this.latestStats = stats;
 

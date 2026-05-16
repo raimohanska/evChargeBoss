@@ -51,7 +51,7 @@ export async function fetchSlots(
   const missingSpot = slotStarts.filter((s) => !spotMap.has(s.getTime()));
   if (missingSpot.length > 0) {
     throw new IncompleteDataError(
-      `Cannot plan safely — missing ${missingSpot.length} spot price slot(s)`,
+      `Cannot plan safely - missing ${missingSpot.length} spot price slot(s)`,
       missingSpot,
     );
   }
@@ -60,7 +60,7 @@ export async function fetchSlots(
   const solarEpochsDesc = [...solarMap.keys()].sort((a, b) => b - a);
   const missingSolar = slotStarts.filter((s) => !solarMap.has(s.getTime())).length;
   if (missingSolar > 0 && verbose)
-    log(`  ${missingSolar} solar slots without exact match — using nearest preceding value`);
+    log(`  ${missingSolar} solar slots without exact match - using nearest preceding value`);
   persistSolarCache(solarMap, verbose);
 
   const slots = slotStarts.map((start) => {

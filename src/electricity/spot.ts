@@ -60,7 +60,7 @@ export function persistSpotCache(map: Map<number, number>, verbose?: boolean): v
     if (count < 96) {
       if (verbose)
         log(
-          `  Spot cache for ${date}: only ${count}/96 slots — skipping write to avoid partial cache`,
+          `  Spot cache for ${date}: only ${count}/96 slots - skipping write to avoid partial cache`,
         );
       continue;
     }

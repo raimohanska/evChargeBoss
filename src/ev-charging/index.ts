@@ -85,7 +85,7 @@ export async function runEvCharging(config: Config): Promise<void> {
   const persistedStats = loadHeatingStatistics();
   if (persistedStats) {
     log(
-      `Heating statistics (persisted): ${persistedStats.heatingOnPercentage.toFixed(1)}% heating on (${persistedStats.cycleStart} → ${persistedStats.cycleEnd})`,
+      `Heating statistics (persisted): ${persistedStats.heatingOnPercentage.toFixed(1)}% heating on (${persistedStats.cycleStart} -> ${persistedStats.cycleEnd})`,
     );
   }
   const tracker = session.holdSource ? new HeatingTracker(persistedStats) : null;

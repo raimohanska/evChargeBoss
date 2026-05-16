@@ -93,7 +93,7 @@ export class StatusPublisher {
         if (this._resolveInitialTargetTime !== null) {
           this._resolveInitialTargetTime = null;
           log(
-            `[MQTT] No retained target time within ${timeoutMs}ms — using ${this.config.targetTime}`,
+            `[MQTT] No retained target time within ${timeoutMs}ms - using ${this.config.targetTime}`,
           );
           resolve();
         }

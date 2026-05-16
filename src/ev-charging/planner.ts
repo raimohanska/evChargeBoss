@@ -136,7 +136,7 @@ export async function planFallbackSlot(
     return {
       charge: true,
       reason: "solar",
-      details: `Solar covers load (${Math.round(effectiveSolarW)} W) — charging for free`,
+      details: `Solar covers load (${Math.round(effectiveSolarW)} W) - charging for free`,
       slotEnd,
     };
   }
@@ -150,7 +150,7 @@ export async function planFallbackSlot(
     return {
       charge: true,
       reason: "mustCharge",
-      details: `Must charge now — ${slotsToTarget} slot(s) to target, need ${slotsNeeded}`,
+      details: `Must charge now - ${slotsToTarget} slot(s) to target, need ${slotsNeeded}`,
       slotEnd,
     };
   }
@@ -158,7 +158,7 @@ export async function planFallbackSlot(
   return {
     charge: false,
     reason: "waiting",
-    details: `Waiting for spot prices — ${slotsToTarget} slot(s) to target, need ${slotsNeeded}`,
+    details: `Waiting for spot prices - ${slotsToTarget} slot(s) to target, need ${slotsNeeded}`,
     slotEnd,
   };
 }

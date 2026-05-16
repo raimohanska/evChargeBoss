@@ -35,7 +35,7 @@ async function fetchAvailableSlots(
     const firstMissing = err.missingSlots[0];
     if (firstMissing.getTime() <= from.getTime()) throw err; // no usable data at all
     log(
-      `[${spConfig.name}] Spot prices only available until ${localTimeShort(firstMissing)} — using shorter plan`,
+      `[${spConfig.name}] Spot prices only available until ${localTimeShort(firstMissing)} - using shorter plan`,
     );
     return await fetchSlots(
       from,

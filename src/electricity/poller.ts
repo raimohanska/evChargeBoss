@@ -41,7 +41,7 @@ export async function runElectricityPollOnce(config: Config, clock: Clock): Prom
 
   const dates = datesInRange(from, to);
   if (allCached(dates)) {
-    log("[ElectricityPoller] Cache hit — skipping fetch");
+    log("[ElectricityPoller] Cache hit - skipping fetch");
     return;
   }
 
@@ -69,7 +69,7 @@ export async function runElectricityPollOnce(config: Config, clock: Clock): Prom
           config.influx,
         );
         log(
-          `[ElectricityPoller] Fetched ${slots.length} slots (partial — spot prices until ${localTimeShort(firstMissing)})`,
+          `[ElectricityPoller] Fetched ${slots.length} slots (partial - spot prices until ${localTimeShort(firstMissing)})`,
         );
         return;
       }
@@ -93,7 +93,7 @@ export async function runElectricityPoller(config: Config): Promise<void> {
       await runElectricityPollOnce(config, clock);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log(`[ElectricityPoller] Fetch failed: ${msg} — retrying in 60s`);
+      log(`[ElectricityPoller] Fetch failed: ${msg} - retrying in 60s`);
       await clock.sleep(60_000);
       continue;
     }

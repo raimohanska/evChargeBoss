@@ -103,7 +103,7 @@ function getInitialState(config: Config, targetTime: Date): MachineState {
       } else {
         reason = `session already complete: chargedKwh=${saved.chargedKwh} >= targetKwh=${config.evCharging.targetKwh}`;
       }
-      log(`Plan file found but not applicable (${planPath}): ${reason} — starting fresh.`);
+      log(`Plan file found but not applicable (${planPath}): ${reason} - starting fresh.`);
     }
   }
 
@@ -232,8 +232,8 @@ export async function runSession(
         const remaining = config.evCharging.targetKwh - machine.chargedKwh;
         log(
           remaining > 0
-            ? `Target time passed — goal not reached. Charged ${machine.chargedKwh.toFixed(2)} / ${config.evCharging.targetKwh.toFixed(2)} kWh (${remaining.toFixed(2)} kWh short).`
-            : `Target time passed — session complete. ${machine.chargedKwh.toFixed(2)} kWh delivered.`,
+            ? `Target time passed - goal not reached. Charged ${machine.chargedKwh.toFixed(2)} / ${config.evCharging.targetKwh.toFixed(2)} kWh (${remaining.toFixed(2)} kWh short).`
+            : `Target time passed - session complete. ${machine.chargedKwh.toFixed(2)} kWh delivered.`,
         );
         break;
       }
@@ -244,14 +244,14 @@ export async function runSession(
           forecast = await fetchPlanInputs(clock.now(), targetTime, config);
         } catch (err) {
           if (err instanceof IncompleteDataError) {
-            log(`Forecast unavailable: ${err.message} — retrying at next slot`);
+            log(`Forecast unavailable: ${err.message} - retrying at next slot`);
             const msToNextSlot = slotMs - (clock.now().getTime() % slotMs);
             wakeCancel = new Canceller();
             publisher.setWakeCallback(() => wakeCancel.abort());
             await clock.sleep(msToNextSlot, wakeCancel.signal);
             tracker?.tick(clock.now());
             if (wakeCancel.signal.aborted) {
-              log("Target time changed during forecast-unavailable wait — re-planning.");
+              log("Target time changed during forecast-unavailable wait - re-planning.");
             }
             continue;
           }
@@ -282,7 +282,7 @@ export async function runSession(
 
         if (wakeCancel.signal.aborted) {
           forecast = null;
-          log("Target time changed mid-slot — re-planning.");
+          log("Target time changed mid-slot - re-planning.");
           continue;
         }
 
@@ -325,7 +325,7 @@ export async function runSession(
     const powerDownStart = clock.now();
     while (currentPowerW > powerThresholdW) {
       if (clock.now().getTime() - powerDownStart.getTime() >= POWER_DOWN_TIMEOUT_MS) {
-        log("Power still high after session end — starting next session immediately.");
+        log("Power still high after session end - starting next session immediately.");
         break;
       }
       await clock.sleep(1_000);

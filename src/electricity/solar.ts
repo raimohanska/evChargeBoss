@@ -28,8 +28,8 @@ export async function fetchSolarForecast(
     const url = `https://api.forecast.solar/estimate/${lat}/${lon}/${declination}/${azimuth}/${kwp}`;
     log("Fetching solar forecast from " + url);
     const res = await fetch(url);
-    if (!res.ok) {      
-        log(`  forecast.solar HTTP ${res.status} — falling back to Open-Meteo`);
+    if (!res.ok) {
+      log(`  forecast.solar HTTP ${res.status} - falling back to Open-Meteo`);
       return { map: await fetchSolarForecastOpenMeteo(solarConfig, verbose), fresh: true };
     }
     const json = (await res.json()) as { result: ForecastSolarResult };

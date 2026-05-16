@@ -132,7 +132,7 @@ export async function checkInfluxHealth(config: InfluxConfig): Promise<void> {
       },
     );
     req.on("error", (err: Error) => {
-      log(`[Influx] WARNING: cannot reach ${config.url} — ${err.message}`);
+      log(`[Influx] WARNING: cannot reach ${config.url} - ${err.message}`);
       resolve();
     });
     req.end();

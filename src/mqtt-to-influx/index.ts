@@ -88,7 +88,7 @@ async function handleMessage(
       await writeLine(influxConfig, line);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log(`[MqttToInflux] ERROR writing ${sensor.name}: ${msg} — line: ${line}`);
+      log(`[MqttToInflux] ERROR writing ${sensor.name}: ${msg} - line: ${line}`);
     }
   }
 }
@@ -97,7 +97,7 @@ export async function runMqttToInflux(config: Config): Promise<void> {
   if (!config.mqttToInflux) return;
 
   if (!config.influx) {
-    log("[MqttToInflux] WARNING: influx not configured — mqtt-to-influx disabled");
+    log("[MqttToInflux] WARNING: influx not configured - mqtt-to-influx disabled");
     return;
   }
 

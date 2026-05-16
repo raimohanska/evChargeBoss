@@ -55,7 +55,7 @@ export function readPlanFile<T>(filePath: string, schema: z.ZodType<T>): T | nul
   }
   const result = schema.safeParse(raw);
   if (!result.success) {
-    log(`Warning: plan file ${filePath} failed validation — ignoring. ${result.error.message}`);
+    log(`Warning: plan file ${filePath} failed validation - ignoring. ${result.error.message}`);
     return null;
   }
   return result.data;

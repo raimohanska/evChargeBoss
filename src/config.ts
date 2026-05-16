@@ -75,7 +75,7 @@ export function getConfigPath(): string {
  */
 export function writeConfigAtomically(configPath: string, config: Config): void {
   if (configPath.endsWith("config-example.json")) {
-    configWarn("Refusing to overwrite config-example.json — changes not persisted.");
+    configWarn("Refusing to overwrite config-example.json - changes not persisted.");
     return;
   }
   const tmp = `${configPath}.tmp`;

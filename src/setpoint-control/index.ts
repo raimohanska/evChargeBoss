@@ -189,11 +189,11 @@ export async function runSetpointControlLoop(
         tempAdjustmentMsg = `[${spConfig.name}] Room temperature unavailable at ${localTimeShort(slot.start)}, using planned setpoint ${setpoint}`;
       } else if (temp < low) {
         const adjusted = setpoint + rtConfig.influence;
-        tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C below range (${low.toFixed(1)}–${high.toFixed(1)}°C), raising setpoint by ${rtConfig.influence}: ${setpoint} → ${adjusted}`;
+        tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C below range (${low.toFixed(1)}-${high.toFixed(1)}°C), raising setpoint by ${rtConfig.influence}: ${setpoint} -> ${adjusted}`;
         setpoint = adjusted;
       } else if (temp > high) {
         const adjusted = setpoint - rtConfig.influence;
-        tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C above range (${low.toFixed(1)}–${high.toFixed(1)}°C), lowering setpoint by ${rtConfig.influence}: ${setpoint} → ${adjusted}`;
+        tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C above range (${low.toFixed(1)}-${high.toFixed(1)}°C), lowering setpoint by ${rtConfig.influence}: ${setpoint} -> ${adjusted}`;
         setpoint = adjusted;
       } else {
         tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C within range (${low.toFixed(1)}–${high.toFixed(1)}°C), no adjustment to planned setpoint ${setpoint}`;

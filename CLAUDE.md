@@ -102,6 +102,10 @@ Startup detection and event orchestration are handled by `runSession()` in `src/
 
 All planning is in **local time** (Europe/Helsinki in production). Cache files are named `YYYY-MM-DD` and keyed `YYYY-MM-DDTHH:MM:SS` — both in local time, no Z suffix. Use `localDateString(d)` and `localDateTimeString(d)` from `src/utils.ts` everywhere dates become strings.
 
+## Logging
+
+Use the makeLogger helper to get a context-specific logger. Don't use any non-ASCII characters in logs.
+
 ## Caching
 
 Spot price and solar data are cached per-day to `.spot-cache-YYYY-MM-DD.json` / `.solar-cache-YYYY-MM-DD.json` in the directory given by `CACHE_DIR` env var (default: `.`). Cache is written **after** data validation passes, never before. Do not clear caches lightly — the forecast.solar free tier rate-limits aggressively.
