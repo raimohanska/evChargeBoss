@@ -1,6 +1,7 @@
 import type { Slot } from "./types.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
 import { makeLogger } from "../utils/log.ts";
+import { formatEur } from "../utils/format.ts";
 
 const log = makeLogger("ev-charging");
 
@@ -59,7 +60,7 @@ export function printPlan(slots: Slot[], opts: PrintPlanOptions): void {
   }
 
   log(
-    `${hr.repeat(3)} Total: ${chargeSlots.length} slots, ~${totalCost.toFixed(3)} EUR charging cost, ${freeSlots} solar-free slots`,
+    `${hr.repeat(3)} Total: ${chargeSlots.length} slots, ~${formatEur(totalCost)} charging cost, ${freeSlots} solar-free slots`,
   );
 }
 export const IS_TTY = process.stdout.isTTY === true;

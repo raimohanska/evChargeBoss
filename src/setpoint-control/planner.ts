@@ -6,6 +6,7 @@ import { fetchSlots } from "../electricity/index.ts";
 import { IncompleteDataError } from "../electricity/IncompleteDataError.ts";
 import { localTimeShort } from "../utils/date-time-format.ts";
 import { makeLogger } from "../utils/log.ts";
+import { formatCents } from "../utils/format.ts";
 
 const log = makeLogger("setpoint-control");
 
@@ -67,7 +68,7 @@ export async function planSetpoint(
 
   const avgCost = costs.reduce((sum, c) => sum + c, 0) / costs.length;
   log(
-    `[${spConfig.name}] Planning ${pricedSlots.length} slots, avg slot cost ${(avgCost * 100).toFixed(2)} cts`,
+    `[${spConfig.name}] Planning ${pricedSlots.length} slots, avg slot cost ${formatCents(avgCost * 100)}`,
   );
 
   // Identify expensive slots first, count = N.
