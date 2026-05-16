@@ -25,11 +25,15 @@ export type EvChargingMqttConfig = z.infer<typeof EvChargingMqttConfig>;
 
 const HoldWhenHeatingConfig = z.object({
   thresholdW: z.number(),
+  maxHoldPercentage: z.number().positive().max(100).optional(),
+  holdMargin: z.number().nonnegative().optional(),
+  statisticsPeriodHours: z.number().positive().optional(),
   mqtt: z.object({
     powerTopic: z.string(),
     powerField: z.string().optional(),
   }),
 });
+export type HoldWhenHeatingConfig = z.infer<typeof HoldWhenHeatingConfig>;
 
 export const EvChargingConfig = z.strictObject({
   mode: Mode,

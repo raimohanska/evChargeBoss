@@ -86,14 +86,30 @@ export async function runEvCharging(config: Config): Promise<void> {
   const persistedStats = loadHeatingStatistics();
   if (persistedStats) {
     log(
-      `Heating statistics (persisted): ${persistedStats.heatingOnPercentage.toFixed(1)}% heating on (${persistedStats.cycleStart} -> ${persistedStats.cycleEnd})`,
+      `Heating statistics (persisted): heatingOn=${persistedStats.heatingOnPercentage.toFixed(1)}% holdPowerLevel=${persistedStats.holdPowerLevel}W threshold=${persistedStats.powerHoldThreshold}W holdFactor=${persistedStats.powerHoldFactor.toFixed(3)} (${persistedStats.periodStart} -> ${persistedStats.periodEnd})`,
     );
   }
-  const tracker = session.holdSource ? new HeatingTracker(persistedStats) : null;
+  const holdCfg = config.evCharging.holdWhenHeating;
+  const tracker =
+    session.heatingWattsSource && holdCfg
+      ? new HeatingTracker(
+          {
+            thresholdW: holdCfg.thresholdW,
+            maxHoldPercentage: holdCfg.maxHoldPercentage ?? 20,
+            holdMargin: holdCfg.holdMargin ?? 100,
+            statisticsPeriodHours: holdCfg.statisticsPeriodHours ?? 24,
+          },
+          persistedStats,
+        )
+      : null;
   let unsubTracker: (() => void) | undefined;
-  if (session.holdSource && tracker) {
-    unsubTracker = session.holdSource.subscribe((held) => tracker.onHoldChange(held, clock.now()));
+  if (session.heatingWattsSource && tracker) {
+    unsubTracker = session.heatingWattsSource.subscribe(({ watts }) =>
+      tracker.onHeatingWatts(watts),
+    );
   }
+  const samplingInterval =
+    tracker !== null ? setInterval(() => tracker.takeSample(new Date()), 60_000) : undefined;
 
   // Charge loop: run sessions indefinitely, retrying on error.
   let from: Date | undefined = initialFrom;
@@ -113,6 +129,7 @@ export async function runEvCharging(config: Config): Promise<void> {
       }
     }
   } finally {
+    if (samplingInterval !== undefined) clearInterval(samplingInterval);
     unsubTracker?.();
   }
 }

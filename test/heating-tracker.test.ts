@@ -1,6 +1,6 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 
@@ -13,154 +13,226 @@ import {
   HeatingTracker,
   loadHeatingStatistics,
   saveHeatingStatistics,
+  type HeatingTrackerConfig,
+  type HeatingPowerStatistics,
 } from "../src/ev-charging/heating-tracker.ts";
-
-const CYCLE_MS = 24 * 60 * 60 * 1000;
-
-function makeDate(offsetMs: number, base = new Date("2026-01-01T00:00:00")): Date {
-  return new Date(base.getTime() + offsetMs);
-}
 
 after(() => {
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
+const MIN_MS = 60_000;
+
+/** Default config: 1 h period (60 samples), maxHoldPercentage=20, holdMargin=100 */
+const defaultCfg: HeatingTrackerConfig = {
+  thresholdW: 3000,
+  maxHoldPercentage: 20,
+  holdMargin: 100,
+  statisticsPeriodHours: 1,
+};
+
+function makeDate(offsetMs: number, base = new Date("2026-01-01T00:00:00")): Date {
+  return new Date(base.getTime() + offsetMs);
+}
+
+/**
+ * Set watts on the tracker, then call takeSample() `count` times at consecutive
+ * minute boundaries starting from `startMinute`.
+ */
+function feedSamples(
+  tracker: HeatingTracker,
+  startMinute: number,
+  count: number,
+  watts: number,
+): void {
+  tracker.onHeatingWatts(watts);
+  for (let i = 0; i < count; i++) {
+    tracker.takeSample(makeDate((startMinute + i) * MIN_MS));
+  }
+}
+
 describe("HeatingTracker", () => {
-  it("getLatest returns null when no persisted stats and no completed cycle", () => {
-    const tracker = new HeatingTracker(null);
-    tracker.onHoldChange(true, makeDate(0));
-    tracker.tick(makeDate(CYCLE_MS - 1));
-    assert.equal(tracker.getLatest(), null);
+  describe("sample recording", () => {
+    it("getLatest returns null before buffer is filled", () => {
+      const tracker = new HeatingTracker(defaultCfg, null);
+      feedSamples(tracker, 0, 30, 1000); // only 30 of 60 required
+      tracker.tick(makeDate(31 * MIN_MS));
+      assert.equal(tracker.getLatest(), null);
+    });
+
+    it("getLatest returns persisted stats before buffer fills", () => {
+      const persisted: HeatingPowerStatistics = {
+        holdPowerLevel: 2800,
+        powerHoldThreshold: 2900,
+        powerHoldFactor: 0.8,
+        heatingOnPercentage: 30,
+        sampleCount: 60,
+        periodStart: "2026-01-01T00:00:00",
+        periodEnd: "2026-01-01T01:00:00",
+      };
+      const tracker = new HeatingTracker(defaultCfg, persisted);
+      feedSamples(tracker, 0, 10, 500);
+      assert.deepEqual(tracker.getLatest(), persisted);
+    });
+
+    it("no samples recorded before first onHeatingWatts call", () => {
+      const tracker = new HeatingTracker(defaultCfg, null);
+      // takeSample with no prior onHeatingWatts → nothing recorded
+      for (let i = 0; i < 60; i++) tracker.takeSample(makeDate(i * MIN_MS));
+      tracker.tick(makeDate(60 * MIN_MS));
+      assert.equal(tracker.getLatest(), null);
+    });
   });
 
-  it("getLatest returns persisted stats before any cycle completes", () => {
-    const persisted = {
-      heatingOnPercentage: 42.5,
-      cycleStart: "2026-01-01T00:00:00",
-      cycleEnd: "2026-01-02T00:00:00",
-    };
-    const tracker = new HeatingTracker(persisted);
-    tracker.onHoldChange(false, makeDate(0));
-    tracker.tick(makeDate(CYCLE_MS - 1));
-    assert.deepEqual(tracker.getLatest(), persisted);
+  describe("statistics computation", () => {
+    it("heatingOnPercentage is 0 when all samples below thresholdW", () => {
+      const tracker = new HeatingTracker(defaultCfg, null);
+      feedSamples(tracker, 0, 60, 500); // all below 3000 W
+      tracker.tick(makeDate(60 * MIN_MS));
+      const stats = tracker.getLatest();
+      assert.notEqual(stats, null);
+      assert.equal(stats!.heatingOnPercentage, 0);
+    });
+
+    it("heatingOnPercentage is 100 when all samples at or above thresholdW", () => {
+      const tracker = new HeatingTracker(defaultCfg, null);
+      feedSamples(tracker, 0, 60, 3000); // all at threshold
+      tracker.tick(makeDate(60 * MIN_MS));
+      const stats = tracker.getLatest();
+      assert.notEqual(stats, null);
+      assert.equal(stats!.heatingOnPercentage, 100);
+    });
+
+    it("heatingOnPercentage is 50 when half samples above thresholdW", () => {
+      const tracker = new HeatingTracker(defaultCfg, null);
+      feedSamples(tracker, 0, 30, 500); // 30 samples below threshold
+      feedSamples(tracker, 30, 30, 5000); // 30 samples above threshold
+      tracker.tick(makeDate(60 * MIN_MS));
+      const stats = tracker.getLatest();
+      assert.notEqual(stats, null);
+      assert.equal(stats!.heatingOnPercentage, 50);
+    });
+
+    it("holdPowerLevel is the (100-maxHoldPercentage)th percentile", () => {
+      // 60 samples with values 1..60 W
+      const tracker = new HeatingTracker(defaultCfg, null);
+      for (let i = 0; i < 60; i++) {
+        tracker.onHeatingWatts(i + 1);
+        tracker.takeSample(makeDate(i * MIN_MS));
+      }
+      tracker.tick(makeDate(60 * MIN_MS));
+      const stats = tracker.getLatest();
+      assert.notEqual(stats, null);
+      // sorted[0..59] = 1..60
+      // percentileIndex = floor((1 - 0.20) * 60) = floor(48) = 48
+      // sorted[48] = 49
+      assert.equal(stats!.holdPowerLevel, 49);
+    });
+
+    it("powerHoldThreshold = holdPowerLevel + holdMargin", () => {
+      const tracker = new HeatingTracker(defaultCfg, null);
+      feedSamples(tracker, 0, 60, 2000);
+      tracker.tick(makeDate(60 * MIN_MS));
+      const stats = tracker.getLatest();
+      assert.notEqual(stats, null);
+      assert.equal(stats!.powerHoldThreshold, stats!.holdPowerLevel + defaultCfg.holdMargin);
+    });
+
+    it("powerHoldFactor is fraction of samples below powerHoldThreshold", () => {
+      // Use holdMargin=0 so powerHoldThreshold === holdPowerLevel, making the
+      // fraction exactly (100 - maxHoldPercentage)% = 0.8
+      const cfg: HeatingTrackerConfig = { ...defaultCfg, holdMargin: 0 };
+      const tracker = new HeatingTracker(cfg, null);
+      feedSamples(tracker, 0, 48, 1000); // 48 samples at 1000 W
+      feedSamples(tracker, 48, 12, 5000); // 12 samples at 5000 W
+      tracker.tick(makeDate(60 * MIN_MS));
+      const stats = tracker.getLatest();
+      assert.notEqual(stats, null);
+      // sorted[48] = 5000 → holdPowerLevel = 5000, threshold = 5000
+      // count(s < 5000) = 48 → 48/60 = 0.8
+      assert.equal(stats!.powerHoldFactor, 48 / 60);
+    });
+
+    it("stats not recomputed until 15 minutes have elapsed", () => {
+      const tracker = new HeatingTracker(defaultCfg, null);
+      feedSamples(tracker, 0, 60, 1000);
+      // First tick: stats compute, lastStatsTime = makeDate(60*MIN_MS)
+      tracker.tick(makeDate(60 * MIN_MS));
+      const first = tracker.getLatest();
+      assert.notEqual(first, null);
+      // 14 min later: no recompute
+      feedSamples(tracker, 60, 14, 5000);
+      tracker.tick(makeDate((60 + 14) * MIN_MS));
+      assert.deepEqual(tracker.getLatest(), first);
+      // 15 min later: recompute
+      feedSamples(tracker, 74, 1, 5000);
+      tracker.tick(makeDate((60 + 15) * MIN_MS));
+      assert.notDeepEqual(tracker.getLatest(), first);
+    });
   });
 
-  it("computes 0% when heating never held during 24h cycle", () => {
-    const tracker = new HeatingTracker(null);
-    tracker.onHoldChange(false, makeDate(0));
-    tracker.tick(makeDate(CYCLE_MS));
-    const stats = tracker.getLatest();
-    assert.notEqual(stats, null);
-    assert.equal(stats!.heatingOnPercentage, 0);
-  });
-
-  it("computes 100% when heating held for entire 24h cycle", () => {
-    const tracker = new HeatingTracker(null);
-    tracker.onHoldChange(true, makeDate(0));
-    tracker.tick(makeDate(CYCLE_MS));
-    const stats = tracker.getLatest();
-    assert.notEqual(stats, null);
-    assert.equal(stats!.heatingOnPercentage, 100);
-  });
-
-  it("computes 50% when heating held for exactly 12 hours", () => {
-    const tracker = new HeatingTracker(null);
-    const base = new Date("2026-01-01T00:00:00");
-    tracker.onHoldChange(true, makeDate(0, base)); // held from t=0
-    tracker.onHoldChange(false, makeDate(12 * 3600_000, base)); // off at t=12h
-    tracker.tick(makeDate(CYCLE_MS, base));
-    const stats = tracker.getLatest();
-    assert.notEqual(stats, null);
-    assert.equal(stats!.heatingOnPercentage, 50);
-  });
-
-  it("computes percentage correctly with multiple events", () => {
-    // held: 0h-6h (6h) + 18h-24h (6h) = 12h total = 50%
-    const base = new Date("2026-01-01T00:00:00");
-    const tracker = new HeatingTracker(null);
-    tracker.onHoldChange(true, makeDate(0, base));
-    tracker.onHoldChange(false, makeDate(6 * 3600_000, base));
-    tracker.onHoldChange(true, makeDate(18 * 3600_000, base));
-    tracker.tick(makeDate(CYCLE_MS, base));
-    const stats = tracker.getLatest();
-    assert.notEqual(stats, null);
-    assert.equal(stats!.heatingOnPercentage, 50);
-  });
-
-  it("handles two completed 48h cycles via tick", () => {
-    const base = new Date("2026-01-01T00:00:00");
-    const tracker = new HeatingTracker(null);
-    // First cycle: held 12h of 24h = 50%
-    tracker.onHoldChange(true, makeDate(0, base));
-    tracker.onHoldChange(false, makeDate(12 * 3600_000, base));
-    // 48h later
-    tracker.tick(makeDate(2 * CYCLE_MS, base));
-    const stats = tracker.getLatest();
-    assert.notEqual(stats, null);
-    // Second cycle: heating was off (last state before cycleEnd was off)
-    // so second cycle should be 0%; but latestStats is the last cycle computed
-    assert.equal(stats!.heatingOnPercentage, 0);
-  });
-
-  it("carries held state across cycle boundary for continuity", () => {
-    const base = new Date("2026-01-01T00:00:00");
-    const tracker = new HeatingTracker(null);
-    // Held the whole time — start at t=0 and never turn off
-    tracker.onHoldChange(true, makeDate(0, base));
-    // First cycle complete
-    tracker.tick(makeDate(CYCLE_MS, base));
-    const firstStats = tracker.getLatest();
-    assert.equal(firstStats!.heatingOnPercentage, 100);
-    // Second cycle complete — continuity seed carries held=true, still 100%
-    tracker.tick(makeDate(2 * CYCLE_MS, base));
-    const secondStats = tracker.getLatest();
-    assert.equal(secondStats!.heatingOnPercentage, 100);
-  });
-
-  it("cycle completes when onHoldChange is called past 24h boundary", () => {
-    const base = new Date("2026-01-01T00:00:00");
-    const tracker = new HeatingTracker(null);
-    tracker.onHoldChange(false, makeDate(0, base));
-    // Event arrives after 24h have elapsed
-    tracker.onHoldChange(true, makeDate(CYCLE_MS + 1000, base));
-    const stats = tracker.getLatest();
-    assert.notEqual(stats, null);
-    assert.equal(stats!.heatingOnPercentage, 0);
-  });
-
-  it("persists stats to file and loadHeatingStatistics reads them back", () => {
-    const stats = {
-      heatingOnPercentage: 33.3,
-      cycleStart: "2026-01-01T00:00:00",
-      cycleEnd: "2026-01-02T00:00:00",
-    };
-    saveHeatingStatistics(stats);
-    const loaded = loadHeatingStatistics();
-    assert.deepEqual(loaded, stats);
-  });
-
-  it("loadHeatingStatistics returns null when file missing", () => {
-    // Use a different PLANS_DIR for this check
-    const origDir = process.env.PLANS_DIR;
-    const emptyDir = mkdtempSync(path.join(tmpdir(), "heating-empty-"));
-    process.env.PLANS_DIR = emptyDir;
-    try {
+  describe("persistence", () => {
+    it("persists stats to file and loadHeatingStatistics reads them back", () => {
+      const stats: HeatingPowerStatistics = {
+        holdPowerLevel: 2800,
+        powerHoldThreshold: 2900,
+        powerHoldFactor: 0.82,
+        heatingOnPercentage: 33.3,
+        sampleCount: 60,
+        periodStart: "2026-01-01T00:00:00",
+        periodEnd: "2026-01-01T01:00:00",
+      };
+      saveHeatingStatistics(stats);
       const loaded = loadHeatingStatistics();
-      assert.equal(loaded, null);
-    } finally {
-      process.env.PLANS_DIR = origDir;
-      rmSync(emptyDir, { recursive: true, force: true });
-    }
-  });
+      assert.deepEqual(loaded, stats);
+    });
 
-  it("cycleStart and cycleEnd are included in persisted stats", () => {
-    const base = new Date("2026-03-15T00:00:00");
-    const tracker = new HeatingTracker(null);
-    tracker.onHoldChange(false, base);
-    tracker.tick(makeDate(CYCLE_MS, base));
-    const stats = tracker.getLatest();
-    assert.notEqual(stats, null);
-    assert.match(stats!.cycleStart, /2026-03-15/);
-    assert.match(stats!.cycleEnd, /2026-03-16/);
+    it("loadHeatingStatistics returns null when file missing", () => {
+      const origDir = process.env.PLANS_DIR;
+      const emptyDir = mkdtempSync(path.join(tmpdir(), "heating-empty-"));
+      process.env.PLANS_DIR = emptyDir;
+      try {
+        const loaded = loadHeatingStatistics();
+        assert.equal(loaded, null);
+      } finally {
+        process.env.PLANS_DIR = origDir;
+        rmSync(emptyDir, { recursive: true, force: true });
+      }
+    });
+
+    it("loadHeatingStatistics returns null when file has incompatible schema", () => {
+      const origDir = process.env.PLANS_DIR;
+      const badDir = mkdtempSync(path.join(tmpdir(), "heating-bad-"));
+      process.env.PLANS_DIR = badDir;
+      try {
+        mkdirSync(`${badDir}/.stats`, { recursive: true });
+        writeFileSync(
+          `${badDir}/.stats/heating-statistics.json`,
+          JSON.stringify({ heatingOnPercentage: 50, cycleStart: "x", cycleEnd: "y" }),
+        );
+        const loaded = loadHeatingStatistics();
+        assert.equal(loaded, null);
+      } finally {
+        process.env.PLANS_DIR = origDir;
+        rmSync(badDir, { recursive: true, force: true });
+      }
+    });
+
+    it("stats are persisted after buffer fills and tick fires", () => {
+      const freshDir = mkdtempSync(path.join(tmpdir(), "heating-persist-"));
+      const origDir = process.env.PLANS_DIR;
+      process.env.PLANS_DIR = freshDir;
+      try {
+        const tracker = new HeatingTracker(defaultCfg, null);
+        feedSamples(tracker, 0, 60, 1500);
+        tracker.tick(makeDate(60 * MIN_MS));
+        const persisted = loadHeatingStatistics();
+        assert.notEqual(persisted, null);
+        assert.equal(persisted!.sampleCount, 60);
+      } finally {
+        process.env.PLANS_DIR = origDir;
+        rmSync(freshDir, { recursive: true, force: true });
+      }
+    });
   });
 });

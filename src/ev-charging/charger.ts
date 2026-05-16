@@ -51,5 +51,6 @@ export interface ChargingSession {
   driver: ChargerDriver;
   wattsSource?: WattsSource;
   holdSource?: HoldSource;
+  heatingWattsSource?: WattsSource;
   end(): void;
 }

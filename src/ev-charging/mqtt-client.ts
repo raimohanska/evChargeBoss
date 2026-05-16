@@ -118,8 +118,10 @@ export function makeMqttSession(
 
   // Heating hold: when holdWhenHeating is configured, track heating power and
   // notify holdListeners whenever the held state changes.
+  // Also expose raw heating watts via heatingWattsSource for statistics tracking.
   let heatingHeld = false;
   const holdListeners: Array<(held: boolean) => void> = [];
+  const heatingWattsListeners: Array<(u: WattsUpdate) => void> = [];
   let heatingCleanup: (() => void) | undefined;
 
   const holdSource: HoldSource | undefined = holdWhenHeating
@@ -135,6 +137,18 @@ export function makeMqttSession(
       }
     : undefined;
 
+  const heatingWattsSource: WattsSource | undefined = holdWhenHeating
+    ? {
+        subscribe(cb) {
+          heatingWattsListeners.push(cb);
+          return () => {
+            const i = heatingWattsListeners.indexOf(cb);
+            if (i !== -1) heatingWattsListeners.splice(i, 1);
+          };
+        },
+      }
+    : undefined;
+
   if (holdWhenHeating) {
     const { powerTopic: heatingTopic, powerField: heatingField } = holdWhenHeating.mqtt;
     const { thresholdW } = holdWhenHeating;
@@ -142,6 +156,7 @@ export function makeMqttSession(
       if (topic !== heatingTopic) return;
       const w = parseWatts(message, heatingField);
       if (w === null) return;
+      for (const l of heatingWattsListeners) l({ watts: w });
       const held = w > thresholdW;
       if (held === heatingHeld) return;
       heatingHeld = held;
@@ -167,5 +182,6 @@ export function makeMqttSession(
     driver,
     wattsSource,
     holdSource,
+    heatingWattsSource,
   };
 }

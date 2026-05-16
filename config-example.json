@@ -24,6 +24,9 @@
     },
     "holdWhenHeating": {
       "thresholdW": 3000,
+      "maxHoldPercentage": 20,
+      "holdMargin": 100,
+      "statisticsPeriodHours": 24,
       "mqtt": {
         "powerTopic": "zigbee2mqtt/heating-relay",
         "powerField": "power"
