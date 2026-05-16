@@ -74,7 +74,11 @@ export class StatusPublisher {
 
   resetTargetTime(): void {
     this.targetTimeOverride = null;
-    this.pub(this.timeStateTopic, this.config.targetTime);
+    // Clear the retained override so the next startup uses resolveTargetTime
+    // (weekly schedule). An empty payload is safe: waitForInitialTargetTime's
+    // message handler skips setting the override for payloads without ':', but
+    // still resolves immediately so startup doesn't wait the full 2s timeout.
+    this.pub(this.timeStateTopic, "");
   }
 
   /**
