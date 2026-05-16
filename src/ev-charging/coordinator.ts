@@ -148,6 +148,11 @@ export async function runSession(
   const publishState = async () => {
     publisher.setStatus(getStatus(machine, env()));
     publisher.setChargedEnergy(machine.chargedKwh);
+    if (machine.plan !== null) {
+      publisher.setPlan(machine.plan);
+    } else {
+      publisher.clearPlan();
+    }
     const want = getState(machine.id).relayOn;
     if (want === relayOn) return;
     relayOn = want;
@@ -224,11 +229,8 @@ export async function runSession(
         await updateState();
       }
 
-      // 4. Publish current plan to publisher
+      // 4. Wait for the current slot to end, with events and power tracking
       const planSlots = machine.plan ?? [];
-      if (planSlots.length > 0) publisher.setPlan(planSlots);
-
-      // 5. Wait for the current slot to end, with events and power tracking
       const currentSlot = planSlots.find((s) => s.end > clock.now());
       if (currentSlot) {
         const chargingInThisSlot = getState(machine.id).relayOn;
@@ -301,6 +303,7 @@ export async function runSession(
   }
 
   publisher.setStatus("Idle");
+  publisher.clearPlan();
   publisher.resetTargetTime(clock.now());
   const solarPct = chargedSlots > 0 ? Math.round((solarFractionSum / chargedSlots) * 100) : 0;
   await onSessionEnd?.({ chargedKwh: machine.chargedKwh, totalCostEur, solarPct });

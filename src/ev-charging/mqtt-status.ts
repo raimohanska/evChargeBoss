@@ -238,6 +238,11 @@ export class StatusPublisher {
     this.setState("solar_pct", String(pct));
   }
 
+  clearPlan(): void {
+    this.setState("plan_cost", "-");
+    this.setState("solar_pct", "-");
+  }
+
   setChargedEnergy(kwh: number): void {
     this.setState("charged_energy", kwh.toFixed(2));
   }
