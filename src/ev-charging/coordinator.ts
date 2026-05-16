@@ -2,6 +2,7 @@ import type { Config } from "../config.ts";
 import type { SessionSummary } from "../influx.ts";
 import type { StatusPublisher } from "./mqtt-status.ts";
 import type { ChargingSession } from "./charger.ts";
+import { makeDebouncedDriver } from "./charger.ts";
 import type { Clock } from "../utils/timing-utils.ts";
 import type { Environment, MachineState, StateId } from "./state-machine.ts";
 import type { WeeklySchedule } from "./config.ts";
@@ -124,6 +125,7 @@ export async function runSession(
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
   tracker?: HeatingTracker | null,
 ): Promise<void> {
+  const RELAY_DEBOUNCE_MS = 1000;
   const now = from ?? clock.now();
   const powerThresholdW = config.evCharging.mqtt?.powerThresholdW ?? 10;
   const powerKw = config.evCharging.powerKw ?? 0;
@@ -175,13 +177,17 @@ export async function runSession(
     await publishState();
   };
 
+  const debouncedDriver = makeDebouncedDriver(session.driver, clock, RELAY_DEBOUNCE_MS, (err) =>
+    log(`Relay send error: ${String(err)}`),
+  );
+
   const publishState = async () => {
     publisher.setStatus(getStatus(machine, env()));
     publisher.setChargedEnergy(machine.chargedKwh);
     const want = getState(machine.id).relayOn;
     if (want === relayOn) return;
     relayOn = want;
-    await session.driver.send(relayOn);
+    await debouncedDriver.send(relayOn);
   };
   await publishState();
 
