@@ -21,6 +21,7 @@ import {
 import { localDateTimeString } from "../utils/date-time-format.ts";
 import { sessionSummaryLine } from "./print-plan.ts";
 import { type PricedSlot } from "../electricity/types.ts";
+import type { HeatingTracker } from "./heating-tracker.ts";
 const log = makeLogger("ev-charging");
 
 const EvChargingPlanSchema = z.object({
@@ -121,6 +122,7 @@ export async function runSession(
   from: Date | undefined,
   clock: Clock,
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
+  tracker?: HeatingTracker | null,
 ): Promise<void> {
   const now = from ?? clock.now();
   const powerThresholdW = config.evCharging.mqtt?.powerThresholdW ?? 10;
@@ -241,6 +243,7 @@ export async function runSession(
             wakeCancel = new Canceller();
             publisher.setWakeCallback(() => wakeCancel.abort());
             await clock.sleep(msToNextSlot, wakeCancel.signal);
+            tracker?.tick(clock.now());
             if (wakeCancel.signal.aborted) {
               log("Target time changed during forecast-unavailable wait — re-planning.");
             }
@@ -269,6 +272,7 @@ export async function runSession(
 
         // This is where we wait for the slot to end
         await clock.sleep(msUntilEnd, wakeCancel.signal);
+        tracker?.tick(clock.now());
 
         if (wakeCancel.signal.aborted) {
           forecast = null;
@@ -299,6 +303,7 @@ export async function runSession(
       } else {
         // Nothing to do. Let's just sleep for a second.
         await clock.sleep(1000, wakeCancel.signal);
+        tracker?.tick(clock.now());
       }
     } // end while(true)
 
@@ -318,6 +323,7 @@ export async function runSession(
         break;
       }
       await clock.sleep(1_000);
+      tracker?.tick(clock.now());
     }
   } finally {
     unsubWatts?.();

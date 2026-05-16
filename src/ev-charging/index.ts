@@ -9,6 +9,7 @@ import { makeClock } from "../utils/timing-utils.ts";
 import { parseArgs } from "./parse-args.ts";
 import { runSession, parseTargetTime, resolveTargetTime } from "./coordinator.ts";
 import { writeSessionSummary, checkInfluxHealth } from "../influx.ts";
+import { HeatingTracker, loadHeatingStatistics } from "./heating-tracker.ts";
 
 const log = makeLogger("ev-charging");
 
@@ -81,20 +82,36 @@ export async function runEvCharging(config: Config): Promise<void> {
         writeSessionSummary(config.influx!, summary)
     : undefined;
 
+  const persistedStats = loadHeatingStatistics();
+  if (persistedStats) {
+    log(
+      `Heating statistics (persisted): ${persistedStats.heatingOnPercentage.toFixed(1)}% heating on (${persistedStats.cycleStart} → ${persistedStats.cycleEnd})`,
+    );
+  }
+  const tracker = session.holdSource ? new HeatingTracker(persistedStats) : null;
+  let unsubTracker: (() => void) | undefined;
+  if (session.holdSource && tracker) {
+    unsubTracker = session.holdSource.subscribe((held) => tracker.onHoldChange(held, clock.now()));
+  }
+
   // Charge loop: run sessions indefinitely, retrying on error.
   let from: Date | undefined = initialFrom;
   log("Starting charging loop");
-  while (true) {
-    if (from) log(`Planning from ${from.toISOString()}`);
-    try {
-      await runSession(session, publisher, config, from, clock, onSessionEnd);
-      from = undefined;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log(`ERROR: ${msg}`);
-      publisher.setError(errorStatus(err));
-      log("Retrying in 60s...");
-      await clock.sleep(60_000);
+  try {
+    while (true) {
+      if (from) log(`Planning from ${from.toISOString()}`);
+      try {
+        await runSession(session, publisher, config, from, clock, onSessionEnd, tracker);
+        from = undefined;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log(`ERROR: ${msg}`);
+        publisher.setError(errorStatus(err));
+        log("Retrying in 60s...");
+        await clock.sleep(60_000);
+      }
     }
+  } finally {
+    unsubTracker?.();
   }
 }
