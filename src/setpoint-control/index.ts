@@ -11,6 +11,8 @@ import { makeLogger } from "../utils/log.ts";
 
 const log = makeLogger("setpoint-control");
 import { localTimeShort } from "../utils/date-time-format.ts";
+
+const formatTemp = (t: number) => `${t.toFixed(1)}C`;
 import { SetpointStatusPublisher } from "./ha-status.ts";
 import {
   findNewestPlanFile,
@@ -189,14 +191,14 @@ export async function runSetpointControlLoop(
         tempAdjustmentMsg = `[${spConfig.name}] Room temperature unavailable at ${localTimeShort(slot.start)}, using planned setpoint ${setpoint}`;
       } else if (temp < low) {
         const adjusted = setpoint + rtConfig.influence;
-        tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C below range (${low.toFixed(1)}-${high.toFixed(1)}°C), raising setpoint by ${rtConfig.influence}: ${setpoint} -> ${adjusted}`;
+        tempAdjustmentMsg = `[${spConfig.name}] Room ${formatTemp(temp)} below range (${formatTemp(low)}-${formatTemp(high)}), raising setpoint by ${rtConfig.influence}: ${setpoint} -> ${adjusted}`;
         setpoint = adjusted;
       } else if (temp > high) {
         const adjusted = setpoint - rtConfig.influence;
-        tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C above range (${low.toFixed(1)}-${high.toFixed(1)}°C), lowering setpoint by ${rtConfig.influence}: ${setpoint} -> ${adjusted}`;
+        tempAdjustmentMsg = `[${spConfig.name}] Room ${formatTemp(temp)} above range (${formatTemp(low)}-${formatTemp(high)}), lowering setpoint by ${rtConfig.influence}: ${setpoint} -> ${adjusted}`;
         setpoint = adjusted;
       } else {
-        tempAdjustmentMsg = `[${spConfig.name}] Room ${temp.toFixed(1)}°C within range (${low.toFixed(1)}–${high.toFixed(1)}°C), no adjustment to planned setpoint ${setpoint}`;
+        tempAdjustmentMsg = `[${spConfig.name}] Room ${formatTemp(temp)} within range (${formatTemp(low)}-${formatTemp(high)}), no adjustment to planned setpoint ${setpoint}`;
       }
       if (tempAdjustmentMsg !== lastTempAdjustmentMsg) {
         log(tempAdjustmentMsg);
@@ -272,7 +274,7 @@ export async function runSetpointControl(
     // Give the broker a moment to deliver a retained message before the first plan.
     await clock.sleep(2_000);
     log(
-      `[${spConfig.name}] Initial room temperature: ${latestTemperature !== undefined ? `${latestTemperature}°C` : "unavailable"}`,
+      `[${spConfig.name}] Initial room temperature: ${latestTemperature !== undefined ? formatTemp(latestTemperature) : "unavailable"}`,
     );
   }
 

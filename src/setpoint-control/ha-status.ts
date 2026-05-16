@@ -281,7 +281,7 @@ export class SetpointStatusPublisher {
     const adjustment =
       delta !== 0 ? ` (planned ${plannedSetpoint}, ${delta > 0 ? "+" : ""}${delta} room temp)` : "";
     this.setStatus(
-      `Current slot: ${tierLabel} – setpoint ${actualSetpoint}${adjustment} (until ${until})`,
+      `Current slot: ${tierLabel} - setpoint ${actualSetpoint}${adjustment} (until ${until})`,
     );
   }
 
