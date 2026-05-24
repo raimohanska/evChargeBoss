@@ -51,6 +51,9 @@ export class StatusPublisher {
   private targetTimeOverride: string | null = null;
   private readonly timeStateTopic = `${BASE}/target_time/state`;
   private _resolveInitialTargetTime: (() => void) | null = null;
+  private targetKwhOverride: number | null = null;
+  private readonly kwhStateTopic = `${BASE}/target_kwh/state`;
+  private _resolveInitialTargetKwh: (() => void) | null = null;
 
   constructor(client: MqttClient, config: EvChargingConfig) {
     this.client = client;
@@ -73,12 +76,42 @@ export class StatusPublisher {
     return this.targetTimeOverride;
   }
 
+  getTargetKwhOverride(): number | null {
+    return this.targetKwhOverride;
+  }
+
   resetTargetTime(now: Date): void {
     this.targetTimeOverride = null;
     // Publish the schedule-aware default so HA shows the correct next target
     // time instead of retaining the stale Charge Now override.
     const resolved = resolveTargetTime(this.config.targetTime, this.config.weeklySchedule, now);
     this.pub(this.timeStateTopic, formatHHMM(resolved));
+  }
+
+  resetTargetKwh(): void {
+    this.targetKwhOverride = null;
+    this.pub(this.kwhStateTopic, String(this.config.targetKwh));
+  }
+
+  /**
+   * Waits up to `timeoutMs` for the broker to deliver a retained target-kwh
+   * override, then publishes the confirmed value to the state topic.
+   * Must be called once after construction and before runSession().
+   */
+  async waitForInitialTargetKwh(timeoutMs = 2000): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this._resolveInitialTargetKwh = resolve;
+      setTimeout(() => {
+        if (this._resolveInitialTargetKwh !== null) {
+          this._resolveInitialTargetKwh = null;
+          log(
+            `[MQTT] No retained target kWh within ${timeoutMs}ms - using ${this.config.targetKwh} kWh`,
+          );
+          resolve();
+        }
+      }, timeoutMs);
+    });
+    this.pub(this.kwhStateTopic, String(this.targetKwhOverride ?? this.config.targetKwh));
   }
 
   /**
@@ -157,6 +190,24 @@ export class StatusPublisher {
     this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time/config`, "", true);
     this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
 
+    // HA number entity for target charge energy (kWh)
+    const kwhCmdTopic = `${BASE}/target_kwh/set`;
+    const kwhStateTopic = this.kwhStateTopic;
+    const kwhDiscoveryTopic = `${DISCOVERY}/number/${DEVICE_ID}_target_kwh/config`;
+    const kwhDiscoveryPayload = JSON.stringify({
+      unique_id: `${DEVICE_ID}_target_kwh`,
+      name: "Charge Energy Target (kWh)",
+      icon: "mdi:battery-charging-80",
+      state_topic: kwhStateTopic,
+      command_topic: kwhCmdTopic,
+      min: 0.5,
+      max: 100,
+      step: 0.5,
+      unit_of_measurement: "kWh",
+      device: DEVICE,
+    });
+    this.pub(kwhDiscoveryTopic, kwhDiscoveryPayload, true);
+
     // HA button entity: "Charge Now" — sets target time to now + chargeNowHours
     const chargeNowCmdTopic = `${BASE}/charge_now/set`;
     const chargeNowHours = this.config.chargeNowHours ?? 2;
@@ -176,6 +227,12 @@ export class StatusPublisher {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
     });
     this.client.subscribe(timeCmdTopic, (err) => {
+      if (err) log(`[MQTT status] subscribe error: ${err.message}`);
+    });
+    this.client.subscribe(kwhStateTopic, (err) => {
+      if (err) log(`[MQTT status] subscribe error: ${err.message}`);
+    });
+    this.client.subscribe(kwhCmdTopic, (err) => {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
     });
     this.client.subscribe(chargeNowCmdTopic, (err) => {
@@ -199,6 +256,21 @@ export class StatusPublisher {
         this.targetTimeOverride = newTime;
         log(`[MQTT] Target time updated to ${newTime}`);
         this.pub(timeStateTopic, newTime);
+        this.wakeCallback?.();
+      } else if (topic === kwhStateTopic && this._resolveInitialTargetKwh !== null) {
+        const v = parseFloat(payload.toString().trim());
+        if (v > 0) {
+          this.targetKwhOverride = v;
+        }
+        const resolve = this._resolveInitialTargetKwh;
+        this._resolveInitialTargetKwh = null;
+        resolve();
+      } else if (topic === kwhCmdTopic) {
+        const v = parseFloat(payload.toString().trim());
+        if (!isFinite(v) || v <= 0) return;
+        this.targetKwhOverride = v;
+        log(`[MQTT] Target kWh updated to ${v}`);
+        this.pub(kwhStateTopic, String(v));
         this.wakeCallback?.();
       } else if (topic === chargeNowCmdTopic && payload.toString().trim() === "PRESS") {
         const target = new Date(Date.now() + chargeNowHours * 3_600_000);

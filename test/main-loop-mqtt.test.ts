@@ -666,3 +666,45 @@ describe("main-loop MQTT integration — target time reset", { concurrency: fals
     }
   });
 }); // describe "main-loop MQTT integration — target time reset"
+
+describe("main-loop MQTT integration — target kWh override", { concurrency: false }, () => {
+  /**
+   * Verifies that publishing a kWh override via MQTT replaces the configured
+   * target and is reset to the config default after the session ends.
+   *
+   * Scenario:
+   *   - Config targetKwh=5 (needs 7 slots at 3 kW).
+   *   - After charging starts at 10:00, publish targetKwh=0.75 (1 slot).
+   *   - Coordinator wakes, rebuilds plan with new target, session ends after
+   *     1 slot instead of 7.
+   *   - After session end, target_kwh/state must be reset to "5" (config value).
+   */
+  test("targetKwh override: session ends early when kWh target reduced mid-session", async () => {
+    const { loopPromise, relay, publishTargetKwh, targetKwhState, teardown } =
+      await startMqttSession(FROM, SPEEDUP);
+    try {
+      await relay.assertOn("2026-04-18T17:00"); // plug-in detection
+      await relay.assertOff("2026-04-18T17:10"); // sleep through overnight gap
+      await relay.assertOn("2026-04-19T10:00"); // first charge slot starts
+
+      // Reduce target to 0.75 kWh (1 slot) while charging is underway.
+      publishTargetKwh(0.75);
+
+      // Session must complete (target reached after 1 slot instead of 7).
+      await loopPromise;
+
+      // After session end, target_kwh/state must be reset to the config default.
+      const deadline = Date.now() + 500;
+      while (targetKwhState() !== 5 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      assert.equal(
+        targetKwhState(),
+        5,
+        "target_kwh/state must be reset to config default (5) after session ends",
+      );
+    } finally {
+      teardown();
+    }
+  });
+}); // describe "main-loop MQTT integration — target kWh override"

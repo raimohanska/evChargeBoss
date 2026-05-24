@@ -17,12 +17,16 @@ const STATUS_TOPIC = "evchargeboss/status";
 const CHARGED_ENERGY_TOPIC = "evchargeboss/charged_energy";
 const TARGET_TIME_SET_TOPIC = "evchargeboss/target_time/set";
 const TARGET_TIME_STATE_TOPIC = "evchargeboss/target_time/state";
+const TARGET_KWH_SET_TOPIC = "evchargeboss/target_kwh/set";
+const TARGET_KWH_STATE_TOPIC = "evchargeboss/target_kwh/state";
 
 export interface MqttTestSession {
   loopPromise: Promise<void>;
   relay: MqttRelaySimulator;
   /** Publish a target-time change (HH:MM) via MQTT, triggering an immediate replan. */
   publishTargetTime(time: string): void;
+  /** Publish a target-kWh change via MQTT, triggering an immediate replan. */
+  publishTargetKwh(kwh: number): void;
   /**
    * Publish a heating power reading (watts) to the holdWhenHeating topic.
    * Use this to trigger or release a hold during tests.
@@ -35,6 +39,8 @@ export interface MqttTestSession {
   sessionSummary(): SessionSummary | null;
   /** Last value of evchargeboss/target_time/state received via MQTT — null if none yet. */
   targetTimeState(): string | null;
+  /** Last value of evchargeboss/target_kwh/state received via MQTT — null if none yet. */
+  targetKwhState(): number | null;
   /**
    * Deduplicated sequence of status values received via MQTT.
    * Recording starts from the first "Starting…" message emitted by StatusPublisher,
@@ -99,6 +105,7 @@ export async function startMqttSession(
   let _lastChargedEnergy = 0;
   let _sessionSummary: SessionSummary | null = null;
   let _lastTargetTimeState: string | null = null;
+  let _lastTargetKwhState: number | null = null;
 
   // Subscribe controlClient to observable topics BEFORE creating StatusPublisher so we
   // don't miss the "Starting…" retained message from initializeDiscovery().
@@ -111,6 +118,9 @@ export async function startMqttSession(
     }),
     new Promise<void>((resolve, reject) => {
       controlClient.subscribe(TARGET_TIME_STATE_TOPIC, (err) => (err ? reject(err) : resolve()));
+    }),
+    new Promise<void>((resolve, reject) => {
+      controlClient.subscribe(TARGET_KWH_STATE_TOPIC, (err) => (err ? reject(err) : resolve()));
     }),
   ]);
 
@@ -133,6 +143,9 @@ export async function startMqttSession(
       if (!isNaN(n)) _lastChargedEnergy = n;
     } else if (topic === TARGET_TIME_STATE_TOPIC && value.length > 0) {
       _lastTargetTimeState = value;
+    } else if (topic === TARGET_KWH_STATE_TOPIC && value.length > 0) {
+      const n = parseFloat(value);
+      if (!isNaN(n)) _lastTargetKwhState = n;
     }
   });
 
@@ -173,6 +186,9 @@ export async function startMqttSession(
     publishTargetTime(time: string) {
       controlClient.publish(TARGET_TIME_SET_TOPIC, time);
     },
+    publishTargetKwh(kwh: number) {
+      controlClient.publish(TARGET_KWH_SET_TOPIC, String(kwh));
+    },
     publishHeatingPower(watts: number) {
       const h = config.evCharging.holdWhenHeating;
       if (!h) return;
@@ -184,12 +200,15 @@ export async function startMqttSession(
     chargedEnergy: () => _lastChargedEnergy,
     sessionSummary: () => _sessionSummary,
     targetTimeState: () => _lastTargetTimeState,
+    targetKwhState: () => _lastTargetKwhState,
     statusHistory: () => _statusHistory,
     teardown() {
       relay.cleanup();
       // Clear the retained target_time/state so a changed target time in this
       // test cannot bleed into the next test's StatusPublisher startup.
       controlClient.publish("evchargeboss/target_time/state", Buffer.alloc(0), { retain: true });
+      // Clear the retained target_kwh/state for the same reason.
+      controlClient.publish("evchargeboss/target_kwh/state", Buffer.alloc(0), { retain: true });
       // Force-close so the TCP socket is gone before the next test creates new connections.
       sessionClient.end(true);
       relayClient.end(true);

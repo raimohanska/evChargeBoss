@@ -35,19 +35,19 @@ const EvChargingPlanSchema = z.object({
   }),
 });
 
-function getInitialState(config: Config, targetTime: Date): MachineState {
+function getInitialState(config: Config, targetTime: Date, targetKwh: number): MachineState {
   // Try to resume from a persisted plan file.
   const planPath = findNewestPlanFile("ev-charging");
   if (planPath) {
     const saved = readPlanFile(planPath, EvChargingPlanSchema);
     if (
       saved &&
-      saved.config.targetKwh === config.evCharging.targetKwh &&
+      saved.config.targetKwh === targetKwh &&
       new Date(saved.config.targetDateTime).getTime() === targetTime.getTime() &&
-      saved.chargedKwh < config.evCharging.targetKwh
+      saved.chargedKwh < targetKwh
     ) {
       log(
-        `Resuming session: ${sessionSummaryLine({ powerKw: saved.detectedPowerKw, targetTime, targetKwh: config.evCharging.targetKwh, chargedKwh: saved.chargedKwh })}`,
+        `Resuming session: ${sessionSummaryLine({ powerKw: saved.detectedPowerKw, targetTime, targetKwh, chargedKwh: saved.chargedKwh })}`,
       );
       return {
         plan: null,
@@ -60,12 +60,12 @@ function getInitialState(config: Config, targetTime: Date): MachineState {
       let reason: string;
       if (!saved) {
         reason = "plan file unreadable";
-      } else if (saved.config.targetKwh !== config.evCharging.targetKwh) {
-        reason = `targetKwh mismatch: saved=${saved.config.targetKwh}, config=${config.evCharging.targetKwh}`;
+      } else if (saved.config.targetKwh !== targetKwh) {
+        reason = `targetKwh mismatch: saved=${saved.config.targetKwh}, config=${targetKwh}`;
       } else if (new Date(saved.config.targetDateTime).getTime() !== targetTime.getTime()) {
         reason = `targetDateTime mismatch: saved=${saved.config.targetDateTime}, config=${localDateTimeString(targetTime)}`;
       } else {
-        reason = `session already complete: chargedKwh=${saved.chargedKwh} >= targetKwh=${config.evCharging.targetKwh}`;
+        reason = `session already complete: chargedKwh=${saved.chargedKwh} >= targetKwh=${targetKwh}`;
       }
       log(`Plan file found but not applicable (${planPath}): ${reason} - starting fresh.`);
     }
@@ -101,7 +101,11 @@ export async function runSession(
     return resolveTargetTime(config.evCharging.targetTime, config.evCharging.weeklySchedule, now);
   };
 
+  const getEffectiveTargetKwh = () =>
+    publisher.getTargetKwhOverride() ?? config.evCharging.targetKwh;
+
   let targetTime = getTargetTimeFromPublisher();
+  let targetKwh = getEffectiveTargetKwh();
   let currentPowerW = 0;
   let heatingHold = false;
   let relayOn: boolean | null = null;
@@ -110,7 +114,7 @@ export async function runSession(
   let chargedSlots = 0;
   let forecast: PricedSlot[] | null = null;
 
-  let machine: MachineState = getInitialState(config, targetTime);
+  let machine: MachineState = getInitialState(config, targetTime, targetKwh);
 
   const savePlan = () => {
     const filePath = planFilePath("ev-charging", timestampForFilename(now));
@@ -119,7 +123,7 @@ export async function runSession(
       detectedPowerKw: machine.detectedChargerPowerKw,
       chargedKwh: machine.chargedKwh,
       config: {
-        targetKwh: config.evCharging.targetKwh,
+        targetKwh: targetKwh,
         targetDateTime: localDateTimeString(targetTime),
       },
     });
@@ -132,7 +136,7 @@ export async function runSession(
     heatingHold,
     forecast,
     powerThresholdW,
-    targetKwh: config.evCharging.targetKwh,
+    targetKwh: targetKwh,
   });
 
   const updateState = async () => {
@@ -196,12 +200,19 @@ export async function runSession(
         forecast = null;
       }
 
+      // 1b. Check for target kWh change
+      const newTargetKwh = getEffectiveTargetKwh();
+      if (newTargetKwh !== targetKwh) {
+        targetKwh = newTargetKwh;
+        forecast = null;
+      }
+
       // 2. Check if target time reached
       if (clock.now() >= env().targetTime) {
-        const remaining = config.evCharging.targetKwh - machine.chargedKwh;
+        const remaining = targetKwh - machine.chargedKwh;
         log(
           remaining > 0
-            ? `Target time passed - goal not reached. Charged ${machine.chargedKwh.toFixed(2)} / ${config.evCharging.targetKwh.toFixed(2)} kWh (${remaining.toFixed(2)} kWh short).`
+            ? `Target time passed - goal not reached. Charged ${machine.chargedKwh.toFixed(2)} / ${targetKwh.toFixed(2)} kWh (${remaining.toFixed(2)} kWh short).`
             : `Target time passed - session complete. ${machine.chargedKwh.toFixed(2)} kWh delivered.`,
         );
         break;
@@ -266,7 +277,7 @@ export async function runSession(
             ...machine,
             chargedKwh: machine.chargedKwh + slotKwh,
           };
-          if (machine.chargedKwh >= config.evCharging.targetKwh) {
+          if (machine.chargedKwh >= targetKwh) {
             log(`Charging complete: ${machine.chargedKwh.toFixed(2)} kWh delivered.`);
             break;
           }
@@ -305,6 +316,7 @@ export async function runSession(
   publisher.setStatus("Idle");
   publisher.clearPlan();
   publisher.resetTargetTime(clock.now());
+  publisher.resetTargetKwh();
   const solarPct = chargedSlots > 0 ? Math.round((solarFractionSum / chargedSlots) * 100) : 0;
   await onSessionEnd?.({ chargedKwh: machine.chargedKwh, totalCostEur, solarPct });
 }
