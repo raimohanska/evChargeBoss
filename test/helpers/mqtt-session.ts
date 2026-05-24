@@ -57,7 +57,7 @@ export async function startMqttSession(
   mqttOverrides: Partial<MqttConfig> = {},
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
   initialPlanData?: object,
-  sessionOptions: { suppressPower?: boolean } = {},
+  sessionOptions: { suppressPower?: boolean; holdThreshold?: number } = {},
 ): Promise<MqttTestSession> {
   // Isolate plan files per test session so tests don't interfere with each other.
   const sessionId = `${process.pid}-${++_sessionCounter}`;
@@ -162,6 +162,11 @@ export async function startMqttSession(
     clock,
     config.evCharging.holdWhenHeating,
     config.evCharging.plugInTimeoutMs,
+    config.evCharging.holdWhenHeating && sessionOptions.holdThreshold !== undefined
+      ? () => sessionOptions.holdThreshold!
+      : config.evCharging.holdWhenHeating
+        ? () => null
+        : undefined,
   );
   const relay = new MqttRelaySimulator(relayClient, config.evCharging.mqtt!, clock, {
     suppressPower: sessionOptions.suppressPower,

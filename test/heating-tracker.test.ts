@@ -25,7 +25,6 @@ const MIN_MS = 60_000;
 
 /** Default config: 1 h period (60 samples), maxHoldPercentage=20, holdMargin=100 */
 const defaultCfg: HeatingTrackerConfig = {
-  thresholdW: 3000,
   maxHoldPercentage: 20,
   holdMargin: 100,
   statisticsPeriodHours: 1,
@@ -65,7 +64,6 @@ describe("HeatingTracker", () => {
         holdPowerLevel: 2800,
         powerHoldThreshold: 2900,
         powerHoldFactor: 0.8,
-        heatingOnPercentage: 30,
         sampleCount: 60,
         periodStart: "2026-01-01T00:00:00",
         periodEnd: "2026-01-01T01:00:00",
@@ -85,34 +83,6 @@ describe("HeatingTracker", () => {
   });
 
   describe("statistics computation", () => {
-    it("heatingOnPercentage is 0 when all samples below thresholdW", () => {
-      const tracker = new HeatingTracker(defaultCfg, null);
-      feedSamples(tracker, 0, 60, 500); // all below 3000 W
-      tracker.tick(makeDate(60 * MIN_MS));
-      const stats = tracker.getLatest();
-      assert.notEqual(stats, null);
-      assert.equal(stats!.heatingOnPercentage, 0);
-    });
-
-    it("heatingOnPercentage is 100 when all samples at or above thresholdW", () => {
-      const tracker = new HeatingTracker(defaultCfg, null);
-      feedSamples(tracker, 0, 60, 3000); // all at threshold
-      tracker.tick(makeDate(60 * MIN_MS));
-      const stats = tracker.getLatest();
-      assert.notEqual(stats, null);
-      assert.equal(stats!.heatingOnPercentage, 100);
-    });
-
-    it("heatingOnPercentage is 50 when half samples above thresholdW", () => {
-      const tracker = new HeatingTracker(defaultCfg, null);
-      feedSamples(tracker, 0, 30, 500); // 30 samples below threshold
-      feedSamples(tracker, 30, 30, 5000); // 30 samples above threshold
-      tracker.tick(makeDate(60 * MIN_MS));
-      const stats = tracker.getLatest();
-      assert.notEqual(stats, null);
-      assert.equal(stats!.heatingOnPercentage, 50);
-    });
-
     it("holdPowerLevel is the (100-maxHoldPercentage)th percentile", () => {
       // 60 samples with values 1..60 W
       const tracker = new HeatingTracker(defaultCfg, null);
@@ -177,7 +147,6 @@ describe("HeatingTracker", () => {
         holdPowerLevel: 2800,
         powerHoldThreshold: 2900,
         powerHoldFactor: 0.82,
-        heatingOnPercentage: 33.3,
         sampleCount: 60,
         periodStart: "2026-01-01T00:00:00",
         periodEnd: "2026-01-01T01:00:00",

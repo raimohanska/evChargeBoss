@@ -57,6 +57,7 @@ export function makeMqttSession(
   _clock: Clock,
   holdWhenHeating?: EvChargingConfig["holdWhenHeating"],
   _plugInTimeoutMs?: number,
+  getHoldThreshold?: () => number | null,
 ): ChargingSession {
   const { chargerTopic, onPayload, offPayload, powerTopic, powerField, energyField } = mqttConfig;
 
@@ -151,13 +152,13 @@ export function makeMqttSession(
 
   if (holdWhenHeating) {
     const { powerTopic: heatingTopic, powerField: heatingField } = holdWhenHeating.mqtt;
-    const { thresholdW } = holdWhenHeating;
     const heatingMsgHandler = (topic: string, message: Buffer) => {
       if (topic !== heatingTopic) return;
       const w = parseWatts(message, heatingField);
       if (w === null) return;
       for (const l of heatingWattsListeners) l({ watts: w });
-      const held = w > thresholdW;
+      const threshold = getHoldThreshold?.() ?? null;
+      const held = threshold !== null && w > threshold;
       if (held === heatingHeld) return;
       heatingHeld = held;
       for (const l of holdListeners) l(held);

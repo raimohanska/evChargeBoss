@@ -24,7 +24,6 @@ export const EvChargingMqttConfig = z.strictObject({
 export type EvChargingMqttConfig = z.infer<typeof EvChargingMqttConfig>;
 
 const HoldWhenHeatingConfig = z.object({
-  thresholdW: z.number(),
   maxHoldPercentage: z.number().positive().max(100).optional(),
   holdMargin: z.number().nonnegative().optional(),
   statisticsPeriodHours: z.number().positive().optional(),

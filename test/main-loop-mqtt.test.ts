@@ -384,7 +384,6 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
    */
   const HEATING = {
     holdWhenHeating: {
-      thresholdW: 2000,
       mqtt: { powerTopic: "evchargeboss-test/heating", powerField: "power" },
     },
   };
@@ -401,7 +400,9 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
    */
   test("Hold active when slot starts: relay stays OFF until heating releases", async () => {
     const { loopPromise, relay, publishHeatingPower, statusHistory, teardown } =
-      await startMqttSession(FROM, SPEEDUP, HEATING);
+      await startMqttSession(FROM, SPEEDUP, HEATING, {}, undefined, undefined, {
+        holdThreshold: 2000,
+      });
     try {
       // Publish heating immediately — subscription SUBACK already received, so
       // delivery is guaranteed before the 10:00 slot starts (~6.1 s later).
@@ -436,6 +437,10 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
       FROM,
       SPEEDUP,
       HEATING,
+      {},
+      undefined,
+      undefined,
+      { holdThreshold: 2000 },
     );
     try {
       await relay.assertOn("2026-04-18T17:00"); // plug-in
@@ -466,6 +471,10 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
       FROM,
       SPEEDUP,
       HEATING,
+      {},
+      undefined,
+      undefined,
+      { holdThreshold: 2000 },
     );
     try {
       await relay.assertOn("2026-04-18T17:00"); // plug-in
@@ -498,7 +507,9 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
    */
   test("Status shows heatingHold then charging-active status after hold releases", async () => {
     const { loopPromise, relay, publishHeatingPower, statusHistory, teardown } =
-      await startMqttSession(FROM, SPEEDUP, HEATING);
+      await startMqttSession(FROM, SPEEDUP, HEATING, {}, undefined, undefined, {
+        holdThreshold: 2000,
+      });
     try {
       publishHeatingPower(3000);
       await relay.assertOn("2026-04-18T17:00");

@@ -15,8 +15,6 @@ export interface HeatingPowerStatistics {
   powerHoldThreshold: number;
   /** Fraction (0–1) of samples strictly below powerHoldThreshold */
   powerHoldFactor: number;
-  /** Percentage of samples at or above thresholdW (1 decimal) */
-  heatingOnPercentage: number;
   sampleCount: number;
   periodStart: string;
   periodEnd: string;
@@ -29,7 +27,6 @@ const HeatingPowerStatisticsSchema = z.object({
   holdPowerLevel: z.number(),
   powerHoldThreshold: z.number(),
   powerHoldFactor: z.number(),
-  heatingOnPercentage: z.number(),
   sampleCount: z.number(),
   periodStart: z.string(),
   periodEnd: z.string(),
@@ -62,7 +59,6 @@ export function saveHeatingStatistics(stats: HeatingPowerStatistics): void {
 }
 
 export interface HeatingTrackerConfig {
-  thresholdW: number;
   maxHoldPercentage: number;
   holdMargin: number;
   statisticsPeriodHours: number;
@@ -127,8 +123,6 @@ export class HeatingTracker {
     const holdPowerLevel = sorted[percentileIndex];
     const powerHoldThreshold = holdPowerLevel + this.cfg.holdMargin;
     const powerHoldFactor = this.samples.filter((s) => s < powerHoldThreshold).length / n;
-    const heatingOnCount = this.samples.filter((s) => s >= this.cfg.thresholdW).length;
-    const heatingOnPercentage = Math.round((heatingOnCount / n) * 1000) / 10;
 
     const periodEnd = localDateTimeString(now);
     const periodStart = localDateTimeString(new Date(now.getTime() - (n - 1) * 60_000));
@@ -137,7 +131,6 @@ export class HeatingTracker {
       holdPowerLevel,
       powerHoldThreshold,
       powerHoldFactor,
-      heatingOnPercentage,
       sampleCount: n,
       periodStart,
       periodEnd,
@@ -146,8 +139,7 @@ export class HeatingTracker {
     saveHeatingStatistics(stats);
     statsLog(
       `holdPowerLevel=${holdPowerLevel}W threshold=${powerHoldThreshold}W` +
-        ` holdFactor=${powerHoldFactor.toFixed(3)} heatingOn=${heatingOnPercentage.toFixed(1)}%` +
-        ` samples=${n} period=${periodStart} -> ${periodEnd}`,
+        ` holdFactor=${powerHoldFactor.toFixed(3)} samples=${n} period=${periodStart} -> ${periodEnd}`,
     );
     this.latestStats = stats;
     this.lastStatsTime = now;

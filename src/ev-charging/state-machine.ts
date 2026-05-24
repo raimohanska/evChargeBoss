@@ -117,6 +117,7 @@ export interface Environment {
   readonly forecast: PricedSlot[] | null;
   readonly powerThresholdW: number;
   readonly targetKwh: number;
+  readonly powerHoldFactor: number;
 }
 
 export function getState(id: StateId): StateHandler {
@@ -143,7 +144,7 @@ export function nextState(machine: MachineState, env: Environment): MachineState
     const plan = computePlan(
       env.forecast,
       remainingKwh,
-      machine.detectedChargerPowerKw,
+      machine.detectedChargerPowerKw * env.powerHoldFactor,
       env.targetTime,
       env.now,
     );

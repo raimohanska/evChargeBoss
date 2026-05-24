@@ -41,9 +41,25 @@ export async function runEvCharging(config: Config): Promise<void> {
     const targetTimeStr = config.evCharging.targetTime;
     const now = initialFrom ?? new Date();
     const targetDate = resolveTargetTime(targetTimeStr, config.evCharging.weeklySchedule, now);
-    const slots = await plan(now, targetDate, config.evCharging.targetKwh, powerKw, config);
+    const persistedStats = loadHeatingStatistics();
+    const effectivePowerKw =
+      config.evCharging.holdWhenHeating && persistedStats
+        ? powerKw * persistedStats.powerHoldFactor
+        : powerKw;
+    if (effectivePowerKw !== powerKw) {
+      log(
+        `Applying holdFactor=${persistedStats!.powerHoldFactor.toFixed(3)} -> effective powerKw=${effectivePowerKw.toFixed(3)} kW`,
+      );
+    }
+    const slots = await plan(
+      now,
+      targetDate,
+      config.evCharging.targetKwh,
+      effectivePowerKw,
+      config,
+    );
     printPlan(slots, {
-      powerKw,
+      powerKw: effectivePowerKw,
       targetTime: targetDate,
       targetKwh: config.evCharging.targetKwh,
       chargedKwh: 0,
@@ -68,13 +84,24 @@ export async function runEvCharging(config: Config): Promise<void> {
   await publisher.waitForInitialTargetTime(2000);
   await publisher.waitForInitialTargetKwh(2000);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
+
+  // Declare tracker before makeMqttSession so the getHoldThreshold closure can
+  // reference it — tracker is assigned synchronously after the MQTT session is
+  // created, before any MQTT messages are processed.
+  let tracker: HeatingTracker | null = null;
+  const holdWhenHeating = config.evCharging.holdWhenHeating;
+  const getHoldThreshold: (() => number | null) | undefined = holdWhenHeating
+    ? () => tracker?.getLatest()?.powerHoldThreshold ?? null
+    : undefined;
+
   const session = makeMqttSession(
     mqttClient,
     config.evCharging.mqtt,
     publisher,
     clock,
-    config.evCharging.holdWhenHeating,
+    holdWhenHeating,
     config.evCharging.plugInTimeoutMs,
+    getHoldThreshold,
   );
 
   if (config.influx) await checkInfluxHealth(config.influx);
@@ -87,15 +114,14 @@ export async function runEvCharging(config: Config): Promise<void> {
   const persistedStats = loadHeatingStatistics();
   if (persistedStats) {
     log(
-      `Heating statistics (persisted): heatingOn=${persistedStats.heatingOnPercentage.toFixed(1)}% holdPowerLevel=${persistedStats.holdPowerLevel}W threshold=${persistedStats.powerHoldThreshold}W holdFactor=${persistedStats.powerHoldFactor.toFixed(3)} (${persistedStats.periodStart} -> ${persistedStats.periodEnd})`,
+      `Heating statistics (persisted): holdPowerLevel=${persistedStats.holdPowerLevel}W threshold=${persistedStats.powerHoldThreshold}W holdFactor=${persistedStats.powerHoldFactor.toFixed(3)} (${persistedStats.periodStart} -> ${persistedStats.periodEnd})`,
     );
   }
   const holdCfg = config.evCharging.holdWhenHeating;
-  const tracker =
+  tracker =
     session.heatingWattsSource && holdCfg
       ? new HeatingTracker(
           {
-            thresholdW: holdCfg.thresholdW,
             maxHoldPercentage: holdCfg.maxHoldPercentage ?? 20,
             holdMargin: holdCfg.holdMargin ?? 100,
             statisticsPeriodHours: holdCfg.statisticsPeriodHours ?? 24,

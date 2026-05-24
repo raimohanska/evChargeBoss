@@ -2,18 +2,17 @@
 
 ## Background
 
-When a heat pump or electric heating system is running, it can draw several kilowatts of power simultaneously with EV charging. To avoid overloading the household circuit, the EV charger pauses ("holds") whenever heating demand is detected above a configurable `thresholdW`.
+When a heat pump or electric heating system is running, it can draw several kilowatts of power simultaneously with EV charging. To avoid overloading the household circuit, the EV charger pauses ("holds") whenever heating demand is detected above a statistics-derived `powerHoldThreshold`. If no statistics are available yet, holds are disabled entirely.
 
 This document describes how the system learns the heating behavior from real power measurements and derives parameters used later in charge planning.
 
 ## Configuration (`holdWhenHeating`)
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `thresholdW` | — | Watts above which heating is considered active (triggers hold) |
-| `maxHoldPercentage` | 20 | Maximum acceptable % of time heating power exceeds `holdPowerLevel` |
-| `holdMargin` | 100 | Watts added to `holdPowerLevel` to form `powerHoldThreshold` (safety margin) |
-| `statisticsPeriodHours` | 24 | Rolling buffer length in hours |
+| Field                   | Default | Description                                                                  |
+| ----------------------- | ------- | ---------------------------------------------------------------------------- |
+| `maxHoldPercentage`     | 20      | Maximum acceptable % of time heating power exceeds `holdPowerLevel`          |
+| `holdMargin`            | 100     | Watts added to `holdPowerLevel` to form `powerHoldThreshold` (safety margin) |
+| `statisticsPeriodHours` | 24      | Rolling buffer length in hours                                               |
 
 ## 1-Minute Sample Buffer
 
@@ -61,30 +60,35 @@ powerHoldFactor = count(s < powerHoldThreshold) / n
 
 The fraction of samples (0–1) that fall strictly below `powerHoldThreshold`. This represents the expected proportion of time the charger can run without being held, given the observed heating behavior and the threshold.
 
-### Step 5 — heatingOnPercentage
+## Hold Decision
+
+On every heating power reading from MQTT, the system checks:
 
 ```
-heatingOnPercentage = count(s >= thresholdW) / n × 100
+if stats available:  held = (watts > powerHoldThreshold)
+if stats unavailable: held = false  (no hold applied)
 ```
 
-The percentage of time heating power was at or above the configured `thresholdW`. This is the historical hold rate based on the existing threshold — a useful sanity check alongside the new statistics.
+This means holds only activate once the rolling buffer is fully populated and statistics have been computed. Until then, charging proceeds without interruption from heating.
 
-## Future Use in Plan Calculations
+## Use in Plan Calculations
 
-`powerHoldFactor` will be used to adjust the required charging time in the planner:
+`powerHoldFactor` is used to adjust the effective charger power in the planner:
 
 ```
-adjustedChargingTime = naiveChargingTime / powerHoldFactor
+effectivePowerKw = detectedPowerKw * powerHoldFactor
 ```
 
-For example, if `powerHoldFactor = 0.75` (charger is free 75% of the time), the planner allocates 33% more slots than a naive calculation to account for expected hold interruptions. This produces more realistic plans and avoids falling short of the target kWh due to heating pauses.
+For example, if `powerHoldFactor = 0.75` (charger is free 75% of the time), the planner sees 75% of the actual charger power, which causes it to select more charge slots to compensate for expected hold interruptions. This produces more realistic plans and avoids falling short of the target kWh due to heating pauses.
+
+In `--plan` mode, `powerHoldFactor` is read from the persisted statistics file. If no statistics are available, the full power is used unchanged.
 
 ## Logging
 
 Statistics are logged every 15 minutes (once the buffer is full) to the `ev-charging-heating-stats` log category:
 
 ```
-[ev-charging-heating-stats] holdPowerLevel=2800W threshold=2900W holdFactor=0.823 heatingOn=31.4% samples=1440 period=2026-05-15T12:00:00 -> 2026-05-16T12:00:00
+[ev-charging-heating-stats] holdPowerLevel=2800W threshold=2900W holdFactor=0.823 samples=1440 period=2026-05-15T12:00:00 -> 2026-05-16T12:00:00
 ```
 
 Statistics are also persisted to `.stats/heating-statistics.json` so they survive restarts.

@@ -137,6 +137,7 @@ export async function runSession(
     forecast,
     powerThresholdW,
     targetKwh: targetKwh,
+    powerHoldFactor: tracker?.getLatest()?.powerHoldFactor ?? 1.0,
   });
 
   const updateState = async () => {
