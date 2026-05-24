@@ -156,7 +156,11 @@ export function nextState(machine: MachineState, env: Environment): MachineState
     };
     if (machine.plan === null) {
       if (machine.powerKwMeasured) {
-        log(`Plan computed using measured power ${machine.detectedChargerPowerKw} kW`);
+        const holdSuffix =
+          env.powerHoldFactor < 1.0
+            ? `, estimated ${Math.round((1 - env.powerHoldFactor) * 100)}% of time paused for heating`
+            : "";
+        log(`Plan computed using measured power ${machine.detectedChargerPowerKw} kW${holdSuffix}`);
       } else {
         log(
           `Warning: planning with configured power ${machine.detectedChargerPowerKw} kW - no live measurement yet`,

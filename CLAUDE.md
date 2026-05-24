@@ -88,6 +88,8 @@ Startup detection and event orchestration are handled by `runSession()` in `src/
 
 **`Slot`** (`src/types.ts`) — the unit of planning. All cost fields are in euros; `solarForecastW` is watts.
 
+**`powerHoldFactor`** — a fraction (0–1) representing how much of the time the charger is expected to be free (not paused for space heating). Computed by `HeatingTracker` (`src/ev-charging/heating-tracker.ts`) from a rolling 1-minute sample buffer of heating power readings: it is the fraction of samples below the `powerHoldThreshold`. Defaults to `1.0` when no tracker is configured. Applied by the coordinator via `env.powerHoldFactor` — the state machine multiplies `detectedChargerPowerKw * powerHoldFactor` before calling `computePlan()`, so the planner allocates extra charge slots to budget for expected hold interruptions.
+
 ## State machine invariants
 
 - `src/ev-charging/state-machine.ts` is pure and synchronous: no awaiting, no MQTT/network/timer side effects.
