@@ -20,6 +20,8 @@ export const EvChargingMqttConfig = z.strictObject({
   chargerTopic: z.string(),
   onPayload: z.string(),
   offPayload: z.string(),
+  chargeLevelTopic: z.string().optional(),
+  chargeLevelField: z.string().optional(),
 });
 export type EvChargingMqttConfig = z.infer<typeof EvChargingMqttConfig>;
 

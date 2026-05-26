@@ -1,7 +1,13 @@
 import mqtt from "mqtt";
 import type { EvChargingMqttConfig, EvChargingConfig } from "./config.ts";
 import type { BrokerConfig } from "../config.ts";
-import type { ChargingSession, WattsSource, WattsUpdate, HoldSource } from "./charger.ts";
+import type {
+  ChargingSession,
+  WattsSource,
+  WattsUpdate,
+  HoldSource,
+  ChargeLevelSource,
+} from "./charger.ts";
 import type { StatusPublisher } from "./mqtt-status.ts";
 import type { Clock } from "../utils/timing-utils.ts";
 import { makeLogger } from "../utils/log.ts";
@@ -173,16 +179,53 @@ export function makeMqttSession(
     };
   }
 
+  // Charge level: optional subscription to car's state of charge (%).
+  const chargeLevelListeners: Array<(pct: number) => void> = [];
+  let chargeLevelCleanup: (() => void) | undefined;
+
+  const chargeLevelSource: ChargeLevelSource | undefined = mqttConfig.chargeLevelTopic
+    ? {
+        subscribe(cb) {
+          chargeLevelListeners.push(cb);
+          return () => {
+            const i = chargeLevelListeners.indexOf(cb);
+            if (i !== -1) chargeLevelListeners.splice(i, 1);
+          };
+        },
+      }
+    : undefined;
+
+  if (mqttConfig.chargeLevelTopic) {
+    const chargeLevelTopic = mqttConfig.chargeLevelTopic;
+    const chargeLevelField = mqttConfig.chargeLevelField;
+    const chargeLevelMsgHandler = (topic: string, message: Buffer) => {
+      if (topic !== chargeLevelTopic) return;
+      const pct = parseWatts(message, chargeLevelField); // reuse parser (works for any numeric field)
+      if (pct === null || pct < 0 || pct > 100) return;
+      for (const l of chargeLevelListeners) l(pct);
+    };
+    client.on("message", chargeLevelMsgHandler);
+    client.subscribe(chargeLevelTopic, (err) => {
+      if (err) log(`[CHARGE_LEVEL] Failed to subscribe to ${chargeLevelTopic}: ${err}`);
+    });
+    chargeLevelCleanup = () => {
+      client.off("message", chargeLevelMsgHandler);
+      client.unsubscribe(chargeLevelTopic);
+    };
+  }
+
   return {
     end() {
       client.off("message", msgHandler);
       client.unsubscribe(powerTopic);
       heatingCleanup?.();
+      chargeLevelCleanup?.();
       client.end();
     },
     driver,
     wattsSource,
     holdSource,
     heatingWattsSource,
+    chargeLevelSource,
   };
 }

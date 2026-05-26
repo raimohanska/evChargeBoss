@@ -29,13 +29,19 @@ const EvChargingPlanSchema = z.object({
   version: z.literal(1),
   detectedPowerKw: z.number(),
   chargedKwh: z.number(),
+  chargeLevelPct: z.number().optional(),
   config: z.object({
     targetKwh: z.number(),
     targetDateTime: z.string(),
   }),
 });
 
-function getInitialState(config: Config, targetTime: Date, targetKwh: number): MachineState {
+interface InitialStateResult {
+  state: MachineState;
+  chargeLevelPct?: number;
+}
+
+function getInitialState(config: Config, targetTime: Date, targetKwh: number): InitialStateResult {
   // Try to resume from a persisted plan file.
   const planPath = findNewestPlanFile("ev-charging");
   if (planPath) {
@@ -50,11 +56,14 @@ function getInitialState(config: Config, targetTime: Date, targetKwh: number): M
         `Resuming session: ${sessionSummaryLine({ powerKw: saved.detectedPowerKw, targetTime, targetKwh, chargedKwh: saved.chargedKwh })}`,
       );
       return {
-        plan: null,
-        id: "Planning",
-        chargedKwh: saved.chargedKwh,
-        detectedChargerPowerKw: saved.detectedPowerKw,
-        powerKwMeasured: true, // previous session measured this value
+        state: {
+          plan: null,
+          id: "Planning",
+          chargedKwh: saved.chargedKwh,
+          detectedChargerPowerKw: saved.detectedPowerKw,
+          powerKwMeasured: true, // previous session measured this value
+        },
+        chargeLevelPct: saved.chargeLevelPct,
       };
     } else {
       let reason: string;
@@ -72,11 +81,13 @@ function getInitialState(config: Config, targetTime: Date, targetKwh: number): M
   }
 
   return {
-    id: "WaitingForCar",
-    plan: null,
-    chargedKwh: 0,
-    detectedChargerPowerKw: config.evCharging.powerKw ?? 0,
-    powerKwMeasured: false,
+    state: {
+      id: "WaitingForCar",
+      plan: null,
+      chargedKwh: 0,
+      detectedChargerPowerKw: config.evCharging.powerKw ?? 0,
+      powerKwMeasured: false,
+    },
   };
 }
 
@@ -114,7 +125,20 @@ export async function runSession(
   let chargedSlots = 0;
   let forecast: PricedSlot[] | null = null;
 
-  let machine: MachineState = getInitialState(config, targetTime, targetKwh);
+  const initial = getInitialState(config, targetTime, targetKwh);
+  let machine: MachineState = initial.state;
+  let chargeLevelPct: number | undefined = initial.chargeLevelPct;
+
+  // Subscribe to charge level source (car SoC %) if configured
+  const unsubChargeLevel = session.chargeLevelSource?.subscribe((pct) => {
+    chargeLevelPct = pct;
+  });
+
+  // Compute effective target kWh based on charge level: if battery is X% full, reduce target to (100-X)%
+  const getAdjustedTargetKwh = () =>
+    chargeLevelPct !== undefined
+      ? targetKwh * Math.max(0, (100 - chargeLevelPct) / 100)
+      : targetKwh;
 
   const savePlan = () => {
     const filePath = planFilePath("ev-charging", timestampForFilename(now));
@@ -122,6 +146,7 @@ export async function runSession(
       version: 1,
       detectedPowerKw: machine.detectedChargerPowerKw,
       chargedKwh: machine.chargedKwh,
+      chargeLevelPct,
       config: {
         targetKwh: targetKwh,
         targetDateTime: localDateTimeString(targetTime),
@@ -136,8 +161,9 @@ export async function runSession(
     heatingHold,
     forecast,
     powerThresholdW,
-    targetKwh: targetKwh,
+    targetKwh: getAdjustedTargetKwh(),
     powerHoldFactor: tracker?.getLatest()?.powerHoldFactor ?? 1.0,
+    chargeLevelPct,
   });
 
   const updateState = async () => {
@@ -312,6 +338,7 @@ export async function runSession(
   } finally {
     unsubWatts?.();
     unsubHold?.();
+    unsubChargeLevel?.();
   }
 
   publisher.setStatus("Idle");

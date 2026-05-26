@@ -118,6 +118,7 @@ export interface Environment {
   readonly powerThresholdW: number;
   readonly targetKwh: number;
   readonly powerHoldFactor: number;
+  readonly chargeLevelPct?: number;
 }
 
 export function getState(id: StateId): StateHandler {
@@ -164,6 +165,11 @@ export function nextState(machine: MachineState, env: Environment): MachineState
       } else {
         log(
           `Warning: planning with configured power ${machine.detectedChargerPowerKw} kW - no live measurement yet`,
+        );
+      }
+      if (env.chargeLevelPct !== undefined) {
+        log(
+          `Charge level: ${env.chargeLevelPct}% -> effective target: ${env.targetKwh.toFixed(2)} kWh`,
         );
       }
       printPlan(plan, printOpts);

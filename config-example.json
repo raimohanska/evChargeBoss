@@ -20,7 +20,9 @@
       "energyField": "energy",
       "chargerTopic": "zigbee2mqtt/ev-relay/set",
       "onPayload": "{\"state\":\"ON\"}",
-      "offPayload": "{\"state\":\"OFF\"}"
+      "offPayload": "{\"state\":\"OFF\"}",
+      "chargeLevelTopic": "car/battery/level",
+      "chargeLevelField": "percentage"
     },
     "holdWhenHeating": {
       "maxHoldPercentage": 20,

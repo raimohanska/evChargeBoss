@@ -47,10 +47,15 @@ export interface HoldSource {
   subscribe(cb: (held: boolean) => void): () => void;
 }
 
+export interface ChargeLevelSource {
+  subscribe(cb: (pct: number) => void): () => void;
+}
+
 export interface ChargingSession {
   driver: ChargerDriver;
   wattsSource?: WattsSource;
   holdSource?: HoldSource;
   heatingWattsSource?: WattsSource;
+  chargeLevelSource?: ChargeLevelSource;
   end(): void;
 }
