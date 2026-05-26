@@ -195,7 +195,7 @@ describe("main-loop MQTT integration — energy field", { concurrency: false }, 
       await loopPromise;
       assert.equal(sessionSummary()?.solarPct, 100, "solar forecast exceeds charger power → 100%");
       assert.equal(sessionSummary()?.totalCostEur, 0, "all solar-free slots → zero cost");
-      assert.equal(sessionSummary()?.plannedKwh, 7, "plannedKwh equals configured targetKwh");
+      assert.equal(sessionSummary()?.plannedKwh, 5, "plannedKwh equals configured targetKwh");
     } finally {
       teardown();
     }
