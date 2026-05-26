@@ -180,12 +180,17 @@ export function makeMqttSession(
   }
 
   // Charge level: optional subscription to car's state of charge (%).
+  // Store the latest value so new subscribers get it immediately.
+  let latestChargeLevel: number | undefined;
   const chargeLevelListeners: Array<(pct: number) => void> = [];
   let chargeLevelCleanup: (() => void) | undefined;
 
   const chargeLevelSource: ChargeLevelSource | undefined = mqttConfig.chargeLevelTopic
     ? {
         subscribe(cb) {
+          if (latestChargeLevel !== undefined) {
+            cb(latestChargeLevel); // emit current value immediately
+          }
           chargeLevelListeners.push(cb);
           return () => {
             const i = chargeLevelListeners.indexOf(cb);
@@ -213,6 +218,7 @@ export function makeMqttSession(
         return;
       }
       log(`[CHARGE_LEVEL] Received: ${pct}%`);
+      latestChargeLevel = pct;
       for (const l of chargeLevelListeners) l(pct);
     };
     client.on("message", chargeLevelMsgHandler);
