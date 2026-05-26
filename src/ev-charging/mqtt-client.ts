@@ -16,17 +16,17 @@ const log = makeLogger("ev-charging");
 
 export type MqttClient = mqtt.MqttClient;
 
-// Parse a power reading from an MQTT message payload.
-// When powerField is defined the payload is expected to be JSON; otherwise a plain number string.
-function parseWatts(message: Buffer, powerField: string | undefined): number | null {
+// Parse a numeric value (integer or decimal) from an MQTT message payload.
+// When field is defined the payload is expected to be JSON; otherwise a plain number string.
+function parseNumericField(message: Buffer, field: string | undefined): number | null {
   try {
-    if (powerField !== undefined) {
+    if (field !== undefined) {
       const data = JSON.parse(message.toString()) as Record<string, unknown>;
-      const w = data[powerField];
-      return typeof w === "number" ? w : null;
+      const v = data[field];
+      return typeof v === "number" ? v : null;
     } else {
-      const w = Number(message.toString());
-      return isNaN(w) ? null : w;
+      const v = Number(message.toString());
+      return isNaN(v) ? null : v;
     }
   } catch {
     return null;
@@ -160,7 +160,7 @@ export function makeMqttSession(
     const { powerTopic: heatingTopic, powerField: heatingField } = holdWhenHeating.mqtt;
     const heatingMsgHandler = (topic: string, message: Buffer) => {
       if (topic !== heatingTopic) return;
-      const w = parseWatts(message, heatingField);
+      const w = parseNumericField(message, heatingField);
       if (w === null) return;
       for (const l of heatingWattsListeners) l({ watts: w });
       const threshold = getHoldThreshold?.() ?? null;
@@ -203,7 +203,7 @@ export function makeMqttSession(
     );
     const chargeLevelMsgHandler = (topic: string, message: Buffer) => {
       if (topic !== chargeLevelTopic) return;
-      const pct = parseWatts(message, chargeLevelField); // reuse parser (works for any numeric field)
+      const pct = parseNumericField(message, chargeLevelField);
       if (pct === null) {
         log(`[CHARGE_LEVEL] Received invalid message: ${message.toString().slice(0, 100)}`);
         return;
