@@ -15,6 +15,7 @@ export interface InfluxConfig {
 
 export interface SessionSummary {
   chargedKwh: number;
+  plannedKwh: number;
   totalCostEur: number;
   solarPct: number;
 }
@@ -43,6 +44,7 @@ export function formatLineProtocol(
       : "";
   const fields = [
     `charged_kwh=${summary.chargedKwh}`,
+    `planned_kwh=${summary.plannedKwh}`,
     `total_cost_eur=${summary.totalCostEur}`,
     `solar_pct=${summary.solarPct}i`,
   ].join(",");

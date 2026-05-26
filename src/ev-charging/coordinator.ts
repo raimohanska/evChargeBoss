@@ -348,5 +348,10 @@ export async function runSession(
   publisher.resetTargetTime(clock.now());
   publisher.resetTargetKwh();
   const solarPct = chargedSlots > 0 ? Math.round((solarFractionSum / chargedSlots) * 100) : 0;
-  await onSessionEnd?.({ chargedKwh: machine.chargedKwh, totalCostEur, solarPct });
+  await onSessionEnd?.({
+    chargedKwh: machine.chargedKwh,
+    plannedKwh: getAdjustedTargetKwh(),
+    totalCostEur,
+    solarPct,
+  });
 }

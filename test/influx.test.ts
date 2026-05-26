@@ -91,6 +91,11 @@ describe("InfluxDB integration", { concurrency: false }, () => {
       `charged_kwh: expected 5.25, got ${byField["charged_kwh"]}`,
     );
     assert.equal(
+      parseFloat(byField["planned_kwh"]),
+      7,
+      `planned_kwh: expected 7, got ${byField["planned_kwh"]}`,
+    );
+    assert.equal(
       parseFloat(byField["total_cost_eur"]),
       0,
       `total_cost_eur: expected 0, got ${byField["total_cost_eur"]}`,

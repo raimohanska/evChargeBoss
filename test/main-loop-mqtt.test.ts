@@ -195,6 +195,7 @@ describe("main-loop MQTT integration — energy field", { concurrency: false }, 
       await loopPromise;
       assert.equal(sessionSummary()?.solarPct, 100, "solar forecast exceeds charger power → 100%");
       assert.equal(sessionSummary()?.totalCostEur, 0, "all solar-free slots → zero cost");
+      assert.equal(sessionSummary()?.plannedKwh, 7, "plannedKwh equals configured targetKwh");
     } finally {
       teardown();
     }
@@ -634,6 +635,7 @@ describe("main-loop MQTT integration — detected charger power", { concurrency:
         0.75,
         "session must end after 1 slot using detected 3 kW, not configured 2 kW",
       );
+      assert.equal(sessionSummary()?.plannedKwh, 0.75, "plannedKwh equals overridden targetKwh");
     } finally {
       teardown();
     }
