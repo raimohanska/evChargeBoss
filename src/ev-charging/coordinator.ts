@@ -128,13 +128,26 @@ export async function runSession(
   const initial = getInitialState(config, targetTime, targetKwh);
   let machine: MachineState = initial.state;
   let chargeLevelPct: number | undefined;
+  let chargeLevelTriggeredReplan = false;
+  // Mutable holder so the charge level callback can access wakeCancel (declared later)
+  const wakeRef: { cancel: Canceller | null } = { cancel: null };
 
   // Subscribe to charge level source (car SoC %) if configured.
   // Only track charge level for new sessions - resumed sessions use stored values.
+  // Re-plan on charge level change only if we haven't started charging yet (chargedKwh == 0).
   const unsubChargeLevel = initial.isResuming
     ? undefined
     : session.chargeLevelSource?.subscribe((pct) => {
+        const prevPct = chargeLevelPct;
         chargeLevelPct = pct;
+        // Trigger re-plan only if chargedKwh is still 0 (not yet started charging)
+        // and the charge level actually changed
+        if (machine.chargedKwh === 0 && prevPct !== undefined && prevPct !== pct) {
+          log(`Charge level changed to ${pct}% - re-planning (chargedKwh=0)`);
+          forecast = null;
+          chargeLevelTriggeredReplan = true;
+          wakeRef.cancel?.abort();
+        }
       });
 
   // Compute effective target kWh based on charge level: if battery is X% full, reduce target to (100-X)%
@@ -194,6 +207,7 @@ export async function runSession(
   await publishState();
 
   let wakeCancel = new Canceller();
+  wakeRef.cancel = wakeCancel;
   publisher.setWakeCallback(() => wakeCancel.abort());
   publisher.setChargeNowCallback(() => {
     machine = { ...machine, chargedKwh: 0 };
@@ -256,11 +270,16 @@ export async function runSession(
             log(`Forecast unavailable: ${err.message} - retrying at next slot`);
             const msToNextSlot = slotMs - (clock.now().getTime() % slotMs);
             wakeCancel = new Canceller();
+            wakeRef.cancel = wakeCancel;
             publisher.setWakeCallback(() => wakeCancel.abort());
             await clock.sleep(msToNextSlot, wakeCancel.signal);
             tracker?.tick(clock.now());
             if (wakeCancel.signal.aborted) {
-              log("Target time changed during forecast-unavailable wait - re-planning.");
+              if (chargeLevelTriggeredReplan) {
+                chargeLevelTriggeredReplan = false;
+              } else {
+                log("Target time changed during forecast-unavailable wait - re-planning.");
+              }
             }
             continue;
           }
@@ -280,6 +299,7 @@ export async function runSession(
 
         const msUntilEnd = Math.max(0, currentSlot.end.getTime() - clock.now().getTime());
         wakeCancel = new Canceller();
+        wakeRef.cancel = wakeCancel;
         publisher.setWakeCallback(() => wakeCancel.abort());
 
         // This is where we wait for the slot to end
@@ -287,8 +307,13 @@ export async function runSession(
         tracker?.tick(clock.now());
 
         if (wakeCancel.signal.aborted) {
-          forecast = null;
-          log("Target time changed mid-slot - re-planning.");
+          if (chargeLevelTriggeredReplan) {
+            chargeLevelTriggeredReplan = false;
+            // forecast already null, set by the charge level callback
+          } else {
+            forecast = null;
+            log("Target time changed mid-slot - re-planning.");
+          }
           continue;
         }
 

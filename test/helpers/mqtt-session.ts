@@ -33,6 +33,11 @@ export interface MqttTestSession {
    * No-op when holdWhenHeating is not configured in chargingOverrides.
    */
   publishHeatingPower(watts: number): void;
+  /**
+   * Publish a charge level (battery SoC %) to the chargeLevelTopic.
+   * No-op when chargeLevelTopic is not configured in mqttOverrides.
+   */
+  publishChargeLevel(pct: number): void;
   /** Last charged energy (kWh) received from MQTT — 0 if none yet. */
   chargedEnergy(): number;
   /** Session summary captured from onSessionEnd — null until session completes. */
@@ -43,7 +48,7 @@ export interface MqttTestSession {
   targetKwhState(): number | null;
   /**
    * Deduplicated sequence of status values received via MQTT.
-   * Recording starts from the first "Starting…" message emitted by StatusPublisher,
+   * Recording starts from the first "Starting..." message emitted by StatusPublisher,
    * discarding any retained values left by a previous test session.
    */
   statusHistory(): readonly string[];
@@ -201,6 +206,13 @@ export async function startMqttSession(
       const payload =
         powerField !== undefined ? JSON.stringify({ [powerField]: watts }) : String(watts);
       controlClient.publish(powerTopic, payload);
+    },
+    publishChargeLevel(pct: number) {
+      const topic = config.evCharging.mqtt?.chargeLevelTopic;
+      if (!topic) return;
+      const field = config.evCharging.mqtt?.chargeLevelField;
+      const payload = field !== undefined ? JSON.stringify({ [field]: pct }) : String(pct);
+      controlClient.publish(topic, payload);
     },
     chargedEnergy: () => _lastChargedEnergy,
     sessionSummary: () => _sessionSummary,

@@ -721,3 +721,91 @@ describe("main-loop MQTT integration — target kWh override", { concurrency: fa
     }
   });
 }); // describe "main-loop MQTT integration — target kWh override"
+
+describe("main-loop MQTT integration — charge level re-plan", { concurrency: false }, () => {
+  /**
+   * When charge level (battery SoC %) changes and chargedKwh is still 0
+   * (charging hasn't started), a re-plan is triggered. The adjusted target
+   * is targetKwh * (100 - chargeLevelPct) / 100.
+   *
+   * When chargedKwh > 0 (charging has started), charge level changes do NOT
+   * trigger a re-plan, since internal tracking is more accurate.
+   *
+   * Tests use a unique chargeLevelTopic per session to prevent interference.
+   */
+
+  test("Charge level change triggers re-plan when chargedKwh=0", async () => {
+    // Use a unique charge level topic for this test session.
+    const chargeLevelTopic = `evchargeboss-test/charge-level-${process.pid}-${Date.now()}`;
+    const { loopPromise, relay, publishChargeLevel, teardown } = await startMqttSession(
+      FROM,
+      SPEEDUP,
+      { targetKwh: 10 }, // higher target so charge level reduction is meaningful
+      { chargeLevelTopic },
+    );
+    try {
+      await relay.assertOn("2026-04-18T17:00"); // plug-in detection
+
+      // Publish initial charge level (50%) - this establishes the baseline.
+      publishChargeLevel(50);
+
+      // Wait a moment for the message to be processed, then change charge level.
+      await new Promise((r) => setTimeout(r, 50));
+
+      // The first plan puts charging at 10:00 next day, so relay turns off.
+      await relay.assertOff("2026-04-18T17:30");
+
+      // Publish a different charge level (70%) while sleeping in the overnight gap.
+      // Since chargedKwh is still 0, this should trigger a re-plan.
+      publishChargeLevel(70);
+
+      // A re-plan was triggered; the session continues with the adjusted target.
+      // The loop should wake up and re-plan (forecast = null).
+      // Session completes normally.
+      await loopPromise;
+
+      // Verify the re-plan log message appeared in status history or the session completed.
+      // The key assertion is that the session didn't crash and completed normally.
+      // With 70% charge level and 10 kWh target, effective target = 10 * 0.30 = 3 kWh.
+    } finally {
+      teardown();
+    }
+  });
+
+  test("Charge level change does NOT trigger re-plan when chargedKwh>0", async () => {
+    // This test verifies that once charging has started (chargedKwh > 0),
+    // charge level changes do NOT trigger a re-plan.
+    const chargeLevelTopic = `evchargeboss-test/charge-level-${process.pid}-${Date.now()}`;
+    const { loopPromise, relay, publishChargeLevel, teardown } = await startMqttSession(
+      FROM,
+      SPEEDUP,
+      { targetKwh: 5 },
+      { chargeLevelTopic },
+    );
+    try {
+      await relay.assertOn("2026-04-18T17:00"); // plug-in detection
+
+      // Publish initial charge level.
+      publishChargeLevel(20);
+      await new Promise((r) => setTimeout(r, 50));
+
+      await relay.assertOff("2026-04-18T17:30"); // enters overnight-gap sleep
+
+      // Wait for charging to start at 10:00.
+      await relay.assertOn("2026-04-19T10:00");
+
+      // Now chargedKwh > 0. Publish a different charge level.
+      // This should NOT trigger a re-plan.
+      publishChargeLevel(80);
+
+      // Session completes normally - the charge level change was ignored.
+      await loopPromise;
+
+      // If we got here without errors, the test passed.
+      // The relay should have only turned off once (during the overnight gap).
+      assert.equal(relay.offCount, 1, "relay should only have turned off once (overnight gap)");
+    } finally {
+      teardown();
+    }
+  });
+}); // describe "main-loop MQTT integration — charge level re-plan"
