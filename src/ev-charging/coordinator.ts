@@ -29,7 +29,6 @@ const EvChargingPlanSchema = z.object({
   version: z.literal(1),
   detectedPowerKw: z.number(),
   chargedKwh: z.number(),
-  chargeLevelPct: z.number().optional(),
   config: z.object({
     targetKwh: z.number(),
     targetDateTime: z.string(),
@@ -38,7 +37,6 @@ const EvChargingPlanSchema = z.object({
 
 interface InitialStateResult {
   state: MachineState;
-  chargeLevelPct?: number;
 }
 
 function getInitialState(config: Config, targetTime: Date, targetKwh: number): InitialStateResult {
@@ -63,7 +61,6 @@ function getInitialState(config: Config, targetTime: Date, targetKwh: number): I
           detectedChargerPowerKw: saved.detectedPowerKw,
           powerKwMeasured: true, // previous session measured this value
         },
-        chargeLevelPct: saved.chargeLevelPct,
       };
     } else {
       let reason: string;
@@ -127,11 +124,20 @@ export async function runSession(
 
   const initial = getInitialState(config, targetTime, targetKwh);
   let machine: MachineState = initial.state;
-  let chargeLevelPct: number | undefined = initial.chargeLevelPct;
+  let chargeLevelPct: number | undefined;
 
-  // Subscribe to charge level source (car SoC %) if configured
+  // Subscribe to charge level source (car SoC %) if configured.
+  // When we receive a fresh charge level, reset chargedKwh since the charge
+  // level already reflects the actual battery state.
   const unsubChargeLevel = session.chargeLevelSource?.subscribe((pct) => {
+    const isFirstReading = chargeLevelPct === undefined;
     chargeLevelPct = pct;
+    if (isFirstReading && machine.chargedKwh > 0) {
+      log(
+        `Charge level received (${pct}%) - resetting chargedKwh from ${machine.chargedKwh.toFixed(2)} to 0`,
+      );
+      machine = { ...machine, chargedKwh: 0 };
+    }
   });
 
   // Compute effective target kWh based on charge level: if battery is X% full, reduce target to (100-X)%
@@ -146,7 +152,6 @@ export async function runSession(
       version: 1,
       detectedPowerKw: machine.detectedChargerPowerKw,
       chargedKwh: machine.chargedKwh,
-      chargeLevelPct,
       config: {
         targetKwh: targetKwh,
         targetDateTime: localDateTimeString(targetTime),
