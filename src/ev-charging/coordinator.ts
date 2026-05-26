@@ -29,6 +29,7 @@ const EvChargingPlanSchema = z.object({
   version: z.literal(1),
   detectedPowerKw: z.number(),
   chargedKwh: z.number(),
+  chargeLevelPct: z.number().optional(),
   config: z.object({
     targetKwh: z.number(),
     targetDateTime: z.string(),
@@ -38,6 +39,7 @@ const EvChargingPlanSchema = z.object({
 interface InitialStateResult {
   state: MachineState;
   isResuming: boolean;
+  chargeLevelPct?: number;
 }
 
 function getInitialState(config: Config, targetTime: Date, targetKwh: number): InitialStateResult {
@@ -51,8 +53,13 @@ function getInitialState(config: Config, targetTime: Date, targetKwh: number): I
       new Date(saved.config.targetDateTime).getTime() === targetTime.getTime() &&
       saved.chargedKwh < targetKwh
     ) {
+      // Compute the effective targetKwh for display (same formula as getAdjustedTargetKwh)
+      const effectiveTargetKwh =
+        saved.chargeLevelPct !== undefined
+          ? targetKwh * Math.max(0, (100 - saved.chargeLevelPct) / 100)
+          : targetKwh;
       log(
-        `Resuming session: ${sessionSummaryLine({ powerKw: saved.detectedPowerKw, targetTime, targetKwh, chargedKwh: saved.chargedKwh })}`,
+        `Resuming session: ${sessionSummaryLine({ powerKw: saved.detectedPowerKw, targetTime, targetKwh: effectiveTargetKwh, chargedKwh: saved.chargedKwh })}`,
       );
       return {
         state: {
@@ -63,6 +70,7 @@ function getInitialState(config: Config, targetTime: Date, targetKwh: number): I
           powerKwMeasured: true, // previous session measured this value
         },
         isResuming: true,
+        chargeLevelPct: saved.chargeLevelPct,
       };
     } else {
       let reason: string;
@@ -127,7 +135,7 @@ export async function runSession(
 
   const initial = getInitialState(config, targetTime, targetKwh);
   let machine: MachineState = initial.state;
-  let chargeLevelPct: number | undefined;
+  let chargeLevelPct: number | undefined = initial.chargeLevelPct;
   let chargeLevelTriggeredReplan = false;
   // Mutable holder so the charge level callback can access wakeCancel (declared later)
   const wakeRef: { cancel: Canceller | null } = { cancel: null };
@@ -162,6 +170,7 @@ export async function runSession(
       version: 1,
       detectedPowerKw: machine.detectedChargerPowerKw,
       chargedKwh: machine.chargedKwh,
+      ...(chargeLevelPct !== undefined && { chargeLevelPct }),
       config: {
         targetKwh: targetKwh,
         targetDateTime: localDateTimeString(targetTime),
