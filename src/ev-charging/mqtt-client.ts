@@ -198,10 +198,21 @@ export function makeMqttSession(
   if (mqttConfig.chargeLevelTopic) {
     const chargeLevelTopic = mqttConfig.chargeLevelTopic;
     const chargeLevelField = mqttConfig.chargeLevelField;
+    log(
+      `[CHARGE_LEVEL] Subscribing to ${chargeLevelTopic}${chargeLevelField ? ` (field: ${chargeLevelField})` : ""}`,
+    );
     const chargeLevelMsgHandler = (topic: string, message: Buffer) => {
       if (topic !== chargeLevelTopic) return;
       const pct = parseWatts(message, chargeLevelField); // reuse parser (works for any numeric field)
-      if (pct === null || pct < 0 || pct > 100) return;
+      if (pct === null) {
+        log(`[CHARGE_LEVEL] Received invalid message: ${message.toString().slice(0, 100)}`);
+        return;
+      }
+      if (pct < 0 || pct > 100) {
+        log(`[CHARGE_LEVEL] Received out-of-range value: ${pct}%`);
+        return;
+      }
+      log(`[CHARGE_LEVEL] Received: ${pct}%`);
       for (const l of chargeLevelListeners) l(pct);
     };
     client.on("message", chargeLevelMsgHandler);
