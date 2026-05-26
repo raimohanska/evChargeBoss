@@ -37,6 +37,7 @@ const EvChargingPlanSchema = z.object({
 
 interface InitialStateResult {
   state: MachineState;
+  isResuming: boolean;
 }
 
 function getInitialState(config: Config, targetTime: Date, targetKwh: number): InitialStateResult {
@@ -61,6 +62,7 @@ function getInitialState(config: Config, targetTime: Date, targetKwh: number): I
           detectedChargerPowerKw: saved.detectedPowerKw,
           powerKwMeasured: true, // previous session measured this value
         },
+        isResuming: true,
       };
     } else {
       let reason: string;
@@ -85,6 +87,7 @@ function getInitialState(config: Config, targetTime: Date, targetKwh: number): I
       detectedChargerPowerKw: config.evCharging.powerKw ?? 0,
       powerKwMeasured: false,
     },
+    isResuming: false,
   };
 }
 
@@ -127,18 +130,12 @@ export async function runSession(
   let chargeLevelPct: number | undefined;
 
   // Subscribe to charge level source (car SoC %) if configured.
-  // When we receive a fresh charge level, reset chargedKwh since the charge
-  // level already reflects the actual battery state.
-  const unsubChargeLevel = session.chargeLevelSource?.subscribe((pct) => {
-    const isFirstReading = chargeLevelPct === undefined;
-    chargeLevelPct = pct;
-    if (isFirstReading && machine.chargedKwh > 0) {
-      log(
-        `Charge level received (${pct}%) - resetting chargedKwh from ${machine.chargedKwh.toFixed(2)} to 0`,
-      );
-      machine = { ...machine, chargedKwh: 0 };
-    }
-  });
+  // Only track charge level for new sessions - resumed sessions use stored values.
+  const unsubChargeLevel = initial.isResuming
+    ? undefined
+    : session.chargeLevelSource?.subscribe((pct) => {
+        chargeLevelPct = pct;
+      });
 
   // Compute effective target kWh based on charge level: if battery is X% full, reduce target to (100-X)%
   const getAdjustedTargetKwh = () =>
