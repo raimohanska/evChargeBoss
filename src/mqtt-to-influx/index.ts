@@ -7,14 +7,16 @@ import { makeLogger } from "../utils/log.ts";
 
 const log = makeLogger("mqtt-to-influx");
 
-export function parseValue(payload: string, sensor: SensorConfig): number | null {
+export function parseValue(payload: string, sensor: SensorConfig, topic?: string): number | null {
   let raw: unknown;
 
   if (sensor.json_field) {
     try {
       const parsed = JSON.parse(payload) as Record<string, unknown>;
       raw = parsed[sensor.json_field];
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`JSON parse error for ${topic ?? "unknown"}: ${msg} - payload: ${payload.slice(0, 80)}`);
       return null;
     }
   } else {
@@ -78,7 +80,7 @@ async function handleMessage(
 
   const now = Date.now();
   for (const sensor of sensors) {
-    const value = parseValue(payload, sensor);
+    const value = parseValue(payload, sensor, topic);
     if (value === null) {
       log(`[MqttToInflux] Could not parse value from ${topic}: ${payload.slice(0, 80)}`);
       continue;
@@ -109,6 +111,22 @@ export async function runMqttToInflux(config: Config): Promise<void> {
   log("[MqttToInflux] Starting...");
 
   const client = await connectMqtt(config.mqtt);
+
+  // Connection lifecycle logging
+  let wasConnected = true; // Initial connection succeeded
+  client.on("offline", () => log("MQTT offline"));
+  client.on("reconnect", () => log("MQTT reconnecting..."));
+  client.on("connect", () => {
+    if (wasConnected) return; // Skip first connect (already logged "Starting")
+    wasConnected = true;
+    log("MQTT reconnected");
+  });
+  client.on("error", (err) => log(`MQTT error: ${err.message}`));
+  client.on("close", () => {
+    wasConnected = false;
+    log("MQTT connection closed");
+  });
+
   const { sensors } = config.mqttToInflux;
   const influxConfig = config.influx;
 

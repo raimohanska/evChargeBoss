@@ -45,6 +45,22 @@ export async function connectMqtt(brokerConfig: BrokerConfig): Promise<MqttClien
 
     client.once("connect", () => {
       //log("MQTT connected.");
+
+      // Connection lifecycle logging (post-connection)
+      let wasConnected = true;
+      client.on("offline", () => log("MQTT offline"));
+      client.on("reconnect", () => log("MQTT reconnecting..."));
+      client.on("connect", () => {
+        if (wasConnected) return;
+        wasConnected = true;
+        log("MQTT reconnected");
+      });
+      client.on("error", (err) => log(`MQTT error: ${err.message}`));
+      client.on("close", () => {
+        wasConnected = false;
+        log("MQTT connection closed");
+      });
+
       resolve(client);
     });
     client.once("error", (err) => {
