@@ -262,11 +262,15 @@ export async function runSession(
       // 2. Check if target time reached
       if (clock.now() >= env().targetTime) {
         const remaining = targetKwh - machine.chargedKwh;
-        log(
-          remaining > 0
-            ? `Target time passed - goal not reached. Charged ${machine.chargedKwh.toFixed(2)} / ${targetKwh.toFixed(2)} kWh (${remaining.toFixed(2)} kWh short).`
-            : `Target time passed - session complete. ${machine.chargedKwh.toFixed(2)} kWh delivered.`,
-        );
+        let msg: string;
+        if (remaining <= 0) {
+          msg = `Target time passed - session complete. ${machine.chargedKwh.toFixed(2)} kWh delivered.`;
+        } else if (chargeLevelPct === 100) {
+          msg = `Target time passed - goal not reached but battery is full. Charged ${machine.chargedKwh.toFixed(2)} / ${targetKwh.toFixed(2)} kWh.`;
+        } else {
+          msg = `Target time passed - goal not reached. Charged ${machine.chargedKwh.toFixed(2)} / ${targetKwh.toFixed(2)} kWh (${remaining.toFixed(2)} kWh short).`;
+        }
+        log(msg);
         break;
       }
 

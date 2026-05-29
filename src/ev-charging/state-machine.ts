@@ -57,8 +57,8 @@ const states: Record<StateId, StateHandler> = {
   WaitingForChargingStart: {
     id: "WaitingForChargingStart",
     relayOn: true,
-    getStatusMessage() {
-      return "Waiting for charging to start";
+    getStatusMessage(machine, env) {
+      return env.chargeLevelPct === 100 ? "Battery is full" : "Waiting for charging to start";
     },
   },
   ChargingAsPlanned: {
@@ -73,7 +73,7 @@ const states: Record<StateId, StateHandler> = {
     id: "ChargingPausedForHeat",
     relayOn: false,
     getStatusMessage() {
-      return "Charging paused (heating peak)";
+      return "Charging paused (heating)";
     },
   },
   ForcedToChargingWithoutPlan: {
@@ -207,9 +207,10 @@ export function nextState(machine: MachineState, env: Environment): MachineState
     };
   }
   // We have a plan
-  const ref = floorToSlotStart(env.now);
+  const currentSlotStart = floorToSlotStart(env.now);
   const slot =
-    findCurrentPlannedSlot(machine.plan, ref) ?? findPlannedSlotAtTime(machine.plan, env.now);
+    findCurrentPlannedSlot(machine.plan, currentSlotStart) ??
+    findPlannedSlotAtTime(machine.plan, env.now);
   if (slot?.charge) {
     const chargingNow = env.currentPowerW > env.powerThresholdW;
 
