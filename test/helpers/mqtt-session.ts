@@ -188,7 +188,7 @@ export async function startMqttSession(
     await onSessionEnd?.(summary);
   };
 
-  const loopPromise = runSession(session, publisher, config, from, clock, wrappedOnSessionEnd);
+  const loopPromise = runSession(session, publisher, config, undefined, clock, wrappedOnSessionEnd);
 
   return {
     loopPromise,

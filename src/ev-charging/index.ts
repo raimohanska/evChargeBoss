@@ -29,7 +29,7 @@ function errorStatus(err: unknown): string {
 }
 
 export async function runEvCharging(config: Config): Promise<void> {
-  const { mode, from: initialFrom } = parseArgs(config.evCharging.mode);
+  const { mode } = parseArgs(config.evCharging.mode);
   if (mode === "plan") {
     const powerKw = config.evCharging.powerKw;
     if (!powerKw) {
@@ -39,7 +39,7 @@ export async function runEvCharging(config: Config): Promise<void> {
       process.exit(1);
     }
     const targetTimeStr = config.evCharging.targetTime;
-    const now = initialFrom ?? new Date();
+    const now = new Date();
     const targetDate = resolveTargetTime(targetTimeStr, config.evCharging.weeklySchedule, now);
     const persistedStats = loadHeatingStatistics();
     const effectivePowerKw =
@@ -83,7 +83,7 @@ export async function runEvCharging(config: Config): Promise<void> {
   // overrides before planning, so they survive a restart.
   await publisher.waitForInitialTargetTime(2000);
   await publisher.waitForInitialTargetKwh(2000);
-  const clock = makeClock(config.test?.timeSpeedupFactor ?? 1, initialFrom);
+  const clock = makeClock(config.test?.timeSpeedupFactor ?? 1);
 
   // Declare tracker before makeMqttSession so the getHoldThreshold closure can
   // reference it — tracker is assigned synchronously after the MQTT session is
@@ -139,14 +139,11 @@ export async function runEvCharging(config: Config): Promise<void> {
     tracker !== null ? setInterval(() => tracker.takeSample(new Date()), 60_000) : undefined;
 
   // Charge loop: run sessions indefinitely, retrying on error.
-  let from: Date | undefined = initialFrom;
   log("Starting charging loop");
   try {
     while (true) {
-      if (from) log(`Planning from ${from.toISOString()}`);
       try {
-        await runSession(session, publisher, config, from, clock, onSessionEnd, tracker);
-        from = undefined;
+        await runSession(session, publisher, config, undefined, clock, onSessionEnd, tracker);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         log(`ERROR: ${msg}`);

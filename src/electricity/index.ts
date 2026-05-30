@@ -3,6 +3,7 @@ import { fetchSpotPrices, persistSpotCache } from "./spot.ts";
 import { fetchSolarForecast, persistSolarCache, lookupSolarW, treeShadingFactor } from "./solar.ts";
 import { datesInRange, slotsBetween } from "./dates.ts";
 import { makeLogger } from "../utils/log.ts";
+import { localDateTimeString } from "../utils/date-time-format.ts";
 
 const log = makeLogger("electricity");
 import { assertNotNull } from "../utils/assertNotNull.ts";
@@ -50,8 +51,10 @@ export async function fetchSlots(
 
   const missingSpot = slotStarts.filter((s) => !spotMap.has(s.getTime()));
   if (missingSpot.length > 0) {
+    const lastAvailableEpoch = Math.max(...spotMap.keys());
+    const lastAvailable = new Date(lastAvailableEpoch);
     throw new IncompleteDataError(
-      `Cannot plan safely - missing ${missingSpot.length} spot price slot(s)`,
+      `Cannot plan safely - need spot prices until ${localDateTimeString(to)}, but last available is ${localDateTimeString(lastAvailable)}`,
       missingSpot,
     );
   }
