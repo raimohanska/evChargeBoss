@@ -412,7 +412,7 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
       await relay.assertOff("2026-04-19T10:00"); // gap sleep (17 h virtual)
       // Wait for heatingHold status — confirms slot started with hold active.
       // 10 s timeout covers the ~6.1 s gap plus MQTT roundtrip.
-      await waitUntilStatus(statusHistory, (s) => s === "Charging paused (heating peak)", 10_000);
+      await waitUntilStatus(statusHistory, (s) => s === "Charging paused (heating)", 10_000);
       publishHeatingPower(0); // release heating — relay must turn ON within the slot
       await relay.assertOnBefore("2026-04-19T10:15");
       await loopPromise;
@@ -502,7 +502,7 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
    *
    * Expected status (partial):
    *   …  Planned charge start at 10:00
-   *   →  Charging paused (heating peak)   — when slot starts with hold active
+   *   →  Charging paused (heating)        — when slot starts with hold active
    *   →  Waiting for charging to start    — when heating releases and relay goes ON
    *      (or "Charging until …" if watts arrive before status check)
    */
@@ -515,7 +515,7 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
       publishHeatingPower(3000);
       await relay.assertOn("2026-04-18T17:00");
       await relay.assertOff("2026-04-19T10:00");
-      await waitUntilStatus(statusHistory, (s) => s === "Charging paused (heating peak)", 10_000);
+      await waitUntilStatus(statusHistory, (s) => s === "Charging paused (heating)", 10_000);
       publishHeatingPower(0);
       await relay.assertOnBefore("2026-04-19T10:15");
       await waitUntilStatus(
@@ -525,10 +525,10 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
       await loopPromise;
 
       const history = statusHistory();
-      const holdIdx = history.indexOf("Charging paused (heating peak)");
+      const holdIdx = history.indexOf("Charging paused (heating)");
       assert.ok(
         holdIdx !== -1,
-        `Expected "Charging paused (heating peak)" in status history. Got: ${JSON.stringify(history)}`,
+        `Expected "Charging paused (heating)" in status history. Got: ${JSON.stringify(history)}`,
       );
       const afterHold = history.slice(holdIdx + 1);
       assert.ok(

@@ -346,6 +346,7 @@ export async function runSession(
           };
           if (machine.chargedKwh >= targetKwh) {
             log(`Charging complete: ${machine.chargedKwh.toFixed(2)} kWh delivered.`);
+            await updateState(); // publish final chargedKwh before exiting
             break;
           }
         }
