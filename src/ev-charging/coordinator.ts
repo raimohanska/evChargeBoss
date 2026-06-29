@@ -109,14 +109,15 @@ export async function runSession(
   tracker?: HeatingTracker | null,
 ): Promise<void> {
   const RELAY_DEBOUNCE_MS = 1000;
-  const now = from ?? clock.now();
+  // Fixed per-session timestamp, used only to name the plan file. Never use
+  // this as "current time" - always call clock.now() for that.
+  const sessionStart = from ?? clock.now();
   const powerThresholdW = config.evCharging.mqtt?.powerThresholdW ?? 10;
   const powerKw = config.evCharging.powerKw ?? 0;
   const slotMs = 15 * 60 * 1000;
 
   const getTargetTimeFromPublisher = () => {
-    // Anchor on current time, not the session-start `now`. A long-running
-    // session keeps `now` fixed at startup; resolving a relative override
+    // Always anchor on the current time. Resolving a relative override
     // (e.g. Charge Now -> "now + 2h") against a stale anchor could place the
     // target in the past and end the session immediately.
     const at = clock.now();
@@ -170,7 +171,7 @@ export async function runSession(
       : targetKwh;
 
   const savePlan = () => {
-    const filePath = planFilePath("ev-charging", timestampForFilename(now));
+    const filePath = planFilePath("ev-charging", timestampForFilename(sessionStart));
     writePlanFile(filePath, {
       version: 1,
       detectedPowerKw: machine.detectedChargerPowerKw,
