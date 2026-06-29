@@ -145,6 +145,31 @@ describe("main-loop MQTT integration", { concurrency: false }, () => {
       teardown();
     }
   });
+
+  // Regression: a long-running session (started the previous evening) must
+  // resolve a relative target-time override against the CURRENT time, not the
+  // stale session-start time. Previously, anchoring on the start time placed
+  // the new target in the past, the loop's "target passed" check fired, and
+  // the session ended without charging. After reaching the next-day solar
+  // window, setting an earlier HH:MM must roll to the following day and keep
+  // charging — not end the session.
+  test("Override after midnight resolves against current time, keeps charging", async () => {
+    const { loopPromise, relay, publishTargetTime, sessionSummary, teardown } =
+      await startMqttSession(FROM, SPEEDUP);
+    try {
+      await advanceToSolarWindow(relay); // now ~10:00 on Apr 19, day after start
+      // "09:30" is earlier than the current time of day. With a stale anchor it
+      // would resolve to Apr 19 09:30 (already past) and end the session at
+      // 0 kWh; with the fix it resolves to Apr 20 09:30 and charging continues.
+      publishTargetTime("09:30");
+      await loopPromise;
+      const summary = sessionSummary();
+      assert.ok(summary, "session must complete with a summary");
+      assert.ok(summary!.chargedKwh >= 5, "session must keep charging, not end on stale target");
+    } finally {
+      teardown();
+    }
+  });
 }); // describe "main-loop MQTT integration"
 
 describe("main-loop MQTT integration — energy field", { concurrency: false }, () => {

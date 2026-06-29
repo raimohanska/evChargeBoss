@@ -115,9 +115,14 @@ export async function runSession(
   const slotMs = 15 * 60 * 1000;
 
   const getTargetTimeFromPublisher = () => {
+    // Anchor on current time, not the session-start `now`. A long-running
+    // session keeps `now` fixed at startup; resolving a relative override
+    // (e.g. Charge Now -> "now + 2h") against a stale anchor could place the
+    // target in the past and end the session immediately.
+    const at = clock.now();
     const override = publisher.getTargetTimeOverride();
-    if (override) return parseTargetTime(override, now);
-    return resolveTargetTime(config.evCharging.targetTime, config.evCharging.weeklySchedule, now);
+    if (override) return parseTargetTime(override, at);
+    return resolveTargetTime(config.evCharging.targetTime, config.evCharging.weeklySchedule, at);
   };
 
   const getEffectiveTargetKwh = () =>
