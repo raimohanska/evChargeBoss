@@ -36,15 +36,34 @@ function parseNumericField(message: Buffer, field: string | undefined): number |
 export async function connectMqtt(brokerConfig: BrokerConfig): Promise<MqttClient> {
   const { brokerUrl, username, password } = brokerConfig;
   return new Promise((resolve, reject) => {
-    const opts: mqtt.IClientOptions = {};
+    const opts: mqtt.IClientOptions = {
+      // Keep trying to reconnect after a dropped connection. mqtt.js auto-
+      // resubscribes to previously subscribed topics on reconnect (resubscribe
+      // defaults to true), so message handlers registered on the client stay
+      // valid across reconnects.
+      reconnectPeriod: 5000,
+      connectTimeout: 30_000,
+      keepalive: 60,
+    };
     if (username) opts.username = username;
     if (password) opts.password = password;
 
     //log(`Connecting to MQTT broker at ${brokerUrl}...`);
     const client = mqtt.connect(brokerUrl, opts);
 
+    // Connection-time error handler: reject the connect promise only if the
+    // initial connection fails. It MUST be removed once connected, otherwise a
+    // later transient error (e.g. EPIPE) would call client.end() and
+    // permanently disable auto-reconnect.
+    const onConnectError = (err: Error) => {
+      client.end();
+      reject(err);
+    };
+    client.once("error", onConnectError);
+
     client.once("connect", () => {
       //log("MQTT connected.");
+      client.removeListener("error", onConnectError);
 
       // Connection lifecycle logging (post-connection)
       let wasConnected = true;
@@ -62,10 +81,6 @@ export async function connectMqtt(brokerConfig: BrokerConfig): Promise<MqttClien
       });
 
       resolve(client);
-    });
-    client.once("error", (err) => {
-      client.end();
-      reject(err);
     });
   });
 }

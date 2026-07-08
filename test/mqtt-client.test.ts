@@ -63,3 +63,31 @@ test("wattsSource delivers updates after charging starts", async () => {
   session.end();
   helperClient.end(true);
 });
+
+/**
+ * Regression: a transient error emitted after a successful connect must NOT
+ * tear down the client. Previously connectMqtt left its connection-time
+ * `once("error")` handler attached, so the first post-connect error (e.g. a
+ * write EPIPE) called client.end() and permanently disabled auto-reconnect.
+ */
+test("client survives a post-connect error and stays connected", async () => {
+  const config = makeTestConfig();
+  const client = await connectMqtt(config.mqtt!);
+
+  assert.equal(client.connected, true);
+
+  // Simulate a transient socket error after connecting.
+  client.emit("error", new Error("write EPIPE"));
+
+  // With the bug, client.end() would have run and put the client into the
+  // disconnecting/ended state. It must remain connected and not disconnecting.
+  assert.equal(client.disconnecting, false);
+  assert.equal(client.connected, true);
+
+  // The client must still be usable for publishing.
+  await new Promise<void>((resolve, reject) =>
+    client.publish("evchargeboss/test/regression", "ok", (err) => (err ? reject(err) : resolve())),
+  );
+
+  client.end(true);
+});
