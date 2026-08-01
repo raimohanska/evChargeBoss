@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from "fs";
 import { z } from "zod";
 import { EvChargingConfig } from "./ev-charging/config.ts";
+import type { DayOfWeek } from "./ev-charging/config.ts";
 import { ElectricityConfig, SolarConfig } from "./electricity/config.ts";
 import { SetpointControlConfig } from "./setpoint-control/config.ts";
 import { MqttToInfluxConfig } from "./mqtt-to-influx/config.ts";
@@ -81,6 +82,40 @@ export function writeConfigAtomically(configPath: string, config: Config): void 
   const tmp = `${configPath}.tmp`;
   writeFileSync(tmp, JSON.stringify(config, null, 2) + "\n", "utf8");
   renameSync(tmp, configPath);
+}
+
+/**
+ * Update a single day in evCharging.weeklySchedule inside the on-disk config
+ * file, keeping it in sync with MQTT state. Other fields and days are preserved.
+ * Refuses to write config-example.json. Errors are logged and swallowed so the
+ * main loop is never interrupted by a failed config write.
+ */
+export function updateConfigWeeklySchedule(configPath: string, day: DayOfWeek, time: string): void {
+  if (configPath.endsWith("config-example.json")) {
+    configWarn("Refusing to overwrite config-example.json - schedule change not persisted.");
+    return;
+  }
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    configError(`Failed to read config for schedule update: ${msg}`);
+    return;
+  }
+  const ev = (raw.evCharging ?? {}) as Record<string, unknown>;
+  const schedule = (ev.weeklySchedule ?? {}) as Record<string, unknown>;
+  schedule[day] = time;
+  ev.weeklySchedule = schedule;
+  raw.evCharging = ev;
+  const tmp = `${configPath}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(raw, null, 2) + "\n", "utf8");
+    renameSync(tmp, configPath);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    configError(`Failed to persist schedule change to "${configPath}": ${msg}`);
+  }
 }
 
 export function loadConfig(): Config {

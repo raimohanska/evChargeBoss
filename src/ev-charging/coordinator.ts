@@ -21,7 +21,7 @@ import {
 import { localDateTimeString } from "../utils/date-time-format.ts";
 import { sessionSummaryLine } from "./print-plan.ts";
 import { type PricedSlot } from "../electricity/types.ts";
-import { parseTargetTime, resolveTargetTime } from "./helpers.ts";
+import { parseTargetTime } from "./helpers.ts";
 import type { HeatingTracker } from "./heating-tracker.ts";
 const log = makeLogger("ev-charging");
 
@@ -123,7 +123,7 @@ export async function runSession(
     const at = clock.now();
     const override = publisher.getTargetTimeOverride();
     if (override) return parseTargetTime(override, at);
-    return resolveTargetTime(config.evCharging.targetTime, config.evCharging.weeklySchedule, at);
+    return publisher.resolveTargetTimeFromSchedule(at);
   };
 
   const getEffectiveTargetKwh = () =>

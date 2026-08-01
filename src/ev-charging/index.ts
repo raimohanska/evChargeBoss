@@ -28,7 +28,7 @@ function errorStatus(err: unknown): string {
   return msg;
 }
 
-export async function runEvCharging(config: Config): Promise<void> {
+export async function runEvCharging(config: Config, configPath?: string): Promise<void> {
   const { mode } = parseArgs(config.evCharging.mode);
   if (mode === "plan") {
     const powerKw = config.evCharging.powerKw;
@@ -78,11 +78,12 @@ export async function runEvCharging(config: Config): Promise<void> {
   }
 
   const mqttClient = await connectMqtt(config.mqtt);
-  const publisher = new StatusPublisher(mqttClient, config.evCharging);
-  // Wait for the broker to deliver any retained target-time and target-kWh
-  // overrides before planning, so they survive a restart.
+  const publisher = new StatusPublisher(mqttClient, config.evCharging, configPath);
+  // Wait for the broker to deliver any retained target-time, target-kWh, and
+  // per-day schedule state before planning, so they survive a restart.
   await publisher.waitForInitialTargetTime(2000);
   await publisher.waitForInitialTargetKwh(2000);
+  await publisher.waitForInitialWeeklySchedule(2000);
   const clock = makeClock(config.test?.timeSpeedupFactor ?? 1);
 
   // Declare tracker before makeMqttSession so the getHoldThreshold closure can

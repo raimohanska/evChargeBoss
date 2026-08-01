@@ -45,6 +45,20 @@ export function formatHHMM(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+/**
+ * Normalize an MQTT time payload (HH:MM or HH:MM:SS) to zero-padded HH:MM.
+ * Returns null for anything that is not a valid clock time.
+ */
+export function normalizeTimePayload(payload: string): string | null {
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(payload.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  const sec = m[3] !== undefined ? Number(m[3]) : 0;
+  if (h > 23 || min > 59 || sec > 59) return null;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
 export function floorToSlotStart(date: Date): Date {
   const slot = new Date(date);
   slot.setMinutes(Math.floor(slot.getMinutes() / 15) * 15, 0, 0);

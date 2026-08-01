@@ -1,8 +1,9 @@
 import type { MqttClient } from "./mqtt-client.ts";
-import type { EvChargingConfig } from "./config.ts";
+import type { DayOfWeek, EvChargingConfig, WeeklySchedule } from "./config.ts";
 import type { Slot } from "./types.ts";
 import { makeLogger } from "../utils/log.ts";
-import { resolveTargetTime, formatHHMM } from "./helpers.ts";
+import { resolveTargetTime, formatHHMM, normalizeTimePayload } from "./helpers.ts";
+import { updateConfigWeeklySchedule } from "../config.ts";
 
 const log = makeLogger("ev-charging");
 
@@ -14,6 +15,38 @@ const DEVICE = {
   identifiers: [DEVICE_ID],
   name: "EV Charge Boss",
 };
+
+const WEEKDAYS: ReadonlyArray<{ key: DayOfWeek; name: string }> = [
+  { key: "mon", name: "Monday" },
+  { key: "tue", name: "Tuesday" },
+  { key: "wed", name: "Wednesday" },
+  { key: "thu", name: "Thursday" },
+  { key: "fri", name: "Friday" },
+  { key: "sat", name: "Saturday" },
+  { key: "sun", name: "Sunday" },
+];
+
+function scheduleStateTopic(day: DayOfWeek): string {
+  return `${BASE}/schedule/${day}/state`;
+}
+
+function scheduleSetTopic(day: DayOfWeek): string {
+  return `${BASE}/schedule/${day}/set`;
+}
+
+function dayForStateTopic(topic: string): DayOfWeek | null {
+  for (const { key } of WEEKDAYS) {
+    if (topic === scheduleStateTopic(key)) return key;
+  }
+  return null;
+}
+
+function dayForSetTopic(topic: string): DayOfWeek | null {
+  for (const { key } of WEEKDAYS) {
+    if (topic === scheduleSetTopic(key)) return key;
+  }
+  return null;
+}
 
 interface SensorDef {
   id: string;
@@ -48,16 +81,22 @@ function discoveryTopic(id: string) {
 export class StatusPublisher {
   private client: MqttClient;
   private config: EvChargingConfig;
+  private configPath: string | undefined;
   private targetTimeOverride: string | null = null;
   private readonly timeStateTopic = `${BASE}/target_time/state`;
   private _resolveInitialTargetTime: (() => void) | null = null;
   private targetKwhOverride: number | null = null;
   private readonly kwhStateTopic = `${BASE}/target_kwh/state`;
   private _resolveInitialTargetKwh: (() => void) | null = null;
+  private weeklySchedule: WeeklySchedule;
+  private recoveredScheduleDays = new Set<DayOfWeek>();
+  private _resolveInitialWeeklySchedule: (() => void) | null = null;
 
-  constructor(client: MqttClient, config: EvChargingConfig) {
+  constructor(client: MqttClient, config: EvChargingConfig, configPath?: string) {
     this.client = client;
     this.config = config;
+    this.configPath = configPath;
+    this.weeklySchedule = { ...config.weeklySchedule };
     this.initializeDiscovery();
   }
 
@@ -84,7 +123,7 @@ export class StatusPublisher {
     this.targetTimeOverride = null;
     // Publish the schedule-aware default so HA shows the correct next target
     // time instead of retaining the stale Charge Now override.
-    const resolved = resolveTargetTime(this.config.targetTime, this.config.weeklySchedule, now);
+    const resolved = this.resolveTargetTimeFromSchedule(now);
     this.pub(this.timeStateTopic, formatHHMM(resolved));
   }
 
@@ -125,11 +164,7 @@ export class StatusPublisher {
       setTimeout(() => {
         if (this._resolveInitialTargetTime !== null) {
           this._resolveInitialTargetTime = null;
-          const defaultTime = resolveTargetTime(
-            this.config.targetTime,
-            this.config.weeklySchedule,
-            new Date(),
-          );
+          const defaultTime = this.resolveTargetTimeFromSchedule(new Date());
           log(
             `[MQTT] No retained target time within ${timeoutMs}ms - using ${formatHHMM(defaultTime)}`,
           );
@@ -138,12 +173,52 @@ export class StatusPublisher {
       }, timeoutMs);
     });
     // Now publish the confirmed value (deferred from initializeDiscovery).
-    const fallback = resolveTargetTime(
-      this.config.targetTime,
-      this.config.weeklySchedule,
-      new Date(),
-    );
+    const fallback = this.resolveTargetTimeFromSchedule(new Date());
     this.pub(this.timeStateTopic, this.targetTimeOverride ?? formatHHMM(fallback));
+  }
+
+  /**
+   * Recovers the per-day charging schedule from retained MQTT state, then
+   * publishes the confirmed value for every weekday to its state topic.
+   * Must be called once after construction and before runSession().
+   */
+  async waitForInitialWeeklySchedule(timeoutMs = 2000): Promise<void> {
+    if (this.recoveredScheduleDays.size >= WEEKDAYS.length) {
+      log("[MQTT] Weekly schedule recovered from retained state.");
+    } else {
+      await new Promise<void>((resolve) => {
+        this._resolveInitialWeeklySchedule = resolve;
+        setTimeout(() => {
+          if (this._resolveInitialWeeklySchedule !== null) {
+            this._resolveInitialWeeklySchedule = null;
+            log("[MQTT] Weekly schedule retained recovery timed out - using config values.");
+            resolve();
+          }
+        }, timeoutMs);
+      });
+    }
+    for (const { key } of WEEKDAYS) {
+      this.pub(scheduleStateTopic(key), this.weeklySchedule[key] ?? this.config.targetTime);
+    }
+  }
+
+  /**
+   * Resolve the next charge deadline from the runtime weekly schedule
+   * (config seeded, MQTT-editable), falling back to targetTime per day.
+   */
+  resolveTargetTimeFromSchedule(now: Date): Date {
+    return resolveTargetTime(this.config.targetTime, this.weeklySchedule, now);
+  }
+
+  private maybeResolveScheduleRecovery(): void {
+    if (
+      this._resolveInitialWeeklySchedule !== null &&
+      this.recoveredScheduleDays.size >= WEEKDAYS.length
+    ) {
+      const resolve = this._resolveInitialWeeklySchedule;
+      this._resolveInitialWeeklySchedule = null;
+      resolve();
+    }
   }
 
   private state: Record<string, string> = {
@@ -221,6 +296,30 @@ export class StatusPublisher {
     });
     this.pub(`${DISCOVERY}/button/${DEVICE_ID}_charge_now/config`, chargeNowDiscoveryPayload, true);
 
+    // HA time entities: one per weekday for the charging deadline schedule.
+    // State topics are published by waitForInitialWeeklySchedule (after retained
+    // recovery), not here, so our own publishes never race the recovery.
+    for (const { key, name } of WEEKDAYS) {
+      const stateTopic = scheduleStateTopic(key);
+      const setTopic = scheduleSetTopic(key);
+      const discoveryPayload = JSON.stringify({
+        unique_id: `${DEVICE_ID}_target_time_${key}`,
+        name: `${name} Target Time`,
+        icon: "mdi:calendar-clock",
+        state_topic: stateTopic,
+        command_topic: setTopic,
+        value_template: "{{ today_at(value) }}",
+        device: DEVICE,
+      });
+      this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time_${key}/config`, discoveryPayload, true);
+      this.client.subscribe(stateTopic, (err) => {
+        if (err) log(`[MQTT status] subscribe error on ${stateTopic}: ${err.message}`);
+      });
+      this.client.subscribe(setTopic, (err) => {
+        if (err) log(`[MQTT status] subscribe error on ${setTopic}: ${err.message}`);
+      });
+    }
+
     // Subscribe to our own state topic first so we can recover any retained override
     // before publishing the initial state (see waitForInitialTargetTime).
     this.client.subscribe(timeStateTopic, (err) => {
@@ -280,6 +379,32 @@ export class StatusPublisher {
         this.pub(timeStateTopic, newTime);
         this.chargeNowCallback?.();
         this.wakeCallback?.();
+      } else {
+        const stateDay = dayForStateTopic(topic);
+        if (stateDay !== null && this._resolveInitialWeeklySchedule !== null) {
+          // Retained startup value — recover the runtime schedule only while
+          // waitForInitialWeeklySchedule is active (mirrors the target-time and
+          // target-kWh recovery).  Later state messages are our own echoes and
+          // set edits already update weeklySchedule via the set topic.
+          const t = normalizeTimePayload(payload.toString());
+          if (t) {
+            this.weeklySchedule[stateDay] = t;
+            this.recoveredScheduleDays.add(stateDay);
+          }
+          this.maybeResolveScheduleRecovery();
+        } else {
+          const setDay = dayForSetTopic(topic);
+          if (setDay !== null) {
+            const t = normalizeTimePayload(payload.toString());
+            if (!t) return;
+            if (this.weeklySchedule[setDay] === t) return;
+            this.weeklySchedule[setDay] = t;
+            log(`[MQTT] Schedule ${setDay} updated to ${t}`);
+            this.pub(scheduleStateTopic(setDay), t);
+            if (this.configPath) updateConfigWeeklySchedule(this.configPath, setDay, t);
+            this.wakeCallback?.();
+          }
+        }
       }
     });
 

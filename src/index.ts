@@ -60,7 +60,7 @@ import { runElectricityPoller } from "./electricity/poller.ts";
 const configPath = getConfigPath();
 const config = loadConfig();
 
-const loops: Promise<void>[] = [runEvCharging(config)];
+const loops: Promise<void>[] = [runEvCharging(config, configPath)];
 for (const [id, spConfig] of Object.entries(config.setpointControl ?? {}))
   loops.push(runSetpointControl(id, spConfig, config, configPath));
 if (config.mqttToInflux) loops.push(runMqttToInflux(config));

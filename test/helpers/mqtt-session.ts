@@ -5,6 +5,7 @@ import { StatusPublisher } from "../../src/ev-charging/mqtt-status.ts";
 import { makeClock } from "../../src/utils/timing-utils.ts";
 import { runSession } from "../../src/ev-charging/coordinator.ts";
 import type { Config, MqttConfig } from "../../src/config.ts";
+import type { DayOfWeek } from "../../src/ev-charging/config.ts";
 import type { SessionSummary } from "../../src/influx.ts";
 import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
 import { makeTestConfig } from "./config.ts";
@@ -19,6 +20,9 @@ const TARGET_TIME_SET_TOPIC = "evchargeboss/target_time/set";
 const TARGET_TIME_STATE_TOPIC = "evchargeboss/target_time/state";
 const TARGET_KWH_SET_TOPIC = "evchargeboss/target_kwh/set";
 const TARGET_KWH_STATE_TOPIC = "evchargeboss/target_kwh/state";
+const WEEKDAYS: readonly DayOfWeek[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const scheduleStateTopic = (day: DayOfWeek) => `evchargeboss/schedule/${day}/state`;
+const scheduleSetTopic = (day: DayOfWeek) => `evchargeboss/schedule/${day}/set`;
 
 export interface MqttTestSession {
   loopPromise: Promise<void>;
@@ -27,6 +31,10 @@ export interface MqttTestSession {
   publishTargetTime(time: string): void;
   /** Publish a target-kWh change via MQTT, triggering an immediate replan. */
   publishTargetKwh(kwh: number): void;
+  /** Publish a per-day schedule time (HH:MM or HH:MM:SS) via MQTT. */
+  publishScheduleTime(day: DayOfWeek, time: string): void;
+  /** Last value of a per-day schedule state topic received via MQTT — null if none yet. */
+  scheduleState(day: DayOfWeek): string | null;
   /**
    * Publish a heating power reading (watts) to the holdWhenHeating topic.
    * Use this to trigger or release a hold during tests.
@@ -62,7 +70,17 @@ export async function startMqttSession(
   mqttOverrides: Partial<MqttConfig> = {},
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
   initialPlanData?: object,
-  sessionOptions: { suppressPower?: boolean; holdThreshold?: number } = {},
+  sessionOptions: {
+    suppressPower?: boolean;
+    holdThreshold?: number;
+    /**
+     * Retained schedule values to pre-publish before StatusPublisher starts,
+     * so waitForInitialWeeklySchedule recovers them. Also enables the wait.
+     */
+    initialScheduleState?: Partial<Record<DayOfWeek, string>>;
+    /** Optional config file path passed to StatusPublisher for write-back. */
+    configPath?: string;
+  } = {},
 ): Promise<MqttTestSession> {
   // Isolate plan files per test session so tests don't interfere with each other.
   const sessionId = `${process.pid}-${++_sessionCounter}`;
@@ -111,6 +129,7 @@ export async function startMqttSession(
   let _sessionSummary: SessionSummary | null = null;
   let _lastTargetTimeState: string | null = null;
   let _lastTargetKwhState: number | null = null;
+  const _lastScheduleState = new Map<DayOfWeek, string>();
 
   // Subscribe controlClient to observable topics BEFORE creating StatusPublisher so we
   // don't miss the "Starting…" retained message from initializeDiscovery().
@@ -127,6 +146,14 @@ export async function startMqttSession(
     new Promise<void>((resolve, reject) => {
       controlClient.subscribe(TARGET_KWH_STATE_TOPIC, (err) => (err ? reject(err) : resolve()));
     }),
+    ...WEEKDAYS.map(
+      (day) =>
+        new Promise<void>((resolve, reject) => {
+          controlClient.subscribe(scheduleStateTopic(day), (err) =>
+            err ? reject(err) : resolve(),
+          );
+        }),
+    ),
   ]);
 
   controlClient.on("message", (topic: string, payload: Buffer) => {
@@ -151,14 +178,33 @@ export async function startMqttSession(
     } else if (topic === TARGET_KWH_STATE_TOPIC && value.length > 0) {
       const n = parseFloat(value);
       if (!isNaN(n)) _lastTargetKwhState = n;
+    } else {
+      const day = WEEKDAYS.find((d) => topic === scheduleStateTopic(d));
+      if (day && value.length > 0) _lastScheduleState.set(day, value);
     }
   });
 
-  const clock = makeClock(speedup, from);
+  // Pre-publish retained schedule values so waitForInitialWeeklySchedule can
+  // recover them (simulates a previous run that had persisted schedule edits).
+  for (const [day, time] of Object.entries(sessionOptions.initialScheduleState ?? {})) {
+    controlClient.publish(scheduleStateTopic(day as DayOfWeek), time, { retain: true });
+  }
 
   // Real StatusPublisher — initializeDiscovery() publishes "Starting…" (retained) which
   // wakes the controlClient subscription above.
-  const publisher = new StatusPublisher(sessionClient, config.evCharging);
+  const publisher = new StatusPublisher(
+    sessionClient,
+    config.evCharging,
+    sessionOptions.configPath,
+  );
+  if (sessionOptions.initialScheduleState) {
+    await publisher.waitForInitialWeeklySchedule(2000);
+  }
+
+  // Create the virtual clock only after the retained-recovery wait: the clock
+  // advances with real elapsed time × speedup, so waiting 2000ms at 10 000×
+  // would otherwise shift every relay timestamp forward by ~5.5 hours.
+  const clock = makeClock(speedup, from);
 
   const session = makeMqttSession(
     sessionClient,
@@ -199,6 +245,10 @@ export async function startMqttSession(
     publishTargetKwh(kwh: number) {
       controlClient.publish(TARGET_KWH_SET_TOPIC, String(kwh));
     },
+    publishScheduleTime(day: DayOfWeek, time: string) {
+      controlClient.publish(scheduleSetTopic(day), time);
+    },
+    scheduleState: (day: DayOfWeek) => _lastScheduleState.get(day) ?? null,
     publishHeatingPower(watts: number) {
       const h = config.evCharging.holdWhenHeating;
       if (!h) return;
@@ -226,6 +276,10 @@ export async function startMqttSession(
       controlClient.publish("evchargeboss/target_time/state", Buffer.alloc(0), { retain: true });
       // Clear the retained target_kwh/state for the same reason.
       controlClient.publish("evchargeboss/target_kwh/state", Buffer.alloc(0), { retain: true });
+      // Clear retained per-day schedule states for the same reason.
+      for (const day of WEEKDAYS) {
+        controlClient.publish(scheduleStateTopic(day), Buffer.alloc(0), { retain: true });
+      }
       // Force-close so the TCP socket is gone before the next test creates new connections.
       sessionClient.end(true);
       relayClient.end(true);

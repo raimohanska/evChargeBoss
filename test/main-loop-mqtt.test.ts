@@ -20,8 +20,12 @@
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { MqttRelaySimulator } from "./helpers/mqtt-relay-simulator.ts";
+import { loadConfig } from "../src/config.ts";
 
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
@@ -796,7 +800,6 @@ describe("main-loop MQTT integration — charge level re-plan", { concurrency: f
       teardown();
     }
   });
-
   test("Charge level change does NOT trigger re-plan when chargedKwh>0", async () => {
     // This test verifies that once charging has started (chargedKwh > 0),
     // charge level changes do NOT trigger a re-plan.
@@ -817,6 +820,7 @@ describe("main-loop MQTT integration — charge level re-plan", { concurrency: f
       await relay.assertOff("2026-04-18T17:30"); // enters overnight-gap sleep
 
       // Wait for charging to start at 10:00.
+
       await relay.assertOn("2026-04-19T10:00");
 
       // Now chargedKwh > 0. Publish a different charge level.
@@ -834,3 +838,79 @@ describe("main-loop MQTT integration — charge level re-plan", { concurrency: f
     }
   });
 }); // describe "main-loop MQTT integration — charge level re-plan"
+
+describe("main-loop MQTT integration — weekly charging schedule", { concurrency: false }, () => {
+  /**
+   * FROM = Saturday 2026-04-18T17:00.  The default targetTime="12:00" puts all
+   * charging at 10:00 next day (relay: ON 17:00 -> OFF 17:10 -> ON 10:00).
+   * Setting the Saturday schedule to 21:00 makes the deadline this evening, so
+   * the loop replans and charging restarts immediately.
+   */
+  test("Schedule set via MQTT updates state topic, runtime plan, and config write-back", async () => {
+    // Temp copy of the config so write-back never touches the shared fixture.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "evcb-schedule-"));
+    const configPath = path.join(tmpDir, "config.json");
+    fs.writeFileSync(configPath, JSON.stringify(loadConfig(), null, 2) + "\n", "utf8");
+
+    const { loopPromise, relay, publishScheduleTime, scheduleState, teardown } =
+      await startMqttSession(FROM, SPEEDUP, {}, {}, undefined, undefined, { configPath });
+    try {
+      await relay.assertOn("2026-04-18T17:00"); // plug-in detection
+      await relay.assertOff("2026-04-18T17:10"); // overnight-gap sleep (default 12:00 target)
+
+      // Saturday 21:00 becomes the new deadline while the loop sleeps -> replan.
+      publishScheduleTime("sat", "21:00");
+      await relay.assertOnBefore("2026-04-19T00:00"); // back on the same evening
+
+      // The new value is published to schedule/sat/state.
+      const deadline = Date.now() + 500;
+      while (scheduleState("sat") !== "21:00" && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      assert.equal(scheduleState("sat"), "21:00", "schedule/sat/state must reflect the edit");
+
+      // And persisted to the on-disk config file.
+      const raw = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+        evCharging: { weeklySchedule: Record<string, string> };
+      };
+      assert.equal(raw.evCharging.weeklySchedule.sat, "21:00");
+
+      await loopPromise;
+    } finally {
+      teardown();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("Retained schedule state is recovered at startup and used for planning", async () => {
+    const { loopPromise, relay, scheduleState, teardown } = await startMqttSession(
+      FROM,
+      SPEEDUP,
+      {},
+      {},
+      undefined,
+      undefined,
+      { initialScheduleState: { sat: "21:00" } },
+    );
+    try {
+      // The recovered value is published back to schedule/sat/state.
+      const deadline = Date.now() + 3000;
+      while (scheduleState("sat") !== "21:00" && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      assert.equal(scheduleState("sat"), "21:00", "schedule/sat/state must reflect recovery");
+
+      // Deadline is 21:00 tonight instead of 12:00 next day.  Charging starts
+      // this evening: the relay toggles between non-adjacent slots, then turns
+      // back ON the same evening.  (With the default 12:00 target it would stay
+      // OFF for the overnight gap and only come back at 10:00 next day.)
+      await relay.assertOn("2026-04-18T17:00"); // plug-in detection
+      await relay.assertOff("2026-04-18T22:00"); // gap between this-evening slots
+      await relay.assertOnBefore("2026-04-19T00:00"); // charging resumes tonight
+
+      await loopPromise;
+    } finally {
+      teardown();
+    }
+  });
+}); // describe "main-loop MQTT integration — weekly charging schedule"

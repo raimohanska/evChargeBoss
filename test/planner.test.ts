@@ -1,15 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { localDateTimeString } from "../src/utils/date-time-format.ts";
-import { loadConfig } from "../src/config.ts";
+import { loadConfig, updateConfigWeeklySchedule } from "../src/config.ts";
 
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
 
 const { plan, planFallbackSlot, computePlan } = await import("../src/ev-charging/planner.ts");
-const { parseTargetTime, resolveTargetTime, planChargeStatesChanged } =
+const { parseTargetTime, resolveTargetTime, planChargeStatesChanged, normalizeTimePayload } =
   await import("../src/ev-charging/helpers.ts");
 
 // Fixed planning start: 2026-04-18 14:00 local (Helsinki, UTC+3).
@@ -293,4 +296,80 @@ test("resolveTargetTime: H:MM short format is accepted", () => {
   expected.setDate(expected.getDate() + 1);
   expected.setHours(12, 0, 0, 0);
   assert.equal(result.getTime(), expected.getTime());
+});
+
+// ── normalizeTimePayload ──────────────────────────────────────────────────────
+
+test("normalizeTimePayload: HH:MM passes through", () => {
+  assert.equal(normalizeTimePayload("18:00"), "18:00");
+});
+
+test("normalizeTimePayload: strips seconds from HH:MM:SS", () => {
+  assert.equal(normalizeTimePayload("18:00:00"), "18:00");
+});
+
+test("normalizeTimePayload: pads short hours", () => {
+  assert.equal(normalizeTimePayload("8:00"), "08:00");
+});
+
+test("normalizeTimePayload: rejects malformed values", () => {
+  assert.equal(normalizeTimePayload("18"), null);
+  assert.equal(normalizeTimePayload(""), null);
+  assert.equal(normalizeTimePayload("aa:bb"), null);
+  assert.equal(normalizeTimePayload("24:00"), null);
+  assert.equal(normalizeTimePayload("18:99"), null);
+});
+
+// ── updateConfigWeeklySchedule ────────────────────────────────────────────────
+
+function makeTempConfig(initial: unknown): string {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "evchargeboss-config-"));
+  const file = path.join(dir, "config.json");
+  writeFileSync(file, JSON.stringify(initial, null, 2));
+  return file;
+}
+
+function readJson(file: string): unknown {
+  return JSON.parse(readFileSync(file, "utf8"));
+}
+
+test("updateConfigWeeklySchedule: creates weeklySchedule with the new day, preserving other config", () => {
+  const file = makeTempConfig({ evCharging: { targetTime: "12:00" }, solar: { kwp: 5 } });
+  try {
+    updateConfigWeeklySchedule(file, "mon", "18:30");
+    const raw = readJson(file) as { evCharging: unknown; solar: unknown };
+    assert.deepEqual(raw.evCharging, {
+      targetTime: "12:00",
+      weeklySchedule: { mon: "18:30" },
+    });
+    assert.deepEqual(raw.solar, { kwp: 5 });
+  } finally {
+    rmSync(path.dirname(file), { recursive: true, force: true });
+  }
+});
+
+test("updateConfigWeeklySchedule: preserves other days and overwrites the changed day", () => {
+  const file = makeTempConfig({
+    evCharging: { targetTime: "12:00", weeklySchedule: { sat: "10:00", mon: "12:00" } },
+  });
+  try {
+    updateConfigWeeklySchedule(file, "mon", "18:30");
+    const raw = readJson(file) as { evCharging: { weeklySchedule: Record<string, string> } };
+    assert.deepEqual(raw.evCharging.weeklySchedule, { sat: "10:00", mon: "18:30" });
+  } finally {
+    rmSync(path.dirname(file), { recursive: true, force: true });
+  }
+});
+
+test("updateConfigWeeklySchedule: refuses to write config-example.json", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "evchargeboss-config-"));
+  const file = path.join(dir, "config-example.json");
+  const original = JSON.stringify({ evCharging: { targetTime: "12:00" } }, null, 2);
+  writeFileSync(file, original);
+  try {
+    updateConfigWeeklySchedule(file, "mon", "18:30");
+    assert.equal(readFileSync(file, "utf8"), original);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

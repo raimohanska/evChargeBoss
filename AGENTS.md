@@ -39,9 +39,12 @@ Commit after each completed task; do not batch tasks into one commit unless aske
 - Fixed scenario: start `2026-04-18T17:00:00` local (`FROM` in `test/helpers/config.ts`),
   planner fixture date `2026-04-18T10:00:00`.
 - Cache fixtures live in `test/fixtures/.spot-cache-*.json` / `.solar-cache-*.json`.
-  They are **matched by .gitignore and untracked** — a fresh clone has none, so tests will
-  try to hit the network. Copy them over before assuming a failure is a regression.
-  Never modify a fixture without updating the expected values in the same commit.
+  They are **committed** (the global `.gitignore` matches them, so they were added with
+  `git add -f`). A fresh clone runs the fixed scenario fully offline. Required set is
+  bounded by the fixed dates: spot+solar caches for `2026-04-18`/`2026-04-19` (unit tests,
+  default 12:00 target) plus `2026-04-20` (charge-level re-plan test spans midnight).
+  Add a day's cache only when a test's virtual clock crosses into it. Never modify a
+  fixture without updating the expected values in the same commit.
 - Tests set `CACHE_DIR` / `CONFIG_FILE` via `process.env` at the **top of the file, before
   imports** — `CACHE_DIR` is read at module load in `spot.ts`/`solar.ts`/`poller.ts`, so a
   later assignment is too late.
