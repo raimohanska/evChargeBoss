@@ -24,13 +24,23 @@ export async function fetchSpotPrices(
   });
 
   if (missingDates.length > 0) {
+    // Fetch Today and DayForward separately: they are rate-limited per endpoint,
+    // while the combined TodayAndDayForward endpoint is the one that 429s.
     log(`Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(", ")})`);
-    const res = await fetch("https://api.spot-hinta.fi/TodayAndDayForward");
-    if (!res.ok) throw new Error(`spot-hinta.fi HTTP ${res.status}`);
-    const data = (await res.json()) as SpotHintaEntry[];
+    const responses = await Promise.all(
+      ["https://api.spot-hinta.fi/Today", "https://api.spot-hinta.fi/DayForward"].map(
+        async (url) => {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`spot-hinta.fi HTTP ${res.status}`);
+          return (await res.json()) as SpotHintaEntry[];
+        },
+      ),
+    );
     const map = new Map<number, number>();
-    for (const entry of data) {
-      map.set(new Date(entry.DateTime).getTime(), entry.PriceWithTax);
+    for (const data of responses) {
+      for (const entry of data) {
+        map.set(new Date(entry.DateTime).getTime(), entry.PriceWithTax);
+      }
     }
     if (verbose) log(`  Got ${map.size} quarter-hour price slots`);
     return { map, fresh: true };
