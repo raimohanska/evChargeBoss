@@ -5,3 +5,6 @@ node_modules/
 config.json
 test_run.log
 .worktrees/
+**/.DS_Store
+.plans/
+.claude/settings.local.json
