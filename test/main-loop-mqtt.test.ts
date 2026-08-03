@@ -760,6 +760,160 @@ describe("main-loop MQTT integration", { concurrency: TEST_CONCURRENCY }, () => 
     }
   });
 
+  // ── target time / kWh override recovery on startup ──────────────────────────
+  /**
+   * A retained target_time/state value is only an override if the
+   * target_time/override_active marker is also retained as "1".  A stale value
+   * without a marker (pre-marker-fix legacy data, e.g. a Charge Now that was
+   * never reset) must NOT pin the target on restart — the weekly schedule must
+   * win and the ghost must be cleaned up by publishing the schedule default
+   * and clearing the marker.
+   */
+  test("Startup ignores a stale retained target_time/state without an override marker", async () => {
+    const {
+      loopPromise,
+      relay,
+      targetTimeState,
+      timeOverrideActive,
+      targetTimeOverride,
+      teardown,
+    } = await startMqttSession(FROM, SPEEDUP, {}, {}, undefined, undefined, {
+      initialTargetTime: { time: "09:25" }, // legacy value, no marker published
+    });
+    try {
+      // The stale value must not be installed as an override...
+      assert.equal(targetTimeOverride(), null, "stale retained value must not become an override");
+
+      // ...the schedule default is published to the state topic instead...
+      const deadline = Date.now() + 3000;
+      while (
+        (targetTimeState() !== "12:00" || timeOverrideActive() !== "0") &&
+        Date.now() < deadline
+      ) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      assert.equal(
+        targetTimeState(),
+        "12:00",
+        "schedule default must be published over the stale retained value",
+      );
+      assert.equal(timeOverrideActive(), "0", "override marker must be cleared at startup");
+
+      // ...and planning follows the schedule: charge at 10:00 next day.
+      await relay.assertOn("2026-04-18T17:00"); // plug-in detection
+      await relay.assertOff("2026-04-18T17:10"); // sleeps through the overnight gap
+      relay.skipTo("2026-04-19T09:45");
+      await relay.assertOn("2026-04-19T10:00"); // solar-free slot begins charging
+
+      await loopPromise;
+    } finally {
+      teardown();
+    }
+  });
+
+  /**
+   * An override that is genuinely still active (marker retained as "1") must
+   * survive a restart: it is recovered and used for planning.  When the session
+   * then ends, resetTargetTime clears the marker and republishes the schedule
+   * default, so the NEXT restart falls back to the weekly schedule.
+   */
+  test("Startup recovers an active target_time/state override and clears it after session end", async () => {
+    const {
+      loopPromise,
+      relay,
+      targetTimeState,
+      timeOverrideActive,
+      targetTimeOverride,
+      abort,
+      teardown,
+    } = await startMqttSession(FROM, SPEEDUP, {}, {}, undefined, undefined, {
+      initialTargetTime: { time: "19:00", overrideActive: true },
+    });
+    try {
+      assert.equal(targetTimeOverride(), "19:00", "active override must be recovered at startup");
+
+      const deadline = Date.now() + 3000;
+      while (
+        (targetTimeState() !== "19:00" || timeOverrideActive() !== "1") &&
+        Date.now() < deadline
+      ) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      assert.equal(targetTimeState(), "19:00", "recovered override must be published to state");
+      assert.equal(timeOverrideActive(), "1", "override marker must be active");
+
+      // Charging targets 19:00 this evening — plug-in detection, no overnight gap.
+      await relay.assertOn("2026-04-18T17:00");
+
+      // End the session (as if the target time passed): reset must clear the marker.
+      abort();
+      await loopPromise;
+      const resetDeadline = Date.now() + 500;
+      while (
+        (timeOverrideActive() !== "0" || targetTimeState() !== "12:00") &&
+        Date.now() < resetDeadline
+      ) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      assert.equal(timeOverrideActive(), "0", "reset must clear the override marker");
+      assert.equal(targetTimeState(), "12:00", "reset must publish the schedule default");
+    } finally {
+      teardown();
+    }
+  });
+
+  /**
+   * Same guard for the target-kWh override: a stale retained target_kwh/state
+   * without an active marker must not pin the target on restart.
+   */
+  test("Startup ignores a stale retained target_kwh/state without an override marker", async () => {
+    const { loopPromise, targetKwhState, kwhOverrideActive, targetKwhOverride, abort, teardown } =
+      await startMqttSession(FROM, SPEEDUP, {}, {}, undefined, undefined, {
+        initialTargetKwh: { kwh: 8.1 }, // legacy value, no marker published
+      });
+    try {
+      assert.equal(targetKwhOverride(), null, "stale retained value must not become an override");
+
+      const deadline = Date.now() + 3000;
+      while ((targetKwhState() !== 5 || kwhOverrideActive() !== "0") && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      assert.equal(
+        targetKwhState(),
+        5,
+        "config targetKwh must be published over the stale retained value",
+      );
+      assert.equal(kwhOverrideActive(), "0", "override marker must be cleared at startup");
+
+      abort();
+      await loopPromise;
+    } finally {
+      teardown();
+    }
+  });
+
+  test("Startup recovers an active target_kwh/state override (marker 1)", async () => {
+    const { loopPromise, targetKwhState, kwhOverrideActive, targetKwhOverride, abort, teardown } =
+      await startMqttSession(FROM, SPEEDUP, {}, {}, undefined, undefined, {
+        initialTargetKwh: { kwh: 8.1, overrideActive: true },
+      });
+    try {
+      assert.equal(targetKwhOverride(), 8.1, "active override must be recovered at startup");
+
+      const deadline = Date.now() + 3000;
+      while ((targetKwhState() !== 8.1 || kwhOverrideActive() !== "1") && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      assert.equal(targetKwhState(), 8.1, "recovered override must be published to state");
+      assert.equal(kwhOverrideActive(), "1", "override marker must be active");
+
+      abort();
+      await loopPromise;
+    } finally {
+      teardown();
+    }
+  });
+
   // ── charge level re-plan ──────────────────────────────────────────────────────
   /**
    * When charge level (battery SoC %) changes and chargedKwh is still 0

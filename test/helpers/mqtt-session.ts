@@ -44,8 +44,24 @@ export interface MqttTestSession {
   sessionSummary(): SessionSummary | null;
   /** Last value of the target_time/state topic received via MQTT — null if none yet. */
   targetTimeState(): string | null;
+  /** Last value of the target_time/override_active marker received via MQTT — null if none yet. */
+  timeOverrideActive(): string | null;
   /** Last value of the target_kwh/state topic received via MQTT — null if none yet. */
   targetKwhState(): number | null;
+  /** Last value of the target_kwh/override_active marker received via MQTT — null if none yet. */
+  kwhOverrideActive(): string | null;
+  /**
+   * The runtime target-time override installed by StatusPublisher — null when
+   * none is active (the weekly schedule governs instead). Reads the in-memory
+   * state, not the MQTT topic, so it is immune to controlClient echoes.
+   */
+  targetTimeOverride(): string | null;
+  /**
+   * The runtime target-kWh override installed by StatusPublisher — null when
+   * none is active (config.targetKwh governs instead). Reads the in-memory
+   * state, not the MQTT topic, so it is immune to controlClient echoes.
+   */
+  targetKwhOverride(): number | null;
   /**
    * Deduplicated sequence of status values received via MQTT.
    * Recording starts from the first "Starting..." message emitted by StatusPublisher,
@@ -72,6 +88,20 @@ export async function startMqttSession(
      * so waitForInitialWeeklySchedule recovers them. Also enables the wait.
      */
     initialScheduleState?: Partial<Record<DayOfWeek, string>>;
+    /**
+     * Retained target-time state + override marker to pre-publish before
+     * StatusPublisher starts, so waitForInitialTargetTime can recover them.
+     * Also enables the wait. When overrideActive is omitted, no marker is
+     * published at all — the legacy state (value present, marker absent).
+     */
+    initialTargetTime?: { time: string; overrideActive?: boolean };
+    /**
+     * Retained target-kWh state + override marker to pre-publish before
+     * StatusPublisher starts, so waitForInitialTargetKwh can recover them.
+     * Also enables the wait. When overrideActive is omitted, no marker is
+     * published at all — the legacy state (value present, marker absent).
+     */
+    initialTargetKwh?: { kwh: number; overrideActive?: boolean };
     /** Optional config file path passed to StatusPublisher for write-back. */
     configPath?: string;
   } = {},
@@ -90,8 +120,10 @@ export async function startMqttSession(
   const CHARGED_ENERGY_TOPIC = `${topicPrefix}/charged_energy`;
   const TARGET_TIME_SET_TOPIC = `${topicPrefix}/target_time/set`;
   const TARGET_TIME_STATE_TOPIC = `${topicPrefix}/target_time/state`;
+  const TARGET_TIME_OVERRIDE_TOPIC = `${topicPrefix}/target_time/override_active`;
   const TARGET_KWH_SET_TOPIC = `${topicPrefix}/target_kwh/set`;
   const TARGET_KWH_STATE_TOPIC = `${topicPrefix}/target_kwh/state`;
+  const TARGET_KWH_OVERRIDE_TOPIC = `${topicPrefix}/target_kwh/override_active`;
   const WEEKDAYS: readonly DayOfWeek[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
   const scheduleStateTopic = (day: DayOfWeek) => `${topicPrefix}/schedule/${day}/state`;
   const scheduleSetTopic = (day: DayOfWeek) => `${topicPrefix}/schedule/${day}/set`;
@@ -139,6 +171,8 @@ export async function startMqttSession(
   let _sessionSummary: SessionSummary | null = null;
   let _lastTargetTimeState: string | null = null;
   let _lastTargetKwhState: number | null = null;
+  let _lastTimeOverrideActive: string | null = null;
+  let _lastKwhOverrideActive: string | null = null;
   const _lastScheduleState = new Map<DayOfWeek, string>();
 
   // Subscribe controlClient to observable topics BEFORE creating StatusPublisher so we
@@ -154,7 +188,13 @@ export async function startMqttSession(
       controlClient.subscribe(TARGET_TIME_STATE_TOPIC, (err) => (err ? reject(err) : resolve()));
     }),
     new Promise<void>((resolve, reject) => {
+      controlClient.subscribe(TARGET_TIME_OVERRIDE_TOPIC, (err) => (err ? reject(err) : resolve()));
+    }),
+    new Promise<void>((resolve, reject) => {
       controlClient.subscribe(TARGET_KWH_STATE_TOPIC, (err) => (err ? reject(err) : resolve()));
+    }),
+    new Promise<void>((resolve, reject) => {
+      controlClient.subscribe(TARGET_KWH_OVERRIDE_TOPIC, (err) => (err ? reject(err) : resolve()));
     }),
     ...WEEKDAYS.map(
       (day) =>
@@ -185,9 +225,13 @@ export async function startMqttSession(
       if (!isNaN(n)) _lastChargedEnergy = n;
     } else if (topic === TARGET_TIME_STATE_TOPIC && value.length > 0) {
       _lastTargetTimeState = value;
+    } else if (topic === TARGET_TIME_OVERRIDE_TOPIC && value.length > 0) {
+      _lastTimeOverrideActive = value;
     } else if (topic === TARGET_KWH_STATE_TOPIC && value.length > 0) {
       const n = parseFloat(value);
       if (!isNaN(n)) _lastTargetKwhState = n;
+    } else if (topic === TARGET_KWH_OVERRIDE_TOPIC && value.length > 0) {
+      _lastKwhOverrideActive = value;
     } else {
       const day = WEEKDAYS.find((d) => topic === scheduleStateTopic(d));
       if (day && value.length > 0) _lastScheduleState.set(day, value);
@@ -199,6 +243,33 @@ export async function startMqttSession(
   for (const [day, time] of Object.entries(sessionOptions.initialScheduleState ?? {})) {
     controlClient.publish(scheduleStateTopic(day as DayOfWeek), time, { retain: true });
   }
+  // Pre-publish retained target-time / target-kWh state with their override
+  // marker so waitForInitialTargetTime/Kwh can recover them (simulates a
+  // previous run that had set an override — or a legacy value without a marker).
+  if (sessionOptions.initialTargetTime) {
+    controlClient.publish(TARGET_TIME_STATE_TOPIC, sessionOptions.initialTargetTime.time, {
+      retain: true,
+    });
+    if (sessionOptions.initialTargetTime.overrideActive !== undefined) {
+      controlClient.publish(
+        TARGET_TIME_OVERRIDE_TOPIC,
+        sessionOptions.initialTargetTime.overrideActive ? "1" : "0",
+        { retain: true },
+      );
+    }
+  }
+  if (sessionOptions.initialTargetKwh) {
+    controlClient.publish(TARGET_KWH_STATE_TOPIC, String(sessionOptions.initialTargetKwh.kwh), {
+      retain: true,
+    });
+    if (sessionOptions.initialTargetKwh.overrideActive !== undefined) {
+      controlClient.publish(
+        TARGET_KWH_OVERRIDE_TOPIC,
+        sessionOptions.initialTargetKwh.overrideActive ? "1" : "0",
+        { retain: true },
+      );
+    }
+  }
 
   // Real StatusPublisher — initializeDiscovery() publishes "Starting…" (retained) which
   // wakes the controlClient subscription above.
@@ -209,6 +280,12 @@ export async function startMqttSession(
   );
   if (sessionOptions.initialScheduleState) {
     await publisher.waitForInitialWeeklySchedule(2000);
+  }
+  if (sessionOptions.initialTargetTime) {
+    await publisher.waitForInitialTargetTime(2000);
+  }
+  if (sessionOptions.initialTargetKwh) {
+    await publisher.waitForInitialTargetKwh(2000);
   }
 
   // Create the virtual clock only after the retained-recovery wait: the clock
@@ -290,7 +367,11 @@ export async function startMqttSession(
     chargedEnergy: () => _lastChargedEnergy,
     sessionSummary: () => _sessionSummary,
     targetTimeState: () => _lastTargetTimeState,
+    timeOverrideActive: () => _lastTimeOverrideActive,
     targetKwhState: () => _lastTargetKwhState,
+    kwhOverrideActive: () => _lastKwhOverrideActive,
+    targetTimeOverride: () => publisher.getTargetTimeOverride(),
+    targetKwhOverride: () => publisher.getTargetKwhOverride(),
     statusHistory: () => _statusHistory,
     abort() {
       sessionCanceller.abort();
@@ -300,8 +381,12 @@ export async function startMqttSession(
       // Clear the retained target_time/state so a changed target time in this
       // test cannot bleed into the next test's StatusPublisher startup.
       controlClient.publish(TARGET_TIME_STATE_TOPIC, Buffer.alloc(0), { retain: true });
+      // Clear the retained override marker for the same reason.
+      controlClient.publish(TARGET_TIME_OVERRIDE_TOPIC, Buffer.alloc(0), { retain: true });
       // Clear the retained target_kwh/state for the same reason.
       controlClient.publish(TARGET_KWH_STATE_TOPIC, Buffer.alloc(0), { retain: true });
+      // Clear the retained override marker for the same reason.
+      controlClient.publish(TARGET_KWH_OVERRIDE_TOPIC, Buffer.alloc(0), { retain: true });
       // Clear retained per-day schedule states for the same reason.
       for (const day of WEEKDAYS) {
         controlClient.publish(scheduleStateTopic(day), Buffer.alloc(0), { retain: true });

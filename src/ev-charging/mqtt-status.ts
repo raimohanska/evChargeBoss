@@ -50,10 +50,16 @@ export class StatusPublisher {
   private readonly device: { identifiers: string[]; name: string };
   private targetTimeOverride: string | null = null;
   private readonly timeStateTopic: string;
+  private readonly timeOverrideActiveTopic: string;
   private _resolveInitialTargetTime: (() => void) | null = null;
+  private pendingTimeOverride: string | null = null;
+  private pendingTimeMarker: boolean | null = null;
   private targetKwhOverride: number | null = null;
   private readonly kwhStateTopic: string;
+  private readonly kwhOverrideActiveTopic: string;
   private _resolveInitialTargetKwh: (() => void) | null = null;
+  private pendingKwhOverride: number | null = null;
+  private pendingKwhMarker: boolean | null = null;
   private weeklySchedule: WeeklySchedule;
   private recoveredScheduleDays = new Set<DayOfWeek>();
   private _resolveInitialWeeklySchedule: (() => void) | null = null;
@@ -65,7 +71,9 @@ export class StatusPublisher {
     this.base = config.topicPrefix ?? "evchargeboss";
     this.device = { identifiers: [this.base], name: "EV Charge Boss" };
     this.timeStateTopic = `${this.base}/target_time/state`;
+    this.timeOverrideActiveTopic = `${this.base}/target_time/override_active`;
     this.kwhStateTopic = `${this.base}/target_kwh/state`;
+    this.kwhOverrideActiveTopic = `${this.base}/target_kwh/override_active`;
     this.weeklySchedule = { ...config.weeklySchedule };
     this.initializeDiscovery();
   }
@@ -121,6 +129,9 @@ export class StatusPublisher {
 
   resetTargetTime(now: Date): void {
     this.targetTimeOverride = null;
+    // Clear the override marker: the retained target_time/state value must not
+    // be treated as an override on the next boot.
+    this.pub(this.timeOverrideActiveTopic, "0");
     // Publish the schedule-aware default so HA shows the correct next target
     // time instead of retaining the stale Charge Now override.
     const resolved = this.resolveTargetTimeFromSchedule(now);
@@ -129,6 +140,9 @@ export class StatusPublisher {
 
   resetTargetKwh(): void {
     this.targetKwhOverride = null;
+    // See resetTargetTime: without the cleared marker the next boot would adopt
+    // the retained target_kwh/state as an override.
+    this.pub(this.kwhOverrideActiveTopic, "0");
     this.pub(this.kwhStateTopic, String(this.config.targetKwh));
   }
 
@@ -138,6 +152,8 @@ export class StatusPublisher {
    * Must be called once after construction and before runSession().
    */
   async waitForInitialTargetKwh(timeoutMs = 2000): Promise<void> {
+    this.pendingKwhOverride = null;
+    this.pendingKwhMarker = null;
     await new Promise<void>((resolve) => {
       this._resolveInitialTargetKwh = resolve;
       setTimeout(() => {
@@ -150,7 +166,18 @@ export class StatusPublisher {
         }
       }, timeoutMs);
     });
-    this.pub(this.kwhStateTopic, String(this.targetKwhOverride ?? this.config.targetKwh));
+    if (this.pendingKwhMarker === true && this.pendingKwhOverride !== null) {
+      // Only a retained state value accompanied by an active override marker is
+      // a real override.  Anything else (legacy value without a marker, or a
+      // cleared marker) is a display echo and must not pin the target.
+      this.targetKwhOverride = this.pendingKwhOverride;
+      this.pub(this.kwhOverrideActiveTopic, "1");
+      this.pub(this.kwhStateTopic, String(this.targetKwhOverride));
+    } else {
+      this.targetKwhOverride = null;
+      this.pub(this.kwhOverrideActiveTopic, "0");
+      this.pub(this.kwhStateTopic, String(this.config.targetKwh));
+    }
   }
 
   /**
@@ -159,6 +186,8 @@ export class StatusPublisher {
    * Must be called once after construction and before runSession().
    */
   async waitForInitialTargetTime(timeoutMs = 2000): Promise<void> {
+    this.pendingTimeOverride = null;
+    this.pendingTimeMarker = null;
     await new Promise<void>((resolve) => {
       this._resolveInitialTargetTime = resolve;
       setTimeout(() => {
@@ -174,7 +203,38 @@ export class StatusPublisher {
     });
     // Now publish the confirmed value (deferred from initializeDiscovery).
     const fallback = this.resolveTargetTimeFromSchedule(new Date());
-    this.pub(this.timeStateTopic, this.targetTimeOverride ?? formatHHMM(fallback));
+    if (this.pendingTimeMarker === true && this.pendingTimeOverride !== null) {
+      // Only a retained state value accompanied by an active override marker is
+      // a real override.  Anything else (legacy value without a marker, or a
+      // cleared marker) is a display echo and must not pin the target.
+      this.targetTimeOverride = this.pendingTimeOverride;
+      this.pub(this.timeOverrideActiveTopic, "1");
+      this.pub(this.timeStateTopic, this.pendingTimeOverride);
+    } else {
+      this.targetTimeOverride = null;
+      this.pub(this.timeOverrideActiveTopic, "0");
+      this.pub(this.timeStateTopic, formatHHMM(fallback));
+    }
+  }
+
+  private maybeResolveTimeRecovery(): void {
+    if (this._resolveInitialTargetTime === null) return;
+    if (this.pendingTimeMarker === null) return;
+    if (this.pendingTimeMarker === false || this.pendingTimeOverride !== null) {
+      const resolve = this._resolveInitialTargetTime;
+      this._resolveInitialTargetTime = null;
+      resolve();
+    }
+  }
+
+  private maybeResolveKwhRecovery(): void {
+    if (this._resolveInitialTargetKwh === null) return;
+    if (this.pendingKwhMarker === null) return;
+    if (this.pendingKwhMarker === false || this.pendingKwhOverride !== null) {
+      const resolve = this._resolveInitialTargetKwh;
+      this._resolveInitialTargetKwh = null;
+      resolve();
+    }
   }
 
   /**
@@ -325,10 +385,16 @@ export class StatusPublisher {
     this.client.subscribe(timeStateTopic, (err) => {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
     });
+    this.client.subscribe(this.timeOverrideActiveTopic, (err) => {
+      if (err) log(`[MQTT status] subscribe error: ${err.message}`);
+    });
     this.client.subscribe(timeCmdTopic, (err) => {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
     });
     this.client.subscribe(kwhStateTopic, (err) => {
+      if (err) log(`[MQTT status] subscribe error: ${err.message}`);
+    });
+    this.client.subscribe(this.kwhOverrideActiveTopic, (err) => {
       if (err) log(`[MQTT status] subscribe error: ${err.message}`);
     });
     this.client.subscribe(kwhCmdTopic, (err) => {
@@ -339,15 +405,19 @@ export class StatusPublisher {
     });
     this.client.on("message", (topic: string, payload: Buffer) => {
       if (topic === timeStateTopic && this._resolveInitialTargetTime !== null) {
-        // Retained startup value — recover the override before we publish ours.
+        // Retained startup value — stage it, but only adopt it as an override if
+        // the override_active marker confirms it (see waitForInitialTargetTime).
         const parts = payload.toString().trim().split(":");
         if (parts.length >= 2) {
-          const override = `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
-          this.targetTimeOverride = override;
+          this.pendingTimeOverride = `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
         }
-        const resolve = this._resolveInitialTargetTime;
-        this._resolveInitialTargetTime = null;
-        resolve();
+        this.maybeResolveTimeRecovery();
+      } else if (
+        topic === this.timeOverrideActiveTopic &&
+        this._resolveInitialTargetTime !== null
+      ) {
+        this.pendingTimeMarker = payload.toString().trim() === "1";
+        this.maybeResolveTimeRecovery();
       } else if (topic === timeCmdTopic) {
         const parts = payload.toString().trim().split(":");
         if (parts.length < 2) return;
@@ -355,21 +425,24 @@ export class StatusPublisher {
         this.targetTimeOverride = newTime;
         log(`[MQTT] Target time updated to ${newTime}`);
         this.pub(timeStateTopic, newTime);
+        this.pub(this.timeOverrideActiveTopic, "1");
         this.wakeCallback?.();
       } else if (topic === kwhStateTopic && this._resolveInitialTargetKwh !== null) {
         const v = parseFloat(payload.toString().trim());
         if (v > 0) {
-          this.targetKwhOverride = v;
+          this.pendingKwhOverride = v;
         }
-        const resolve = this._resolveInitialTargetKwh;
-        this._resolveInitialTargetKwh = null;
-        resolve();
+        this.maybeResolveKwhRecovery();
+      } else if (topic === this.kwhOverrideActiveTopic && this._resolveInitialTargetKwh !== null) {
+        this.pendingKwhMarker = payload.toString().trim() === "1";
+        this.maybeResolveKwhRecovery();
       } else if (topic === kwhCmdTopic) {
         const v = parseFloat(payload.toString().trim());
         if (!isFinite(v) || v <= 0) return;
         this.targetKwhOverride = v;
         log(`[MQTT] Target kWh updated to ${v}`);
         this.pub(kwhStateTopic, String(v));
+        this.pub(this.kwhOverrideActiveTopic, "1");
         this.wakeCallback?.();
       } else if (topic === chargeNowCmdTopic && payload.toString().trim() === "PRESS") {
         const target = new Date(Date.now() + chargeNowHours * 3_600_000);
@@ -377,6 +450,7 @@ export class StatusPublisher {
         this.targetTimeOverride = newTime;
         log(`[MQTT] Charge Now pressed -> target time set to ${newTime}`);
         this.pub(timeStateTopic, newTime);
+        this.pub(this.timeOverrideActiveTopic, "1");
         this.chargeNowCallback?.();
         this.wakeCallback?.();
       } else {
