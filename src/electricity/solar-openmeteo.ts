@@ -1,4 +1,5 @@
 import type { SolarConfig } from "./config.ts";
+import { assertNetworkFetchAllowed } from "./no-fetch.ts";
 import { makeLogger } from "../utils/log.ts";
 
 const log = makeLogger("electricity");
@@ -21,6 +22,7 @@ export async function fetchSolarForecastOpenMeteo(
   const { lat, lon, kwp } = solarConfig;
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&forecast_days=2&timezone=auto`;
   if (verbose !== false) log("Fetching solar forecast from " + url);
+  assertNetworkFetchAllowed("Open-Meteo solar fallback");
   const res = await fetch(url);
   if (!res.ok) throw new Error(`open-meteo HTTP ${res.status}`);
   const json = (await res.json()) as OpenMeteoResponse;

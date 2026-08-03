@@ -16,6 +16,7 @@ import { makeTestConfig } from "./helpers/config.ts";
 
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
+process.env.EVCHARGEBOSS_NO_FETCH = "1";
 
 /**
  * Regression: watts message routing must remain active for the whole session.

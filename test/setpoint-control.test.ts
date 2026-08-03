@@ -7,6 +7,7 @@ import { makeClock } from "../src/utils/timing-utils.ts";
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
+process.env.EVCHARGEBOSS_NO_FETCH = "1";
 
 const { planSetpoint } = await import("../src/setpoint-control/planner.ts");
 const { runSetpointControlLoop } = await import("../src/setpoint-control/index.ts");

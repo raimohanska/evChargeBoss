@@ -1,5 +1,6 @@
 import type { SolarConfig } from "./config.ts";
 import { readCache, writeCache } from "./cache.ts";
+import { assertNetworkFetchAllowed } from "./no-fetch.ts";
 import { localDateString, localDateTimeString } from "../utils/date-time-format.ts";
 import { makeLogger } from "../utils/log.ts";
 
@@ -27,6 +28,7 @@ export async function fetchSolarForecast(
     const { lat, lon, declination, azimuth, kwp } = solarConfig;
     const url = `https://api.forecast.solar/estimate/${lat}/${lon}/${declination}/${azimuth}/${kwp}`;
     log("Fetching solar forecast from " + url);
+    assertNetworkFetchAllowed("solar forecast from forecast.solar");
     const res = await fetch(url);
     if (!res.ok) {
       log(`  forecast.solar HTTP ${res.status} - falling back to Open-Meteo`);

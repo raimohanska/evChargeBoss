@@ -10,6 +10,7 @@ import { loadConfig, updateConfigWeeklySchedule } from "../src/config.ts";
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
+process.env.EVCHARGEBOSS_NO_FETCH = "1";
 
 const { plan, planFallbackSlot, computePlan } = await import("../src/ev-charging/planner.ts");
 const { parseTargetTime, resolveTargetTime, planChargeStatesChanged, normalizeTimePayload } =

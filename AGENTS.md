@@ -11,7 +11,7 @@ npm run typecheck       # tsc --noEmit
 npm run build           # tsc + esbuild -> dist/bundle.cjs (single file, Node 12 target)
 npm run format          # prettier --write src/ test/
 npm test                # unit tests (TZ pinned to Europe/Helsinki, concurrency 1)
-npm run test:integration  # slow; needs docker compose up -d
+npm run test:integration  # slow; needs Mosquitto + InfluxDB (devcontainer or `docker compose up -d`)
 ```
 
 Run a single test file:
@@ -30,10 +30,19 @@ Commit after each completed task; do not batch tasks into one commit unless aske
 
 ## Test gotchas
 
+- Tests must never hit the real spot/solar APIs. `src/electricity/no-fetch.ts`
+  throws when `EVCHARGEBOSS_NO_FETCH` is set and a fetch would be needed
+  (spot, forecast.solar, and the Open-Meteo fallback). Every test file sets
+  it. The one exception is `test/forecast-influx.test.ts`, which lifts it only
+  around its "fresh" path call and replaces `globalThis.fetch` with a strict
+  mock that throws on any unrecognized URL - a real request cannot escape.
 - `npm test` is _not_ fully offline: `test/mqtt-client.test.ts` needs a Mosquitto broker
   (`docker compose up -d`). Without it 2 tests fail with ECONNREFUSED — that is the
   environment, not your change.
 - Integration tests need Mosquitto **and** InfluxDB (both in `docker-compose.yml`).
+  The devcontainer (`.devcontainer/`) is the supported agent environment: mosquitto
+  and influxdb join the app container's network namespace (`network_mode: service:app`),
+  so both are reachable on localhost. The plain host workflow is `docker compose up -d`.
   Run one file at a time while iterating; they are slow (time is compressed via
   `config.test.timeSpeedupFactor`, set to 10000 in `test/helpers/config.ts`).
 - Fixed scenario: start `2026-04-18T17:00:00` local (`FROM` in `test/helpers/config.ts`),
@@ -45,6 +54,9 @@ Commit after each completed task; do not batch tasks into one commit unless aske
   default 12:00 target) plus `2026-04-20` (charge-level re-plan test spans midnight).
   Add a day's cache only when a test's virtual clock crosses into it. Never modify a
   fixture without updating the expected values in the same commit.
+- Fixtures are effectively read-only during tests: `fetchSlots` only persists data it
+  just fetched, and `writeCache` is atomic (temp file + rename), so the concurrently
+  running integration files cannot corrupt each other's cache reads.
 - Tests set `CACHE_DIR` / `CONFIG_FILE` via `process.env` at the **top of the file, before
   imports** — `CACHE_DIR` is read at module load in `spot.ts`/`solar.ts`/`poller.ts`, so a
   later assignment is too late.

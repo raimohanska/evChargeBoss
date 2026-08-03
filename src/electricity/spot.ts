@@ -1,4 +1,5 @@
 import { readCache, writeCache } from "./cache.ts";
+import { assertNetworkFetchAllowed } from "./no-fetch.ts";
 import { localDateString, localDateTimeString } from "../utils/date-time-format.ts";
 import { makeLogger } from "../utils/log.ts";
 
@@ -27,6 +28,7 @@ export async function fetchSpotPrices(
     // Fetch Today and DayForward separately: they are rate-limited per endpoint,
     // while the combined TodayAndDayForward endpoint is the one that 429s.
     log(`Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(", ")})`);
+    assertNetworkFetchAllowed(`spot prices for ${missingDates.join(", ")}`);
     const responses = await Promise.all(
       ["https://api.spot-hinta.fi/Today", "https://api.spot-hinta.fi/DayForward"].map(
         async (url) => {

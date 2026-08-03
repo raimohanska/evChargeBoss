@@ -47,6 +47,7 @@ import { loadConfig } from "../src/config.ts";
 
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
+process.env.EVCHARGEBOSS_NO_FETCH = "1";
 
 const { FROM, SPEEDUP } = await import("./helpers/config.ts");
 const { startMqttSession } = await import("./helpers/mqtt-session.ts");

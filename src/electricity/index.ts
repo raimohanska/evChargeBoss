@@ -58,13 +58,13 @@ export async function fetchSlots(
       missingSpot,
     );
   }
-  persistSpotCache(spotMap, verbose);
+  if (spotFresh) persistSpotCache(spotMap, verbose);
 
   const solarEpochsDesc = [...solarMap.keys()].sort((a, b) => b - a);
   const missingSolar = slotStarts.filter((s) => !solarMap.has(s.getTime())).length;
   if (missingSolar > 0 && verbose)
     log(`  ${missingSolar} solar slots without exact match - using nearest preceding value`);
-  persistSolarCache(solarMap, verbose);
+  if (solarFresh) persistSolarCache(solarMap, verbose);
 
   const slots = slotStarts.map((start) => {
     const epoch = start.getTime();

@@ -5,9 +5,13 @@
  *   docker compose up -d
  *
  * Uses future dates (2099-01-01) that have no local cache files to trigger
- * the "fresh" fetch path.  globalThis.fetch is temporarily replaced to return
- * canned spot/solar data without hitting the real APIs.  Actual writes go to
- * the real InfluxDB and are verified with a Flux query.
+ * the "fresh" fetch path.  globalThis.fetch is temporarily replaced with a
+ * strict mock that returns canned spot/solar data and THROWS on any
+ * unrecognized URL - a real network request can never escape this file.
+ * Actual writes go to the real InfluxDB and are verified with a Flux query.
+ *
+ * The EVCHARGEBOSS_NO_FETCH guard is set for the whole file and lifted only
+ * around the single mocked fetchSlots call below.
  *
  * NOTE: CACHE_DIR in spot.ts/solar.ts is captured at module-load time, so the
  * env var cannot be overridden from within a test file.  Cache files for the
@@ -24,6 +28,7 @@ import { queryInflux, parseFluxCsv } from "../src/influx.ts";
 import type { InfluxConfig } from "../src/influx.ts";
 
 process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import.meta.url));
+process.env.EVCHARGEBOSS_NO_FETCH = "1";
 const CONFIG = loadConfig();
 
 const INFLUX: InfluxConfig = {
@@ -117,7 +122,9 @@ function installFetchMock(): () => void {
         json: async () => ({ result: { watts, watt_hours_period: {} } }),
       } as Response;
     }
-    return orig(input as string);
+    // No escape hatch: an unrecognized URL means a code path we do not mock,
+    // so fail loudly offline rather than hit the real network.
+    throw new Error(`Unexpected network fetch in forecast-influx test: ${s}`);
   };
   return () => {
     globalThis.fetch = orig;
@@ -167,10 +174,14 @@ after(() => {
 
 test("writes electricity and solar forecast to InfluxDB when data is fresh", async () => {
   const restoreFetch = installFetchMock();
+  // The no-fetch guard must be lifted for the fresh path; the strict mock
+  // above keeps this offline.
+  delete process.env.EVCHARGEBOSS_NO_FETCH;
   try {
     const slots = await fetchSlots(FROM, TO, elConfigFresh, solConfigFresh, false, INFLUX);
     assert.equal(slots.length, 2, "should return 2 slots");
   } finally {
+    process.env.EVCHARGEBOSS_NO_FETCH = "1";
     restoreFetch();
   }
 
