@@ -6,8 +6,8 @@ import { makeLogger } from "./log.ts";
 
 const log = makeLogger("plan-store");
 
-function getPlansDir(): string {
-  return path.join(process.env.PLANS_DIR ?? ".", ".plans");
+function getPlansDir(plansDir?: string): string {
+  return path.join(plansDir ?? process.env.PLANS_DIR ?? ".", ".plans");
 }
 
 function getRetentionMs(): number {
@@ -21,17 +21,17 @@ export function timestampForFilename(d: Date): string {
 }
 
 /** Resolve the full path for a plan file given a prefix and timestamp. */
-export function planFilePath(prefix: string, timestamp: string): string {
-  return path.join(getPlansDir(), `${prefix}-${timestamp}.json`);
+export function planFilePath(prefix: string, timestamp: string, plansDir?: string): string {
+  return path.join(getPlansDir(plansDir), `${prefix}-${timestamp}.json`);
 }
 
 /**
  * Return the path to the newest `{prefix}-*.json` file in the plans directory,
  * or null if none exist or the directory is not readable.
  */
-export function findNewestPlanFile(prefix: string): string | null {
+export function findNewestPlanFile(prefix: string, plansDir?: string): string | null {
   try {
-    const dir = getPlansDir();
+    const dir = getPlansDir(plansDir);
     const files = readdirSync(dir)
       .filter((f) => f.startsWith(`${prefix}-`) && f.endsWith(".json"))
       .sort()
@@ -71,10 +71,10 @@ export function writePlanFile(filePath: string, data: unknown): void {
  * Delete plan files older than PLANS_RETENTION_DAYS (default 7) days.
  * Errors are swallowed — cleanup is best-effort.
  */
-export function cleanOldPlanFiles(): void {
+export function cleanOldPlanFiles(plansDir?: string): void {
   const cutoffMs = Date.now() - getRetentionMs();
   try {
-    const dir = getPlansDir();
+    const dir = getPlansDir(plansDir);
     const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
     for (const f of files) {
       const fullPath = path.join(dir, f);

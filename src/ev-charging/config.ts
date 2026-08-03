@@ -44,6 +44,13 @@ export const EvChargingConfig = z.strictObject({
   weeklySchedule: WeeklySchedule.optional(),
   chargeNowHours: z.number().positive().optional(),
   plugInTimeoutMs: z.number().positive().optional(),
+  /**
+   * Topic prefix for all MQTT topics this instance publishes/subscribes to
+   * (status, target_time, target_kwh, schedule, discovery). Defaults to
+   * "evchargeboss". Lets multiple instances or test sessions run against the
+   * same broker without topic collisions.
+   */
+  topicPrefix: z.string().optional(),
   mqtt: EvChargingMqttConfig.optional(),
   holdWhenHeating: HoldWhenHeatingConfig.optional(),
 });

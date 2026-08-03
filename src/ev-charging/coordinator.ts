@@ -42,9 +42,14 @@ interface InitialStateResult {
   chargeLevelPct?: number;
 }
 
-function getInitialState(config: Config, targetTime: Date, targetKwh: number): InitialStateResult {
+function getInitialState(
+  config: Config,
+  targetTime: Date,
+  targetKwh: number,
+  plansDir?: string,
+): InitialStateResult {
   // Try to resume from a persisted plan file.
-  const planPath = findNewestPlanFile("ev-charging");
+  const planPath = findNewestPlanFile("ev-charging", plansDir);
   if (planPath) {
     const saved = readPlanFile(planPath, EvChargingPlanSchema);
     if (
@@ -107,6 +112,7 @@ export async function runSession(
   clock: Clock,
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
   tracker?: HeatingTracker | null,
+  plansDir?: string,
 ): Promise<void> {
   const RELAY_DEBOUNCE_MS = 1000;
   // Fixed per-session timestamp, used only to name the plan file. Never use
@@ -139,7 +145,7 @@ export async function runSession(
   let chargedSlots = 0;
   let forecast: PricedSlot[] | null = null;
 
-  const initial = getInitialState(config, targetTime, targetKwh);
+  const initial = getInitialState(config, targetTime, targetKwh, plansDir);
   let machine: MachineState = initial.state;
   let chargeLevelPct: number | undefined = initial.chargeLevelPct;
   let chargeLevelTriggeredReplan = false;
@@ -171,7 +177,7 @@ export async function runSession(
       : targetKwh;
 
   const savePlan = () => {
-    const filePath = planFilePath("ev-charging", timestampForFilename(sessionStart));
+    const filePath = planFilePath("ev-charging", timestampForFilename(sessionStart), plansDir);
     writePlanFile(filePath, {
       version: 1,
       detectedPowerKw: machine.detectedChargerPowerKw,

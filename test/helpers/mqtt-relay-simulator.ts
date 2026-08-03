@@ -7,8 +7,10 @@ import assert from "node:assert/strict";
 
 // 15 virtual minutes — absorbs MQTT roundtrip jitter at high speedup factors
 const TIMING_TOLERANCE_MS = 15 * 60_000;
-// Generous default: a 17-hour virtual gap takes ~6 s real at 10 000× speedup
-const DEFAULT_TIMEOUT_MS = 10_000;
+// Generous default: a 17-hour virtual gap takes ~15 s real at 4 000× speedup.
+// 30 s leaves headroom for MQTT latency spikes while several sessions run
+// concurrently against the same broker.
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
  * Simulates a physical relay sitting on MQTT.
@@ -109,8 +111,8 @@ export class MqttRelaySimulator {
     // Set timer first so the guard in stopEmittingPower can clear it before
     // the repeated publish fires.  Publish once immediately so waitForPlugIn
     // resolves within a single MQTT roundtrip instead of waiting for the first
-    // setInterval tick (which at 10 000× speedup would advance virtual time by
-    // ~16 virtual minutes before charging begins).
+    // setInterval tick (which at high speedup would advance virtual time by
+    // many virtual minutes before charging begins).
     this.powerTimer = setInterval(publish, 20);
     publish();
   }

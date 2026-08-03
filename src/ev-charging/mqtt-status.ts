@@ -7,14 +7,7 @@ import { updateConfigWeeklySchedule } from "../config.ts";
 
 const log = makeLogger("ev-charging");
 
-const DEVICE_ID = "evchargeboss";
-const BASE = "evchargeboss";
 const DISCOVERY = "homeassistant";
-
-const DEVICE = {
-  identifiers: [DEVICE_ID],
-  name: "EV Charge Boss",
-};
 
 const WEEKDAYS: ReadonlyArray<{ key: DayOfWeek; name: string }> = [
   { key: "mon", name: "Monday" },
@@ -25,28 +18,6 @@ const WEEKDAYS: ReadonlyArray<{ key: DayOfWeek; name: string }> = [
   { key: "sat", name: "Saturday" },
   { key: "sun", name: "Sunday" },
 ];
-
-function scheduleStateTopic(day: DayOfWeek): string {
-  return `${BASE}/schedule/${day}/state`;
-}
-
-function scheduleSetTopic(day: DayOfWeek): string {
-  return `${BASE}/schedule/${day}/set`;
-}
-
-function dayForStateTopic(topic: string): DayOfWeek | null {
-  for (const { key } of WEEKDAYS) {
-    if (topic === scheduleStateTopic(key)) return key;
-  }
-  return null;
-}
-
-function dayForSetTopic(topic: string): DayOfWeek | null {
-  for (const { key } of WEEKDAYS) {
-    if (topic === scheduleSetTopic(key)) return key;
-  }
-  return null;
-}
 
 interface SensorDef {
   id: string;
@@ -71,22 +42,17 @@ const SENSORS: SensorDef[] = [
   },
 ];
 
-function stateTopic(id: string) {
-  return `${BASE}/${id}`;
-}
-function discoveryTopic(id: string) {
-  return `${DISCOVERY}/sensor/${DEVICE_ID}_${id}/config`;
-}
-
 export class StatusPublisher {
   private client: MqttClient;
   private config: EvChargingConfig;
   private configPath: string | undefined;
+  private base: string;
+  private readonly device: { identifiers: string[]; name: string };
   private targetTimeOverride: string | null = null;
-  private readonly timeStateTopic = `${BASE}/target_time/state`;
+  private readonly timeStateTopic: string;
   private _resolveInitialTargetTime: (() => void) | null = null;
   private targetKwhOverride: number | null = null;
-  private readonly kwhStateTopic = `${BASE}/target_kwh/state`;
+  private readonly kwhStateTopic: string;
   private _resolveInitialTargetKwh: (() => void) | null = null;
   private weeklySchedule: WeeklySchedule;
   private recoveredScheduleDays = new Set<DayOfWeek>();
@@ -96,6 +62,10 @@ export class StatusPublisher {
     this.client = client;
     this.config = config;
     this.configPath = configPath;
+    this.base = config.topicPrefix ?? "evchargeboss";
+    this.device = { identifiers: [this.base], name: "EV Charge Boss" };
+    this.timeStateTopic = `${this.base}/target_time/state`;
+    this.kwhStateTopic = `${this.base}/target_kwh/state`;
     this.weeklySchedule = { ...config.weeklySchedule };
     this.initializeDiscovery();
   }
@@ -109,6 +79,36 @@ export class StatusPublisher {
 
   setChargeNowCallback(cb: () => void): void {
     this.chargeNowCallback = cb;
+  }
+
+  private scheduleStateTopic(day: DayOfWeek): string {
+    return `${this.base}/schedule/${day}/state`;
+  }
+
+  private scheduleSetTopic(day: DayOfWeek): string {
+    return `${this.base}/schedule/${day}/set`;
+  }
+
+  private dayForStateTopic(topic: string): DayOfWeek | null {
+    for (const { key } of WEEKDAYS) {
+      if (topic === this.scheduleStateTopic(key)) return key;
+    }
+    return null;
+  }
+
+  private dayForSetTopic(topic: string): DayOfWeek | null {
+    for (const { key } of WEEKDAYS) {
+      if (topic === this.scheduleSetTopic(key)) return key;
+    }
+    return null;
+  }
+
+  private stateTopic(id: string): string {
+    return `${this.base}/${id}`;
+  }
+
+  private discoveryTopic(id: string): string {
+    return `${DISCOVERY}/sensor/${this.base}_${id}/config`;
   }
 
   getTargetTimeOverride(): string | null {
@@ -198,7 +198,7 @@ export class StatusPublisher {
       });
     }
     for (const { key } of WEEKDAYS) {
-      this.pub(scheduleStateTopic(key), this.weeklySchedule[key] ?? this.config.targetTime);
+      this.pub(this.scheduleStateTopic(key), this.weeklySchedule[key] ?? this.config.targetTime);
     }
   }
 
@@ -231,46 +231,46 @@ export class StatusPublisher {
   private initializeDiscovery(): void {
     for (const s of SENSORS) {
       const config: Record<string, unknown> = {
-        unique_id: `${DEVICE_ID}_${s.id}`,
+        unique_id: `${this.base}_${s.id}`,
         name: s.name,
-        state_topic: stateTopic(s.id),
+        state_topic: this.stateTopic(s.id),
         icon: s.icon,
-        device: DEVICE,
+        device: this.device,
         ...(s.unit && { unit_of_measurement: s.unit }),
         ...(s.state_class && { state_class: s.state_class }),
       };
-      this.pub(discoveryTopic(s.id), JSON.stringify(config), true);
+      this.pub(this.discoveryTopic(s.id), JSON.stringify(config), true);
     }
     for (const s of SENSORS) {
-      this.pub(stateTopic(s.id), this.state[s.id]);
+      this.pub(this.stateTopic(s.id), this.state[s.id]);
     }
 
     // HA text entity for target charge time (HH:MM input with pattern validation)
-    const timeCmdTopic = `${BASE}/target_time/set`;
+    const timeCmdTopic = `${this.base}/target_time/set`;
     const timeStateTopic = this.timeStateTopic;
-    const timeDiscoveryTopic = `${DISCOVERY}/text/${DEVICE_ID}_target_time/config`;
+    const timeDiscoveryTopic = `${DISCOVERY}/text/${this.base}_target_time/config`;
     const timeDiscoveryPayload = JSON.stringify({
-      unique_id: `${DEVICE_ID}_target_time`,
+      unique_id: `${this.base}_target_time`,
       name: "Charge Target Time",
       icon: "mdi:clock-end",
       state_topic: timeStateTopic,
       command_topic: timeCmdTopic,
       pattern: "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
-      device: DEVICE,
+      device: this.device,
     });
     // Clear stale retained messages from removed/renamed entities
-    this.pub(`${DISCOVERY}/sensor/${DEVICE_ID}_next_charge/config`, "", true);
-    this.pub(stateTopic("next_charge"), "", true);
+    this.pub(`${DISCOVERY}/sensor/${this.base}_next_charge/config`, "", true);
+    this.pub(this.stateTopic("next_charge"), "", true);
     // Remove any previously-retained `time` discovery (old entity type, now replaced by `text`)
-    this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time/config`, "", true);
+    this.pub(`${DISCOVERY}/time/${this.base}_target_time/config`, "", true);
     this.pub(timeDiscoveryTopic, timeDiscoveryPayload, true);
 
     // HA number entity for target charge energy (kWh)
-    const kwhCmdTopic = `${BASE}/target_kwh/set`;
+    const kwhCmdTopic = `${this.base}/target_kwh/set`;
     const kwhStateTopic = this.kwhStateTopic;
-    const kwhDiscoveryTopic = `${DISCOVERY}/number/${DEVICE_ID}_target_kwh/config`;
+    const kwhDiscoveryTopic = `${DISCOVERY}/number/${this.base}_target_kwh/config`;
     const kwhDiscoveryPayload = JSON.stringify({
-      unique_id: `${DEVICE_ID}_target_kwh`,
+      unique_id: `${this.base}_target_kwh`,
       name: "Charge Energy Target (kWh)",
       icon: "mdi:battery-charging-80",
       state_topic: kwhStateTopic,
@@ -279,39 +279,39 @@ export class StatusPublisher {
       max: 100,
       step: 0.5,
       unit_of_measurement: "kWh",
-      device: DEVICE,
+      device: this.device,
     });
     this.pub(kwhDiscoveryTopic, kwhDiscoveryPayload, true);
 
     // HA button entity: "Charge Now" — sets target time to now + chargeNowHours
-    const chargeNowCmdTopic = `${BASE}/charge_now/set`;
+    const chargeNowCmdTopic = `${this.base}/charge_now/set`;
     const chargeNowHours = this.config.chargeNowHours ?? 2;
     const chargeNowDiscoveryPayload = JSON.stringify({
-      unique_id: `${DEVICE_ID}_charge_now`,
+      unique_id: `${this.base}_charge_now`,
       name: `Charge Now (+${chargeNowHours}h)`,
       icon: "mdi:flash",
       command_topic: chargeNowCmdTopic,
       payload_press: "PRESS",
-      device: DEVICE,
+      device: this.device,
     });
-    this.pub(`${DISCOVERY}/button/${DEVICE_ID}_charge_now/config`, chargeNowDiscoveryPayload, true);
+    this.pub(`${DISCOVERY}/button/${this.base}_charge_now/config`, chargeNowDiscoveryPayload, true);
 
     // HA time entities: one per weekday for the charging deadline schedule.
     // State topics are published by waitForInitialWeeklySchedule (after retained
     // recovery), not here, so our own publishes never race the recovery.
     for (const { key, name } of WEEKDAYS) {
-      const stateTopic = scheduleStateTopic(key);
-      const setTopic = scheduleSetTopic(key);
+      const stateTopic = this.scheduleStateTopic(key);
+      const setTopic = this.scheduleSetTopic(key);
       const discoveryPayload = JSON.stringify({
-        unique_id: `${DEVICE_ID}_target_time_${key}`,
+        unique_id: `${this.base}_target_time_${key}`,
         name: `${name} Target Time`,
         icon: "mdi:calendar-clock",
         state_topic: stateTopic,
         command_topic: setTopic,
         value_template: "{{ today_at(value) }}",
-        device: DEVICE,
+        device: this.device,
       });
-      this.pub(`${DISCOVERY}/time/${DEVICE_ID}_target_time_${key}/config`, discoveryPayload, true);
+      this.pub(`${DISCOVERY}/time/${this.base}_target_time_${key}/config`, discoveryPayload, true);
       this.client.subscribe(stateTopic, (err) => {
         if (err) log(`[MQTT status] subscribe error on ${stateTopic}: ${err.message}`);
       });
@@ -380,7 +380,7 @@ export class StatusPublisher {
         this.chargeNowCallback?.();
         this.wakeCallback?.();
       } else {
-        const stateDay = dayForStateTopic(topic);
+        const stateDay = this.dayForStateTopic(topic);
         if (stateDay !== null && this._resolveInitialWeeklySchedule !== null) {
           // Retained startup value — recover the runtime schedule only while
           // waitForInitialWeeklySchedule is active (mirrors the target-time and
@@ -393,14 +393,14 @@ export class StatusPublisher {
           }
           this.maybeResolveScheduleRecovery();
         } else {
-          const setDay = dayForSetTopic(topic);
+          const setDay = this.dayForSetTopic(topic);
           if (setDay !== null) {
             const t = normalizeTimePayload(payload.toString());
             if (!t) return;
             if (this.weeklySchedule[setDay] === t) return;
             this.weeklySchedule[setDay] = t;
             log(`[MQTT] Schedule ${setDay} updated to ${t}`);
-            this.pub(scheduleStateTopic(setDay), t);
+            this.pub(this.scheduleStateTopic(setDay), t);
             if (this.configPath) updateConfigWeeklySchedule(this.configPath, setDay, t);
             this.wakeCallback?.();
           }
@@ -446,7 +446,7 @@ export class StatusPublisher {
 
   private setState(id: string, value: string): void {
     this.state[id] = value;
-    this.pub(stateTopic(id), value);
+    this.pub(this.stateTopic(id), value);
   }
 
   private pub(topic: string, payload: string, retain = true): void {

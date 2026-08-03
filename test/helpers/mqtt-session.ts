@@ -11,18 +11,9 @@ import { MqttRelaySimulator } from "./mqtt-relay-simulator.ts";
 import { makeTestConfig } from "./config.ts";
 import { writePlanFile, planFilePath } from "../../src/utils/plan-store.ts";
 
-// Use a unique plans directory per session to prevent cross-test interference.
+// Give every session a unique MQTT topic prefix and plans directory so tests can
+// run concurrently without cross-talk or plan-file collisions.
 let _sessionCounter = 0;
-
-const STATUS_TOPIC = "evchargeboss/status";
-const CHARGED_ENERGY_TOPIC = "evchargeboss/charged_energy";
-const TARGET_TIME_SET_TOPIC = "evchargeboss/target_time/set";
-const TARGET_TIME_STATE_TOPIC = "evchargeboss/target_time/state";
-const TARGET_KWH_SET_TOPIC = "evchargeboss/target_kwh/set";
-const TARGET_KWH_STATE_TOPIC = "evchargeboss/target_kwh/state";
-const WEEKDAYS: readonly DayOfWeek[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const scheduleStateTopic = (day: DayOfWeek) => `evchargeboss/schedule/${day}/state`;
-const scheduleSetTopic = (day: DayOfWeek) => `evchargeboss/schedule/${day}/set`;
 
 export interface MqttTestSession {
   loopPromise: Promise<void>;
@@ -50,9 +41,9 @@ export interface MqttTestSession {
   chargedEnergy(): number;
   /** Session summary captured from onSessionEnd — null until session completes. */
   sessionSummary(): SessionSummary | null;
-  /** Last value of evchargeboss/target_time/state received via MQTT — null if none yet. */
+  /** Last value of the target_time/state topic received via MQTT — null if none yet. */
   targetTimeState(): string | null;
-  /** Last value of evchargeboss/target_kwh/state received via MQTT — null if none yet. */
+  /** Last value of the target_kwh/state topic received via MQTT — null if none yet. */
   targetKwhState(): number | null;
   /**
    * Deduplicated sequence of status values received via MQTT.
@@ -84,10 +75,23 @@ export async function startMqttSession(
 ): Promise<MqttTestSession> {
   // Isolate plan files per test session so tests don't interfere with each other.
   const sessionId = `${process.pid}-${++_sessionCounter}`;
-  process.env.PLANS_DIR = path.join(os.tmpdir(), `evchargeboss-test-plans-${sessionId}`);
+  const plansDir = path.join(os.tmpdir(), `evchargeboss-test-plans-${sessionId}`);
   if (initialPlanData !== undefined) {
-    writePlanFile(planFilePath("ev-charging", "2026-04-18T17-00-00"), initialPlanData);
+    writePlanFile(planFilePath("ev-charging", "2026-04-18T17-00-00", plansDir), initialPlanData);
   }
+
+  // Unique MQTT topic prefix for every observable topic this session publishes
+  // or subscribes to (status, target_time, target_kwh, schedule, discovery).
+  const topicPrefix = `evchargeboss-test-${sessionId}`;
+  const STATUS_TOPIC = `${topicPrefix}/status`;
+  const CHARGED_ENERGY_TOPIC = `${topicPrefix}/charged_energy`;
+  const TARGET_TIME_SET_TOPIC = `${topicPrefix}/target_time/set`;
+  const TARGET_TIME_STATE_TOPIC = `${topicPrefix}/target_time/state`;
+  const TARGET_KWH_SET_TOPIC = `${topicPrefix}/target_kwh/set`;
+  const TARGET_KWH_STATE_TOPIC = `${topicPrefix}/target_kwh/state`;
+  const WEEKDAYS: readonly DayOfWeek[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  const scheduleStateTopic = (day: DayOfWeek) => `${topicPrefix}/schedule/${day}/state`;
+  const scheduleSetTopic = (day: DayOfWeek) => `${topicPrefix}/schedule/${day}/set`;
 
   // Give every session its own unique MQTT topics for the charger relay and
   // power readings.  This prevents zombie loops from failed/slow tests from
@@ -98,10 +102,13 @@ export async function startMqttSession(
     ...mqttOverrides,
   };
   // Also unique-ify the holdWhenHeating topic when configured, for the same reason.
-  let sessionChargingOverrides = chargingOverrides;
+  let sessionChargingOverrides: Partial<Omit<Config["evCharging"], "mode" | "mqtt">> = {
+    ...chargingOverrides,
+    topicPrefix,
+  };
   if (chargingOverrides.holdWhenHeating) {
     sessionChargingOverrides = {
-      ...chargingOverrides,
+      ...sessionChargingOverrides,
       holdWhenHeating: {
         ...chargingOverrides.holdWhenHeating,
         mqtt: {
@@ -202,8 +209,8 @@ export async function startMqttSession(
   }
 
   // Create the virtual clock only after the retained-recovery wait: the clock
-  // advances with real elapsed time × speedup, so waiting 2000ms at 10 000×
-  // would otherwise shift every relay timestamp forward by ~5.5 hours.
+  // advances with real elapsed time × speedup, so waiting 2000ms at 4 000×
+  // would otherwise shift every relay timestamp forward by ~2.2 hours.
   const clock = makeClock(speedup, from);
 
   const session = makeMqttSession(
@@ -234,7 +241,16 @@ export async function startMqttSession(
     await onSessionEnd?.(summary);
   };
 
-  const loopPromise = runSession(session, publisher, config, undefined, clock, wrappedOnSessionEnd);
+  const loopPromise = runSession(
+    session,
+    publisher,
+    config,
+    undefined,
+    clock,
+    wrappedOnSessionEnd,
+    undefined,
+    plansDir,
+  );
 
   return {
     loopPromise,
@@ -273,9 +289,9 @@ export async function startMqttSession(
       relay.cleanup();
       // Clear the retained target_time/state so a changed target time in this
       // test cannot bleed into the next test's StatusPublisher startup.
-      controlClient.publish("evchargeboss/target_time/state", Buffer.alloc(0), { retain: true });
+      controlClient.publish(TARGET_TIME_STATE_TOPIC, Buffer.alloc(0), { retain: true });
       // Clear the retained target_kwh/state for the same reason.
-      controlClient.publish("evchargeboss/target_kwh/state", Buffer.alloc(0), { retain: true });
+      controlClient.publish(TARGET_KWH_STATE_TOPIC, Buffer.alloc(0), { retain: true });
       // Clear retained per-day schedule states for the same reason.
       for (const day of WEEKDAYS) {
         controlClient.publish(scheduleStateTopic(day), Buffer.alloc(0), { retain: true });

@@ -33,6 +33,13 @@ process.env.CONFIG_FILE = fileURLToPath(new URL("./fixtures/config.json", import
 const { FROM, SPEEDUP } = await import("./helpers/config.ts");
 const { startMqttSession } = await import("./helpers/mqtt-session.ts");
 
+/**
+ * Run up to this many tests concurrently (env TEST_CONCURRENCY, default 1).
+ * Start at 1 and ramp up (2, 3, ...) — higher values stress the shared broker
+ * and shrink the real-time margins the relay assertions rely on.
+ */
+const TEST_CONCURRENCY = Math.max(1, parseInt(process.env.TEST_CONCURRENCY ?? "1", 10));
+
 /** Consume the three relay commands that mark arrival at the 10:00 solar charge window. */
 async function advanceToSolarWindow(relay: MqttRelaySimulator): Promise<void> {
   await relay.assertOn("2026-04-18T17:00"); // plug-in detection at session start
@@ -59,9 +66,10 @@ async function waitUntilStatus(
   }
 }
 
-// Tests run sequentially: each MQTT session subscribes to the same topics, so
-// concurrent execution would cause relay simulators to receive each other's commands.
-describe("main-loop MQTT integration", { concurrency: false }, () => {
+// Every session now uses its own MQTT topic prefix and plans directory, so the
+// tests are safe to run concurrently.  Concurrency is controlled by the
+// TEST_CONCURRENCY env var (default 1 = sequential).
+describe("main-loop MQTT integration", { concurrency: TEST_CONCURRENCY }, () => {
   test("Relay sees ON → OFF → ON during a single charge session", async () => {
     const { loopPromise, relay, teardown } = await startMqttSession(FROM, SPEEDUP);
     try {
@@ -107,7 +115,7 @@ describe("main-loop MQTT integration", { concurrency: false }, () => {
   // the 10:00 slot is actively running.  The slot is aborted (relay sees OFF
   // before the natural 10:15 end) and the session replans with the new target.
   //
-  // A single MQTT roundtrip advances virtual time by ~70 s at 10 000× speedup,
+  // A single MQTT roundtrip advances virtual time by ~28 s at 4 000× speedup,
   // so assertOff("10:15") provides a comfortable 14-minute margin.
 
   test("Mid-slot abort with earlier target: session replans and keeps charging", async () => {
@@ -174,9 +182,8 @@ describe("main-loop MQTT integration", { concurrency: false }, () => {
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration"
 
-describe("main-loop MQTT integration — energy field", { concurrency: false }, () => {
+  // ── energy field ──────────────────────────────────────────────────────────────
   /**
    * Verifies that publisher.setChargedEnergy() is called with a positive value
    * while the relay is ON and the energyField is configured.
@@ -229,9 +236,8 @@ describe("main-loop MQTT integration — energy field", { concurrency: false }, 
       teardown();
     }
   });
-});
 
-describe("main-loop MQTT integration — status history", { concurrency: false }, () => {
+  // ── status history ────────────────────────────────────────────────────────────
   /**
    * Verifies that the effective status sequence for a full 7-slot solar session
    * contains no flicker entries:
@@ -321,9 +327,8 @@ describe("main-loop MQTT integration — status history", { concurrency: false }
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration — status history"
 
-describe("main-loop MQTT integration — plan resume", { concurrency: false }, () => {
+  // ── plan resume ───────────────────────────────────────────────────────────────
   /**
    * Verifies that chargedKwh persisted in a plan file is honoured on resume.
    *
@@ -368,14 +373,13 @@ describe("main-loop MQTT integration — plan resume", { concurrency: false }, (
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration — plan resume"
 
-describe("main-loop MQTT integration — plug-in timeout", { concurrency: false }, () => {
+  // ── plug-in timeout ───────────────────────────────────────────────────────────
   test("It just waits and if no car power is detected, not erroring. Exists on target time reached.", async () => {
     const { loopPromise, relay, teardown } = await startMqttSession(
       FROM,
       SPEEDUP,
-      { plugInTimeoutMs: 60_000 }, // 60 s virtual → 6 ms real
+      { plugInTimeoutMs: 60_000 }, // 60 s virtual → 15 ms real
       {},
       undefined,
       undefined,
@@ -396,17 +400,16 @@ describe("main-loop MQTT integration — plug-in timeout", { concurrency: false 
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration — plug-in timeout"
 
-describe("main-loop MQTT integration — heating hold", { concurrency: false }, () => {
+  // ── heating hold ──────────────────────────────────────────────────────────────
   /**
    * All tests use FROM=17:00 (same as the baseline scenario) so planning
    * overhead never skips the gap sleep.  The holdWhenHeating config uses a
    * dedicated test topic that is separate from the charger power topic.
    * Threshold 2000 W: >2000 W → relay held OFF; ≤2000 W → relay may be ON.
    *
-   * Virtual slot 10:00–10:15 = 90 ms real at 10 000×.
-   * Virtual gap 17:00→10:00 = 17 h = ~6.1 s real.
+   * Virtual slot 10:00–10:15 = 225 ms real at 4 000×.
+   * Virtual gap 17:00→10:00 = 17 h = ~15.3 s real.
    *
    * Synchronisation: publishHeatingPower() is safe to call once startMqttSession()
    * returns because the heating subscription SUBACK always precedes relay.ready
@@ -420,7 +423,7 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
 
   /**
    * Heating is published ON immediately after the session starts, which is
-   * guaranteed to be delivered before the 10:00 charge slot (the gap is ~6 s real).
+   * guaranteed to be delivered before the 10:00 charge slot (the gap is ~15 s real).
    *
    * Expected relay sequence:
    *   ON  (17:00) — plug-in detection
@@ -435,13 +438,13 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
       });
     try {
       // Publish heating immediately — subscription SUBACK already received, so
-      // delivery is guaranteed before the 10:00 slot starts (~6.1 s later).
+      // delivery is guaranteed before the 10:00 slot starts (~15.3 s later).
       publishHeatingPower(3000);
       await relay.assertOn("2026-04-18T17:00"); // plug-in detection
       await relay.assertOff("2026-04-19T10:00"); // gap sleep (17 h virtual)
       // Wait for heatingHold status — confirms slot started with hold active.
-      // 10 s timeout covers the ~6.1 s gap plus MQTT roundtrip.
-      await waitUntilStatus(statusHistory, (s) => s === "Charging paused (heating)", 10_000);
+      // 30 s timeout covers the ~15.3 s gap plus MQTT roundtrip.
+      await waitUntilStatus(statusHistory, (s) => s === "Charging paused (heating)", 30_000);
       publishHeatingPower(0); // release heating — relay must turn ON within the slot
       await relay.assertOnBefore("2026-04-19T10:15");
       await loopPromise;
@@ -508,9 +511,9 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
     );
     try {
       await relay.assertOn("2026-04-18T17:00"); // plug-in
-      await relay.assertOff("2026-04-19T10:00"); // gap sleep starts (~6.1 s real)
+      await relay.assertOff("2026-04-19T10:00"); // gap sleep starts (~15.3 s real)
       // Publish heating during the gap then release it 3 s later (mid-gap).
-      // The slot does not start for another ~6 s so heating is off well before then.
+      // The slot does not start for another ~12 s so heating is off well before then.
       publishHeatingPower(3000);
       setTimeout(() => publishHeatingPower(0), 3000);
       await relay.assertOn("2026-04-19T10:00"); // normal slot start — no hold
@@ -544,7 +547,7 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
       publishHeatingPower(3000);
       await relay.assertOn("2026-04-18T17:00");
       await relay.assertOff("2026-04-19T10:00");
-      await waitUntilStatus(statusHistory, (s) => s === "Charging paused (heating)", 10_000);
+      await waitUntilStatus(statusHistory, (s) => s === "Charging paused (heating)", 30_000);
       publishHeatingPower(0);
       await relay.assertOnBefore("2026-04-19T10:15");
       await waitUntilStatus(
@@ -570,9 +573,8 @@ describe("main-loop MQTT integration — heating hold", { concurrency: false }, 
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration — heating hold"
 
-describe("main-loop MQTT integration — Charge Now", { concurrency: false }, () => {
+  // ── Charge Now ────────────────────────────────────────────────────────────────
   /**
    * Regression test for the past-slot relay-flicker bug.
    *
@@ -631,9 +633,8 @@ describe("main-loop MQTT integration — Charge Now", { concurrency: false }, ()
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration — Charge Now"
 
-describe("main-loop MQTT integration — detected charger power", { concurrency: false }, () => {
+  // ── detected charger power ────────────────────────────────────────────────────
   /**
    * Verifies that the planner uses live-measured charger power when it exceeds
    * the configured value, not just the config default.
@@ -669,9 +670,8 @@ describe("main-loop MQTT integration — detected charger power", { concurrency:
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration — detected charger power"
 
-describe("main-loop MQTT integration — target time reset", { concurrency: false }, () => {
+  // ── target time reset ─────────────────────────────────────────────────────────
   /**
    * After a Charge Now session completes, resetTargetTime() must publish the
    * schedule-aware default time (e.g. "12:00") to the target_time/state topic,
@@ -707,9 +707,8 @@ describe("main-loop MQTT integration — target time reset", { concurrency: fals
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration — target time reset"
 
-describe("main-loop MQTT integration — target kWh override", { concurrency: false }, () => {
+  // ── target kWh override ───────────────────────────────────────────────────────
   /**
    * Verifies that publishing a kWh override via MQTT replaces the configured
    * target and is reset to the config default after the session ends.
@@ -749,9 +748,8 @@ describe("main-loop MQTT integration — target kWh override", { concurrency: fa
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration — target kWh override"
 
-describe("main-loop MQTT integration — charge level re-plan", { concurrency: false }, () => {
+  // ── charge level re-plan ──────────────────────────────────────────────────────
   /**
    * When charge level (battery SoC %) changes and chargedKwh is still 0
    * (charging hasn't started), a re-plan is triggered. The adjusted target
@@ -837,9 +835,8 @@ describe("main-loop MQTT integration — charge level re-plan", { concurrency: f
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration — charge level re-plan"
 
-describe("main-loop MQTT integration — weekly charging schedule", { concurrency: false }, () => {
+  // ── weekly charging schedule ──────────────────────────────────────────────────
   /**
    * FROM = Saturday 2026-04-18T17:00.  The default targetTime="12:00" puts all
    * charging at 10:00 next day (relay: ON 17:00 -> OFF 17:10 -> ON 10:00).
@@ -913,4 +910,4 @@ describe("main-loop MQTT integration — weekly charging schedule", { concurrenc
       teardown();
     }
   });
-}); // describe "main-loop MQTT integration — weekly charging schedule"
+}); // describe "main-loop MQTT integration"
