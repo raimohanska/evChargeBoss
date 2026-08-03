@@ -31,6 +31,36 @@ Or run directly from source (Node 22+):
 node --experimental-strip-types src/index.ts
 ```
 
+## Development container
+
+`.devcontainer/` provides a ready-made environment (Node 24, Mosquitto, InfluxDB, opencode,
+GitHub CLI). Open the repo in VS Code and choose **Reopen in Container**, or:
+
+```sh
+devcontainer up --workspace-folder .
+```
+
+Mosquitto and InfluxDB share the app container's network namespace, so they are reachable
+on `localhost:1883` / `localhost:8086` inside the container — the same addresses the tests
+and `config-example.json` use. Both are also published to the host, so stop the top-level
+`docker compose` stack first if it is running; the ports collide.
+
+The root `docker-compose.yml` is unchanged, so the plain host workflow (`docker compose up -d`
+plus a local Node) still works.
+
+Notes:
+
+- `node_modules` lives in a named volume, not the bind mount, so Linux binaries (esbuild)
+  never overwrite the host's. `npm ci` runs automatically on create.
+- opencode's config is bind-mounted from `.devcontainer/opencode` (gitignored, container-local);
+  its auth and session state live in a named volume, so you log in once and rebuilds keep it.
+  Set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GH_TOKEN` on the host and they are forwarded in.
+- `~/.gitconfig` and `~/.ssh` are mounted from the host (ssh read-only).
+- `npm test`, `npm run lint` and `npm run build` pass in the container.
+  `test/main-loop-mqtt.test.ts` does **not**: its 10000× time compression leaves ~30 ms of
+  real time per virtual 5-minute window, which the container's extra latency overruns. Run
+  that file on the host for now.
+
 ## Modes
 
 | Flag     | Behaviour                                                                                                                               |

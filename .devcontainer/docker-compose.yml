@@ -1,0 +1,65 @@
+# Devcontainer stack.
+#
+# The test suite hardcodes localhost:1883 (Mosquitto) and localhost:8086 (InfluxDB),
+# so mosquitto/influxdb join the *app* container's network namespace via
+# `network_mode: service:app`. That makes both reachable on localhost from inside
+# the devcontainer, exactly like the host-side `docker compose up -d` workflow.
+# Consequence: all published ports live on the app service.
+#
+# ../docker-compose.yml is left untouched so the plain host workflow keeps working.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sleep infinity
+    init: true
+    environment:
+      TZ: Europe/Helsinki
+    volumes:
+      - ..:/workspaces/evChargeBoss:cached
+      # Keep node_modules inside the container (native binaries: esbuild).
+      - node_modules:/workspaces/evChargeBoss/node_modules
+      # opencode's config. Container-local and gitignored, so the container can
+      # point at its own model providers without touching the host's
+      # ~/.config/opencode. Kept in the repo rather than a volume so it survives
+      # rebuilds and stays editable from the host. Holds no credentials.
+      - ./opencode:/home/node/.config/opencode:cached
+      # opencode's auth + session state. Named volume, not a host bind: it holds
+      # a live SQLite db with a WAL that must not be shared with the host's
+      # opencode. Survives rebuilds, so you log in once.
+      - opencode_data:/home/node/.local/share/opencode
+      - ${HOME}/.gitconfig:/home/node/.gitconfig:cached
+      - ${HOME}/.ssh:/home/node/.ssh:ro
+    ports:
+      - "1883:1883"
+      - "8086:8086"
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    network_mode: service:app
+    depends_on:
+      - app
+    volumes:
+      - ../docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  influxdb:
+    image: influxdb:2
+    network_mode: service:app
+    depends_on:
+      - app
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adminpassword
+      DOCKER_INFLUXDB_INIT_ORG: evchargeboss
+      DOCKER_INFLUXDB_INIT_BUCKET: evchargeboss
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: test-token
+    volumes:
+      - influx_data:/var/lib/influxdb2
+
+volumes:
+  node_modules:
+  influx_data:
+  opencode_data:
