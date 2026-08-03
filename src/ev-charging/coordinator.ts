@@ -3,7 +3,7 @@ import type { SessionSummary } from "../influx.ts";
 import type { StatusPublisher } from "./mqtt-status.ts";
 import type { ChargingSession } from "./charger.ts";
 import { makeDebouncedDriver } from "./charger.ts";
-import type { Clock } from "../utils/timing-utils.ts";
+import type { CancelSignal, Clock } from "../utils/timing-utils.ts";
 import type { Environment, MachineState } from "./state-machine.ts";
 import { z } from "zod";
 import { fetchPlanInputs } from "./planner.ts";
@@ -113,6 +113,7 @@ export async function runSession(
   onSessionEnd?: (summary: SessionSummary) => Promise<void>,
   tracker?: HeatingTracker | null,
   plansDir?: string,
+  abortSignal?: CancelSignal,
 ): Promise<void> {
   const RELAY_DEBOUNCE_MS = 1000;
   // Fixed per-session timestamp, used only to name the plan file. Never use
@@ -233,6 +234,11 @@ export async function runSession(
   publisher.setChargeNowCallback(() => {
     machine = { ...machine, chargedKwh: 0 };
   });
+  // External abort (used by tests to stop a session that would otherwise wait
+  // forever, e.g. no car ever plugged in). Wakes any in-flight slot sleep so
+  // the loop can notice and exit at its next iteration.
+  const abortWake = () => wakeCancel.abort();
+  abortSignal?.addEventListener("abort", abortWake);
 
   let latestEnergyKwh: number | undefined = undefined;
   let slotMeterStartKwh: number | undefined = undefined;
@@ -257,6 +263,7 @@ export async function runSession(
   try {
     // Main loop: fetch plan, sleep to slot, charge, repeat until target kWh reached.
     while (true) {
+      if (abortSignal?.aborted) break;
       // 1. Check for target time change
       const newTargetTime = getTargetTimeFromPublisher();
       if (newTargetTime.getTime() !== targetTime.getTime()) {

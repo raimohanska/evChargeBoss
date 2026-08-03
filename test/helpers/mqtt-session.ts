@@ -3,6 +3,7 @@ import path from "path";
 import { connectMqtt, makeMqttSession } from "../../src/ev-charging/mqtt-client.ts";
 import { StatusPublisher } from "../../src/ev-charging/mqtt-status.ts";
 import { makeClock } from "../../src/utils/timing-utils.ts";
+import { Canceller } from "../../src/utils/timing-utils.ts";
 import { runSession } from "../../src/ev-charging/coordinator.ts";
 import type { Config, MqttConfig } from "../../src/config.ts";
 import type { DayOfWeek } from "../../src/ev-charging/config.ts";
@@ -52,6 +53,8 @@ export interface MqttTestSession {
    */
   statusHistory(): readonly string[];
   teardown(): void;
+  /** Stop a session that never ends on its own (e.g. no car plugged in). */
+  abort(): void;
 }
 
 export async function startMqttSession(
@@ -230,6 +233,9 @@ export async function startMqttSession(
     suppressPower: sessionOptions.suppressPower,
   });
 
+  // Abort handle for sessions that never end on their own (no car plugged in).
+  const sessionCanceller = new Canceller();
+
   // Wait for the relay's charger-topic subscription to be confirmed (SUBACK) before
   // starting the main loop.  Without this, coordinator startup detection can publish
   // ON before the relay has subscribed, causing the relay to miss the command.
@@ -250,6 +256,7 @@ export async function startMqttSession(
     wrappedOnSessionEnd,
     undefined,
     plansDir,
+    sessionCanceller.signal,
   );
 
   return {
@@ -285,6 +292,9 @@ export async function startMqttSession(
     targetTimeState: () => _lastTargetTimeState,
     targetKwhState: () => _lastTargetKwhState,
     statusHistory: () => _statusHistory,
+    abort() {
+      sessionCanceller.abort();
+    },
     teardown() {
       relay.cleanup();
       // Clear the retained target_time/state so a changed target time in this
