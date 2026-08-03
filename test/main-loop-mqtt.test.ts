@@ -251,7 +251,13 @@ describe("main-loop MQTT integration", { concurrency: TEST_CONCURRENCY }, () => 
   test("Status history is clean — no flicker between consecutive charge slots", async () => {
     const { loopPromise, relay, statusHistory, teardown } = await startMqttSession(FROM, SPEEDUP);
     try {
-      await advanceToSolarWindow(relay);
+      await relay.assertOn("2026-04-18T17:00"); // plug-in detection
+      await relay.assertOff("2026-04-18T17:10"); // initial plan: charge at 10:00 next day
+      // Fast-forward the ~17h overnight dead period, landing one slot before
+      // the 10:00 solar window. The loop wakes at 09:45 and reaches 10:00
+      // naturally, so the relay ON is observed at the slot boundary as usual.
+      relay.skipTo("2026-04-19T09:45");
+      await relay.assertOn("2026-04-19T10:00"); // solar-free slot begins charging
       await loopPromise;
       // Baseline relay shape: ON (plug-in), OFF (gap), ON (solar window), then
       // stays ON — never toggles between consecutive charge slots.

@@ -172,6 +172,38 @@ export class MqttRelaySimulator {
     );
   }
 
+  /**
+   * Fast-forward virtual time to `dateStr` ("YYYY-MM-DDTHH:MM"), re-arming any
+   * in-flight loop sleep against the jumped time. Only safe during quiet
+   * periods (e.g. the overnight gap) where no relay command or MQTT message is
+   * expected until `dateStr` — the skipped slots' status re-publishes are
+   * deduplicated anyway.
+   *
+   * Pick `dateStr` at least one 15-min slot *before* the next boundary you care
+   * about (e.g. "09:45" when charging starts at "10:00"). The loop then wakes
+   * there and sleeps the remaining slot normally, so a stale power reading
+   * cached before the last OFF has real time to settle before the boundary is
+   * evaluated — otherwise the machine can briefly flip to ChargingAsPlanned on
+   * the stale value.
+   */
+  skipTo(dateStr: string): void {
+    const jump = (this.clock as Clock & { jumpTo?: (t: Date) => void }).jumpTo;
+    if (!jump) throw new Error(`MqttRelaySimulator.skipTo: clock does not support jumpTo`);
+    this.publishPowerState();
+    jump(new Date(`${dateStr}:00`));
+  }
+
+  /** Publish the relay's current power/energy reading once (0 W when off, 3 kW when on). */
+  private publishPowerState(): void {
+    const { powerTopic, powerField } = this.mqttConfig;
+    const on = this.powerTimer !== null;
+    if (powerField !== undefined) {
+      this.client.publish(powerTopic, JSON.stringify({ [powerField]: on ? 3000 : 0 }));
+    } else {
+      this.client.publish(powerTopic, on ? "3000" : "0");
+    }
+  }
+
   private async nextCommand(expected: boolean): Promise<Date> {
     let actual: boolean;
 
