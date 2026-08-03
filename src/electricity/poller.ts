@@ -12,6 +12,7 @@ const log = makeLogger("electricity");
 
 const POLL_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const WINDOW_DAYS = 2; // today + tomorrow
+const SLOT_MS = 15 * 60 * 1000; // quarter-hour
 
 // Must match the constant in spot.ts and solar.ts — all three read the same env var.
 const CACHE_DIR = process.env.CACHE_DIR ?? ".";
@@ -59,7 +60,7 @@ export async function runElectricityPollOnce(config: Config, clock: Clock): Prom
     if (err instanceof IncompleteDataError && err.missingSlots.length > 0) {
       const firstMissing = err.missingSlots[0];
       if (firstMissing.getTime() > from.getTime()) {
-        // Partial data available — fetch and write what we have.
+        // Missing slots at the end — fetch and write what the source covers.
         const slots = await fetchSlots(
           from,
           firstMissing,
@@ -70,6 +71,25 @@ export async function runElectricityPollOnce(config: Config, clock: Clock): Prom
         );
         log(
           `[ElectricityPoller] Fetched ${slots.length} slots (partial - spot prices until ${localTimeShort(firstMissing)})`,
+        );
+        return;
+      }
+      const lastMissing = err.missingSlots[err.missingSlots.length - 1];
+      const suffixStart = new Date(lastMissing.getTime() + SLOT_MS);
+      if (suffixStart.getTime() < to.getTime()) {
+        // Missing slots at the start: a rolling-window source (the
+        // porssisahko.net fallback) covers from suffixStart onward but never
+        // the hours before its window begins. Fetch what is available.
+        const slots = await fetchSlots(
+          suffixStart,
+          to,
+          config.electricity,
+          config.solar,
+          false,
+          config.influx,
+        );
+        log(
+          `[ElectricityPoller] Fetched ${slots.length} slots (partial - spot prices from ${localTimeShort(suffixStart)})`,
         );
         return;
       }

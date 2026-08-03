@@ -21,7 +21,9 @@ const CACHE_DIR = mkdtempSync(path.join(os.tmpdir(), "spot-fallback-"));
 process.env.CACHE_DIR = CACHE_DIR;
 process.env.EVCHARGEBOSS_NO_FETCH = "1";
 
-const { fetchSpotPrices } = await import("../src/electricity/spot.ts");
+const { fetchSpotPrices, persistSpotCache } = await import("../src/electricity/spot.ts");
+const { readCache, writeCache } = await import("../src/electricity/cache.ts");
+const { localDateString, localDateTimeString } = await import("../src/utils/date-time-format.ts");
 
 // Future date with no cache file anywhere → the fresh fetch path.
 const DATE = "2099-01-01";
@@ -139,4 +141,45 @@ test("throws when both spot-hinta.fi and porssisahko.net fail", async () => {
   } finally {
     restore();
   }
+});
+
+test("persistSpotCache writes a partial cache for the current day but skips partial other days", () => {
+  const today = localDateString(new Date());
+  const map = new Map<number, number>();
+  // 92 slots from 01:00 today, like the porssisahko.net rolling window.
+  for (let i = 0; i < 92; i++) {
+    map.set(new Date(`${today}T01:00:00`).getTime() + i * 15 * 60 * 1000, 0.05);
+  }
+  // A short partial day that must still be skipped.
+  for (let i = 0; i < 10; i++) {
+    map.set(new Date(`2099-12-31T10:00:00`).getTime() + i * 15 * 60 * 1000, 0.05);
+  }
+
+  persistSpotCache(map);
+
+  const todayCached = readCache<Record<string, number>>(`${CACHE_DIR}/.spot-cache-${today}.json`);
+  assert.ok(todayCached, "today's cache is written even though it is partial");
+  assert.equal(Object.keys(todayCached).length, 92);
+  assert.equal(
+    readCache(`${CACHE_DIR}/.spot-cache-2099-12-31.json`),
+    null,
+    "partial non-today day is still skipped",
+  );
+});
+
+test("fetchSpotPrices serves a partial current-day cache without any network access", async () => {
+  const today = localDateString(new Date());
+  const partial: Record<string, number> = {};
+  for (let i = 0; i < 92; i++) {
+    const d = new Date(`${today}T01:00:00`);
+    d.setMinutes(d.getMinutes() + i * 15);
+    partial[localDateTimeString(d)] = 0.05;
+  }
+  writeCache(`${CACHE_DIR}/.spot-cache-${today}.json`, partial);
+
+  // EVCHARGEBOSS_NO_FETCH stays set: accepting the partial cache must not
+  // attempt any network access.
+  const { map, fresh } = await fetchSpotPrices([today]);
+  assert.equal(fresh, false);
+  assert.equal(map.size, 92);
 });

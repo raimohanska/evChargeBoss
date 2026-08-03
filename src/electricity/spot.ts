@@ -7,6 +7,13 @@ const log = makeLogger("electricity");
 
 const CACHE_DIR = process.env.CACHE_DIR ?? ".";
 
+const SLOTS_PER_DAY = 96; // 24 hours × 4 quarter-hours
+// A rolling-window source (the porssisahko.net fallback) starts ~1 h after
+// local midnight, so a current-day cache can legitimately be a few slots
+// short. Accept a partial cache for today that is missing at most the first
+// 2 hours instead of re-fetching (and rate-limiting) on every start.
+const MIN_PARTIAL_DAY_SLOTS = SLOTS_PER_DAY - 8;
+
 interface SpotHintaEntry {
   Rank: number;
   DateTime: string;
@@ -64,10 +71,13 @@ export async function fetchSpotPrices(
   dates: string[],
   verbose?: boolean,
 ): Promise<{ map: Map<number, number>; fresh: boolean }> {
-  const SLOTS_PER_DAY = 96; // 24 hours × 4 quarter-hours
+  const today = localDateString(new Date());
   const missingDates = dates.filter((d) => {
     const cached = readCache<Record<string, number>>(`${CACHE_DIR}/.spot-cache-${d}.json`);
-    return cached === null || Object.keys(cached).length < SLOTS_PER_DAY;
+    if (cached === null) return true;
+    const count = Object.keys(cached).length;
+    if (count >= SLOTS_PER_DAY) return false;
+    return d !== today || count < MIN_PARTIAL_DAY_SLOTS;
   });
 
   if (missingDates.length > 0) {
@@ -106,9 +116,11 @@ export function persistSpotCache(map: Map<number, number>, verbose?: boolean): v
     byDate.get(date)![localDateTimeString(new Date(epoch))] = price;
   }
   let written = 0;
+  const today = localDateString(new Date());
   for (const [date, data] of byDate) {
     const count = Object.keys(data).length;
-    if (count < 96) {
+    const isPartialToday = date === today && count >= MIN_PARTIAL_DAY_SLOTS;
+    if (count < SLOTS_PER_DAY && !isPartialToday) {
       if (verbose)
         log(
           `  Spot cache for ${date}: only ${count}/96 slots - skipping write to avoid partial cache`,
