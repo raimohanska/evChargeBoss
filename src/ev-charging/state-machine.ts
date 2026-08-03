@@ -140,8 +140,8 @@ export function nextState(machine: MachineState, env: Environment): MachineState
       powerKwMeasured: true,
     };
   }
+  const remainingKwh = Math.max(0, env.targetKwh - machine.chargedKwh);
   if (env.forecast) {
-    const remainingKwh = Math.max(0, env.targetKwh - machine.chargedKwh);
     const plan = computePlan(
       env.forecast,
       remainingKwh,
@@ -185,6 +185,17 @@ export function nextState(machine: MachineState, env: Environment): MachineState
     machine = {
       ...machine,
       plan: null,
+    };
+  }
+  // Charging goal already reached: keep the relay ON so battery-full detection
+  // can observe the power drop. The loop breaks right after the last slot and
+  // waits for power to fall; turning the relay OFF here would flick it at the
+  // very moment charging completes (for grid-paid slots the recomputed plan is
+  // empty, which would otherwise resolve to Planning -> relay OFF).
+  if (remainingKwh <= 0) {
+    return {
+      ...machine,
+      id: "ChargingAsPlanned",
     };
   }
   if (!machine.plan) {

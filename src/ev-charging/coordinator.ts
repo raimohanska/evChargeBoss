@@ -141,6 +141,11 @@ export async function runSession(
   let currentPowerW = 0;
   let heatingHold = false;
   let relayOn: boolean | null = null;
+  // Set once the charge/simulate loop has finished. During the subsequent
+  // power-down wait the relay is deliberately left ON and status must not be
+  // re-published — a late power reading would otherwise flip the machine to
+  // Planning (relay OFF) or emit a flickering status right before "Idle".
+  let sessionEnded = false;
   let totalCostEur = 0;
   let solarFractionSum = 0;
   let chargedSlots = 0;
@@ -259,12 +264,12 @@ export async function runSession(
         if (slotKwh > 0) publisher.setChargedEnergy(machine.chargedKwh + slotKwh);
       }
     }
-    updateState().catch((err) => log(`CarPowerChange error: ${String(err)}`));
+    if (!sessionEnded) updateState().catch((err) => log(`CarPowerChange error: ${String(err)}`));
   });
 
   const unsubHold = session.holdSource?.subscribe((held) => {
     heatingHold = held;
-    updateState().catch((err) => log(`HeatingHoldChange error: ${String(err)}`));
+    if (!sessionEnded) updateState().catch((err) => log(`HeatingHoldChange error: ${String(err)}`));
   });
 
   try {
@@ -392,6 +397,7 @@ export async function runSession(
     //  this wait is typically instantaneous. If power stays high beyond the
     //  timeout we start the next session immediately — acceptable for the
     //  target-time-reached-while-charging case.)
+    sessionEnded = true;
     const POWER_DOWN_TIMEOUT_MS = 30_000;
     const powerDownStart = clock.now();
     while (currentPowerW > powerThresholdW) {
