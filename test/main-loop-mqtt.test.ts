@@ -52,11 +52,14 @@ const { FROM, SPEEDUP } = await import("./helpers/config.ts");
 const { startMqttSession } = await import("./helpers/mqtt-session.ts");
 
 /**
- * Run up to this many tests concurrently (env TEST_CONCURRENCY, default 1).
- * Start at 1 and ramp up (2, 3, ...) — higher values stress the shared broker
- * and shrink the real-time margins the relay assertions rely on.
+ * Run up to this many tests concurrently (env TEST_CONCURRENCY, default 8).
+ * Measured at 4 000× speedup on a clean broker:
+ *   C=1 ~268 s, C=4 ~69 s, C=8 ~37 s, C=12 ~35 s — all 20 tests pass.
+ *   C=16 ~22 s but 7 tests fail: the shared broker's roundtrip latency pushes
+ *   relay commands past their assertion windows.  8 keeps a safe margin below
+ *   that cliff while giving most of the speedup.
  */
-const TEST_CONCURRENCY = Math.max(1, parseInt(process.env.TEST_CONCURRENCY ?? "1", 10));
+const TEST_CONCURRENCY = Math.max(1, parseInt(process.env.TEST_CONCURRENCY ?? "8", 10));
 
 /** Consume the three relay commands that mark arrival at the 10:00 solar charge window. */
 async function advanceToSolarWindow(relay: MqttRelaySimulator): Promise<void> {
