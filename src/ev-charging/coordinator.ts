@@ -224,6 +224,13 @@ export async function runSession(
     const want = getState(machine.id).relayOn;
     if (want === relayOn) return;
     relayOn = want;
+    if (want) {
+      // The relay is being turned ON but the car has not responded yet — any
+      // cached power reading belongs to the previous (OFF) period. Drop it so
+      // the machine waits for the first live reading instead of treating the
+      // stale value as proof of charging at a slot boundary.
+      currentPowerW = 0;
+    }
     await debouncedDriver.send(relayOn);
   };
   await publishState();
