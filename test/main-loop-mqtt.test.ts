@@ -62,10 +62,15 @@ const { startMqttSession } = await import("./helpers/mqtt-session.ts");
  */
 const TEST_CONCURRENCY = Math.max(1, parseInt(process.env.TEST_CONCURRENCY ?? "8", 10));
 
-/** Consume the three relay commands that mark arrival at the 10:00 solar charge window. */
+/**
+ * Consume the relay commands that mark arrival at the 10:00 solar charge
+ * window.  The ~17 h overnight dead period is fast-forwarded via skipTo,
+ * landing one slot before the boundary so the loop reaches 10:00 naturally.
+ */
 async function advanceToSolarWindow(relay: MqttRelaySimulator): Promise<void> {
   await relay.assertOn("2026-04-18T17:00"); // plug-in detection at session start
   await relay.assertOff("2026-04-18T17:10"); // sleep through the overnight gap
+  relay.skipTo("2026-04-19T09:45"); // fast-forward the overnight dead period
   await relay.assertOn("2026-04-19T10:00"); // solar-free slot begins charging
 }
 
@@ -144,9 +149,11 @@ describe("main-loop MQTT integration", { concurrency: TEST_CONCURRENCY }, () => 
     try {
       await relay.assertOn("2026-04-18T17:00"); // plug-in detection
       await relay.assertOff("2026-04-18T18:00"); // plan computed; sleeping until overnight slots
+      relay.skipTo("2026-04-19T00:45"); // fast-forward the dead evening; land before 01:00
       await relay.assertOn("2026-04-19T01:00"); // first overnight cheap slot
       publishTargetTime("12:00"); // extend deadline mid-slot
       await relay.assertOff("2026-04-19T02:00"); // mid-slot abort before slot ends
+      relay.skipTo("2026-04-19T09:45"); // fast-forward the dead morning gap
       await relay.assertOn("2026-04-19T10:00"); // new plan: solar-free window
       await loopPromise;
     } finally {
@@ -371,6 +378,7 @@ describe("main-loop MQTT integration", { concurrency: TEST_CONCURRENCY }, () => 
     try {
       // No plug-in detection ON — the session resumes directly without waitForStart().
       await relay.assertOff("2026-04-19T10:00"); // gap OFF before first charge slot
+      relay.skipTo("2026-04-19T09:45"); // fast-forward the overnight dead period
       await relay.assertOn("2026-04-19T10:00"); // first slot
       // Relay stays ON after target reached; no final OFF.
       await loopPromise;
@@ -472,6 +480,7 @@ describe("main-loop MQTT integration", { concurrency: TEST_CONCURRENCY }, () => 
     try {
       await relay.assertOn("2026-04-18T17:00"); // plug-in
       await relay.assertOff("2026-04-19T10:00"); // gap
+      relay.skipTo("2026-04-19T09:45"); // fast-forward the overnight dead period
       await relay.assertOn("2026-04-19T10:00"); // charging starts, no hold
       publishHeatingPower(3000); // trigger hold mid-charge
       await relay.assertOff("2026-04-19T10:15"); // hold-triggered OFF within the slot
@@ -547,6 +556,7 @@ describe("main-loop MQTT integration", { concurrency: TEST_CONCURRENCY }, () => 
       publishHeatingPower(3000);
       await relay.assertOn("2026-04-18T17:00");
       await relay.assertOff("2026-04-19T10:00");
+      relay.skipTo("2026-04-19T09:45"); // fast-forward the overnight dead period
       await waitUntilStatus(statusHistory, (s) => s === "Charging paused (heating)", 30_000);
       publishHeatingPower(0);
       await relay.assertOnBefore("2026-04-19T10:15");
@@ -726,6 +736,7 @@ describe("main-loop MQTT integration", { concurrency: TEST_CONCURRENCY }, () => 
     try {
       await relay.assertOn("2026-04-18T17:00"); // plug-in detection
       await relay.assertOff("2026-04-18T17:10"); // sleep through overnight gap
+      relay.skipTo("2026-04-19T09:45"); // fast-forward the overnight dead period
       await relay.assertOn("2026-04-19T10:00"); // first charge slot starts
 
       // Reduce target to 0.75 kWh (1 slot) while charging is underway.
@@ -782,8 +793,9 @@ describe("main-loop MQTT integration", { concurrency: TEST_CONCURRENCY }, () => 
 
       // The first plan puts charging at 10:00 next day, so relay turns off.
       await relay.assertOff("2026-04-18T17:30");
+      relay.skipTo("2026-04-19T09:45"); // fast-forward the overnight dead period
 
-      // Publish a different charge level (70%) while sleeping in the overnight gap.
+      // Publish a different charge level (70%) while still before charging starts.
       // Since chargedKwh is still 0, this should trigger a re-plan.
       publishChargeLevel(70);
 
@@ -817,6 +829,7 @@ describe("main-loop MQTT integration", { concurrency: TEST_CONCURRENCY }, () => 
       await new Promise((r) => setTimeout(r, 50));
 
       await relay.assertOff("2026-04-18T17:30"); // enters overnight-gap sleep
+      relay.skipTo("2026-04-19T09:45"); // fast-forward the overnight dead period
 
       // Wait for charging to start at 10:00.
 
