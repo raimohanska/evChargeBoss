@@ -3,6 +3,22 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "../src/config.ts";
 import { makeClock } from "../src/utils/timing-utils.ts";
+import { RoomTemperatureConfig } from "../src/setpoint-control/config.ts";
+
+test("room temperature configuration accepts an optional temperatureJsonField", () => {
+  const config = {
+    targetTemperature: 21,
+    allowedDeviationUp: 1,
+    allowedDeviationDown: 1,
+    influence: 2,
+    mqtt: { temperatureTopic: "test/room", temperatureJsonField: "temperature" },
+  };
+  assert.deepEqual(RoomTemperatureConfig.parse(config), config);
+  assert.deepEqual(
+    RoomTemperatureConfig.parse({ ...config, mqtt: { temperatureTopic: "test/room" } }).mqtt,
+    { temperatureTopic: "test/room" },
+  );
+});
 
 // Point cache reads at the checked-in fixture files, never touch the network.
 process.env.CACHE_DIR = fileURLToPath(new URL("./fixtures", import.meta.url));

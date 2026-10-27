@@ -4,49 +4,19 @@ import { connectMqtt } from "../ev-charging/mqtt-client.ts";
 import { writeLine, escapeTagKeyValue } from "../influx.ts";
 import type { InfluxConfig } from "../influx.ts";
 import { makeLogger } from "../utils/log.ts";
+import { parseMqttValue } from "../utils/mqtt-value.ts";
 
 const log = makeLogger("mqtt-to-influx");
 
 export function parseValue(payload: string, sensor: SensorConfig, topic?: string): number | null {
-  let raw: unknown;
-
-  if (sensor.json_field) {
-    try {
-      const parsed = JSON.parse(payload) as Record<string, unknown>;
-      raw = parsed[sensor.json_field];
-    } catch (err) {
+  let value = parseMqttValue(payload, sensor.jsonField, {
+    allowBoolean: true,
+    onJsonError: (err) => {
       const msg = err instanceof Error ? err.message : String(err);
       log(`JSON parse error for ${topic ?? "unknown"}: ${msg} - payload: ${payload.slice(0, 80)}`);
-      return null;
-    }
-  } else {
-    const trimmed = payload.trim();
-    if (trimmed === "true" || trimmed === "ON") raw = true;
-    else if (trimmed === "false" || trimmed === "OFF") raw = false;
-    else {
-      const n = parseFloat(trimmed);
-      if (isNaN(n) || !isFinite(n)) return null;
-      raw = n;
-    }
-  }
-
-  let value: number;
-  if (typeof raw === "boolean") {
-    value = raw ? 1 : 0;
-  } else if (typeof raw === "number") {
-    if (!isFinite(raw)) return null;
-    value = raw;
-  } else if (typeof raw === "string") {
-    if (raw === "true" || raw === "ON") value = 1;
-    else if (raw === "false" || raw === "OFF") value = 0;
-    else {
-      const n = parseFloat(raw);
-      if (isNaN(n) || !isFinite(n)) return null;
-      value = n;
-    }
-  } else {
-    return null;
-  }
+    },
+  });
+  if (value === null) return null;
 
   // Motion values are always 0 or 1
   if (sensor.type === "motion") {

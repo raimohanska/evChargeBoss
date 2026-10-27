@@ -8,6 +8,7 @@ import { printSetpointPlan } from "./print-plan.ts";
 import { connectMqtt } from "../ev-charging/mqtt-client.ts";
 import { makeClock } from "../utils/timing-utils.ts";
 import { makeLogger } from "../utils/log.ts";
+import { parseMqttValue } from "../utils/mqtt-value.ts";
 
 const log = makeLogger("setpoint-control");
 import { localTimeShort } from "../utils/date-time-format.ts";
@@ -256,25 +257,23 @@ export async function runSetpointControl(
 
   let getTemperature: (() => number | undefined) | undefined;
   if (spConfig.roomTemperature) {
-    const { temperatureTopic } = spConfig.roomTemperature.mqtt;
+    const { temperatureTopic, temperatureJsonField } = spConfig.roomTemperature.mqtt;
     let latestTemperature: number | undefined;
 
-    mqttClient.subscribe(temperatureTopic);
     mqttClient.on("message", (topic: string, message: Buffer) => {
       if (topic !== temperatureTopic) return;
-      const value = parseFloat(message.toString());
-      if (!isNaN(value)) {
-        latestTemperature = value;
-      }
+      const value = parseMqttValue(message.toString(), temperatureJsonField);
+      if (value !== null) latestTemperature = value;
     });
-
+    mqttClient.subscribe(temperatureTopic);
     log(`[${spConfig.name}] Subscribed to room temperature topic: ${temperatureTopic}`);
     getTemperature = () => latestTemperature;
 
     // Give the broker a moment to deliver a retained message before the first plan.
     await clock.sleep(2_000);
+    const initialTemperature = getTemperature();
     log(
-      `[${spConfig.name}] Initial room temperature: ${latestTemperature !== undefined ? formatTemp(latestTemperature) : "unavailable"}`,
+      `[${spConfig.name}] Initial room temperature: ${initialTemperature !== undefined ? formatTemp(initialTemperature) : "unavailable"}`,
     );
   }
 

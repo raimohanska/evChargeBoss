@@ -86,7 +86,8 @@
         "allowedDeviationDown": 1.0,
         "influence": 2.0,
         "mqtt": {
-          "temperatureTopic": "zigbee2mqtt/living-room-sensor"
+          "temperatureTopic": "zigbee2mqtt/living-room-sensor",
+          "temperatureJsonField": "temperature"
         }
       },
       "mqtt": {
@@ -111,7 +112,7 @@
         "location": "autotalli",
         "mqtt_topic": "zigbee2mqtt/Autotallin liiketunnistin",
         "unit": "",
-        "json_field": "occupancy"
+        "jsonField": "occupancy"
       },
       {
         "name": "Radiator Return",

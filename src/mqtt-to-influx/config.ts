@@ -7,7 +7,7 @@ export const SensorConfig = z.strictObject({
   location: z.string(),
   mqtt_topic: z.string(),
   unit: z.string(),
-  json_field: z.string().optional(),
+  jsonField: z.string().optional(),
 });
 export type SensorConfig = z.infer<typeof SensorConfig>;
 

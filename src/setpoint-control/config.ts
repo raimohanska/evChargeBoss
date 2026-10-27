@@ -10,7 +10,10 @@ export const RoomTemperatureConfig = z.strictObject({
   allowedDeviationUp: z.number().nonnegative(),
   allowedDeviationDown: z.number().nonnegative(),
   influence: z.number().positive(),
-  mqtt: z.strictObject({ temperatureTopic: z.string() }),
+  mqtt: z.strictObject({
+    temperatureTopic: z.string(),
+    temperatureJsonField: z.string().optional(),
+  }),
 });
 export type RoomTemperatureConfig = z.infer<typeof RoomTemperatureConfig>;
 
