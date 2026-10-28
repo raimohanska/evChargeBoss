@@ -97,7 +97,8 @@ after(() => {
   rmSync(CACHE_DIR, { recursive: true, force: true });
 });
 
-test("falls back to porssisahko.net when spot-hinta.fi returns 429", async () => {
+test("falls back to porssisahko.net when spot-hinta.fi returns 429", async (t) => {
+  const logs = t.mock.method(console, "log", () => {});
   const restore = installFetchStub({
     spotHinta: async () => ({ ok: false, status: 429 }) as Response,
     porssisahkoOk: true,
@@ -109,12 +110,19 @@ test("falls back to porssisahko.net when spot-hinta.fi returns 429", async () =>
     // price is cents/kWh → divided by 100 into €/kWh.
     assert.equal(map.get(T0), 0.05, "first slot: 5 cents = 0.05 EUR/kWh");
     assert.equal(map.get(T95), 1.0, "last slot: 100 cents = 1.00 EUR/kWh");
+    assert.equal(logs.mock.callCount(), 1);
+    assert.ok(
+      String(logs.mock.calls[0].arguments[0]).endsWith(
+        "Spot prices fetched from porssisahko.net: 96 slots, covering 2099-01-01T00:00:00 to 2099-01-02T00:00:00; primary failed: spot-hinta.fi HTTP 429",
+      ),
+    );
   } finally {
     restore();
   }
 });
 
-test("uses spot-hinta.fi prices as-is when it responds OK", async () => {
+test("uses spot-hinta.fi prices as-is when it responds OK", async (t) => {
+  const logs = t.mock.method(console, "log", () => {});
   const restore = installFetchStub({
     spotHinta: async () => ({ ok: true, json: async () => SPOT_HINTA_DAY }) as Response,
     porssisahkoOk: true,
@@ -126,18 +134,107 @@ test("uses spot-hinta.fi prices as-is when it responds OK", async () => {
     // PriceWithTax is already €/kWh → used directly, no /100 conversion.
     assert.equal(map.get(T0), 0.05, "first slot = PriceWithTax 0.05");
     assert.equal(map.get(T95), 0.05 + 95 * 0.001, "last slot = PriceWithTax 0.145");
+    assert.equal(logs.mock.callCount(), 1);
+    assert.ok(
+      String(logs.mock.calls[0].arguments[0]).endsWith(
+        "Spot prices fetched from api.spot-hinta.fi: 96 slots, covering 2099-01-01T00:00:00 to 2099-01-02T00:00:00",
+      ),
+    );
   } finally {
     restore();
   }
 });
 
-test("throws when both spot-hinta.fi and porssisahko.net fail", async () => {
+test("throws when both spot-hinta.fi and porssisahko.net fail", async (t) => {
+  const logs = t.mock.method(console, "log", () => {});
   const restore = installFetchStub({
     spotHinta: async () => ({ ok: false, status: 429 }) as Response,
     porssisahkoOk: false,
   });
   try {
     await assert.rejects(fetchSpotPricesFresh([DATE]), /porssisahko\.net HTTP 503/);
+    assert.equal(logs.mock.callCount(), 1);
+    assert.ok(
+      String(logs.mock.calls[0].arguments[0]).endsWith(
+        "Spot price fetch failed: api.spot-hinta.fi (spot-hinta.fi HTTP 429); porssisahko.net (porssisahko.net HTTP 503)",
+      ),
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("failure summary identifies providers and flattens multiline errors", async (t) => {
+  const logs = t.mock.method(console, "log", () => {});
+  const fallbackError = new Error("connection failed\nplease retry");
+  t.mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+    if (String(input).includes("spot-hinta.fi")) throw new Error("network\ntimeout");
+    if (String(input).includes("porssisahko.net")) throw fallbackError;
+    throw new Error(`Unexpected network fetch: ${String(input)}`);
+  });
+  await assert.rejects(fetchSpotPricesFresh([DATE]), (err) => err === fallbackError);
+  assert.equal(logs.mock.callCount(), 1);
+  assert.ok(
+    String(logs.mock.calls[0].arguments[0]).endsWith(
+      "Spot price fetch failed: api.spot-hinta.fi (network timeout); porssisahko.net (connection failed please retry)",
+    ),
+  );
+});
+
+test("fallback summary identifies incomplete requested dates", async (t) => {
+  const logs = t.mock.method(console, "log", () => {});
+  const restore = installFetchStub({
+    spotHinta: async () => ({ ok: false, status: 404 }) as Response,
+    porssisahkoOk: true,
+  });
+  try {
+    await fetchSpotPricesFresh([DATE, "2099-01-02"]);
+    assert.equal(logs.mock.callCount(), 1);
+    assert.ok(
+      String(logs.mock.calls[0].arguments[0]).endsWith(
+        "Spot prices fetched from porssisahko.net: 96 slots, covering 2099-01-01T00:00:00 to 2099-01-02T00:00:00; requested dates incomplete: 2099-01-02; primary failed: spot-hinta.fi HTTP 404",
+      ),
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("summary detects gaps within coverage and stays single-line in verbose mode", async (t) => {
+  const logs = t.mock.method(console, "log", () => {});
+  const restore = installFetchStub({
+    spotHinta: async () =>
+      ({ ok: true, json: async () => SPOT_HINTA_DAY.filter((_, i) => i !== 4) }) as Response,
+    porssisahkoOk: true,
+  });
+  delete process.env.EVCHARGEBOSS_NO_FETCH;
+  try {
+    await fetchSpotPrices([DATE], true);
+    assert.equal(logs.mock.callCount(), 1);
+    assert.match(
+      String(logs.mock.calls[0].arguments[0]),
+      /95 slots, covering .*; requested dates incomplete: 2099-01-01$/,
+    );
+  } finally {
+    process.env.EVCHARGEBOSS_NO_FETCH = "1";
+    restore();
+  }
+});
+
+test("empty response reports no coverage and incomplete dates", async (t) => {
+  const logs = t.mock.method(console, "log", () => {});
+  const restore = installFetchStub({
+    spotHinta: async () => ({ ok: true, json: async () => [] }) as Response,
+    porssisahkoOk: true,
+  });
+  try {
+    await fetchSpotPricesFresh([DATE]);
+    assert.equal(logs.mock.callCount(), 1);
+    assert.ok(
+      String(logs.mock.calls[0].arguments[0]).endsWith(
+        "Spot prices fetched from api.spot-hinta.fi: 0 slots, no coverage; requested dates incomplete: 2099-01-01",
+      ),
+    );
   } finally {
     restore();
   }
@@ -167,7 +264,8 @@ test("persistSpotCache writes a partial cache for the current day but skips part
   );
 });
 
-test("fetchSpotPrices serves a partial current-day cache without any network access", async () => {
+test("fetchSpotPrices serves a partial current-day cache without any network access", async (t) => {
+  const logs = t.mock.method(console, "log", () => {});
   const today = localDateString(new Date());
   const partial: Record<string, number> = {};
   for (let i = 0; i < 92; i++) {
@@ -182,4 +280,5 @@ test("fetchSpotPrices serves a partial current-day cache without any network acc
   const { map, fresh } = await fetchSpotPrices([today]);
   assert.equal(fresh, false);
   assert.equal(map.size, 92);
+  assert.equal(logs.mock.callCount(), 0);
 });

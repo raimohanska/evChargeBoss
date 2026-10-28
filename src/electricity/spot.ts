@@ -82,18 +82,49 @@ export async function fetchSpotPrices(
 
   if (missingDates.length > 0) {
     assertNetworkFetchAllowed(`spot prices for ${missingDates.join(", ")}`);
-    log(`Fetching spot prices from api.spot-hinta.fi... (missing: ${missingDates.join(", ")})`);
     let map: Map<number, number>;
+    let source = "api.spot-hinta.fi";
+    let primaryFailure = "";
     try {
       map = await fetchSpotHintaPrices();
     } catch (err) {
       // spot-hinta.fi rate-limits hard (HTTP 429 on the shared IP/endpoint),
       // so fall back to porssisahko.net on any failure to keep planning alive.
-      const reason = err instanceof Error ? err.message : String(err);
-      log(`  api.spot-hinta.fi unavailable (${reason}) - falling back to porssisahko.net`);
-      map = await fetchPorssisahkoPrices();
+      primaryFailure = (err instanceof Error ? err.message : String(err)).replace(/[\r\n]+/g, " ");
+      source = "porssisahko.net";
+      try {
+        map = await fetchPorssisahkoPrices();
+      } catch (fallbackErr) {
+        const reason = (
+          fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+        ).replace(/[\r\n]+/g, " ");
+        log(
+          `Spot price fetch failed: api.spot-hinta.fi (${primaryFailure}); porssisahko.net (${reason})`,
+        );
+        throw fallbackErr;
+      }
     }
-    if (verbose) log(`  Got ${map.size} quarter-hour price slots`);
+
+    const incompleteDates = dates.filter((date) => {
+      const start = new Date(`${date}T00:00:00`);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      for (let epoch = start.getTime(); epoch < end.getTime(); epoch += 15 * 60 * 1000) {
+        if (!map.has(epoch)) return true;
+      }
+      return false;
+    });
+    const coverage =
+      map.size > 0
+        ? `covering ${localDateTimeString(new Date(Math.min(...map.keys())))} to ${localDateTimeString(new Date(Math.max(...map.keys()) + 15 * 60 * 1000))}`
+        : "no coverage";
+    log(
+      `Spot prices fetched from ${source}: ${map.size} slots, ${coverage}` +
+        (incompleteDates.length > 0
+          ? `; requested dates incomplete: ${incompleteDates.join(", ")}`
+          : "") +
+        (primaryFailure ? `; primary failed: ${primaryFailure}` : ""),
+    );
     return { map, fresh: true };
   }
 
