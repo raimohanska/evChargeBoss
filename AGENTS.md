@@ -26,7 +26,10 @@ Before every commit: `npm run format` (or prettier on changed files), `npm run l
 
 ## Committing
 
-Commit after each completed task; do not batch tasks into one commit unless asked.
+After making changes and running the required verification, commit those changes
+before reporting the task complete. Do not wait for a separate commit request.
+Commit each completed task separately; do not batch tasks into one commit unless
+asked. Stage only files belonging to that task, leaving unrelated changes untouched.
 
 ## Test gotchas
 
